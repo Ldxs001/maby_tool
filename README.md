@@ -17,7 +17,7 @@
 
 ## 演示
 
-<video src="https://github.com/user-attachments/assets/148ee88c-5c17-4dc2-a6ea-a867624635cb" controls width="680"></video>
+https://github.com/user-attachments/assets/148ee88c-5c17-4dc2-a6ea-a867624635cb
 
 *▲ 演示视频（51 秒）：GitHub 端上方为内嵌播放器；若未加载，[点此到 Release 页播放](https://github.com/Ldxs001/maby_tool/releases/tag/v1.1.0)*
 
