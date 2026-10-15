@@ -17,9 +17,11 @@
 
 ## 演示
 
-[![MDEditor 演示视频](https://gitee.com/wUwproject/maby_tool/releases/download/v1.1.0/md_cover.png)](https://github.com/Ldxs001/maby_tool/releases/tag/v1.1.0)
+<video src="https://github.com/user-attachments/assets/98d178ba-e74f-4129-adf5-ae05333df098" controls width="680"></video>
 
-▶ **观看演示视频（51 秒，1.6 MB）**：[GitHub（Release 页在线播放）](https://github.com/Ldxs001/maby_tool/releases/tag/v1.1.0) ｜ [Gitee（直接下载）](https://gitee.com/wUwproject/maby_tool/releases/download/v1.1.0/MDEditor-intro.mp4)
+*▲ 演示视频（51 秒）：GitHub 端上方为内嵌播放器；若未加载，[点此到 Release 页播放](https://github.com/Ldxs001/maby_tool/releases/tag/v1.1.0)*
+
+▶ **备用观看**：[GitHub（Release 页在线播放）](https://github.com/Ldxs001/maby_tool/releases/tag/v1.1.0) ｜ [Gitee（直接下载）](https://gitee.com/wUwproject/maby_tool/releases/download/v1.1.0/MDEditor-intro.mp4)
 
 ---
 
