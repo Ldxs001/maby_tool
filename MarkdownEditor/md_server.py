@@ -29,7 +29,7 @@ import html as html_module
 PORT = 18765
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 35  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 36  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 
 class ReuseTCPServer(socketserver.TCPServer):
@@ -326,6 +326,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not p:
                     self._send(400, json.dumps({"ok": False, "error": "missing path"}, ensure_ascii=False))
                     return
+                added = []
                 if materialize_images:
                     content, added = materialize_images(p, content)
                 with open(p, "w", encoding="utf-8") as f:
@@ -350,118 +351,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not name.lower().endswith(".md"):
                     name += ".md"
                 path = os.path.join(d, name)
-                if materialize_images:
-                    content, added = materialize_images(path, content)
-                else:
-                    added = []
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(content)
-                _LAST_DOC_DIR[0] = d
-                self._send(200, json.dumps({"ok": True, "path": path,
-                                            "images": added},
-                                           ensure_ascii=False))
-            except Exception as e:
-                self._send(500, json.dumps({"ok": False, "error": str(e)},
-                                           ensure_ascii=False))
-            return
-        if u.path == "/api/paste-image":
-            try:
-                length = int(self.headers.get("Content-Length", 0))
-                obj = json.loads(self.rfile.read(length).decode("utf-8"))
-                doc_path = obj.get("docPath") or ""
-                data_url = obj.get("dataUrl") or ""
-                if not doc_path:
-                    self._send(400, json.dumps({"ok": False,
-                        "error": "文档尚未保存"}, ensure_ascii=False))
-                    return
-                head, _, b64 = data_url.partition(",")
-                ext = ".png"
-                if "jpeg" in head: ext = ".jpg"
-                elif "webp" in head: ext = ".webp"
-                elif "gif" in head: ext = ".gif"
-                stem = os.path.splitext(os.path.basename(doc_path))[0]
-                assets = os.path.join(os.path.dirname(doc_path), stem + ".assets")
-                os.makedirs(assets, exist_ok=True)
-                fname = "%s_%s%s" % (time.strftime("%Y%m%d_%H%M%S"),
-                                     str(int(time.time() * 1000))[-4:], ext)
-                with open(os.path.join(assets, fname), "wb") as f:
-                    f.write(base64.b64decode(b64))
-                self._send(200, json.dumps({"ok": True,
-                    "rel": "%s.assets/%s" % (stem, fname)}, ensure_ascii=False))
-            except Exception as e:
-                self._send(500, json.dumps({"ok": False, "error": str(e)},
-                                           ensure_ascii=False))
-            return
-        if u.path == "/api/save-as":
-            try:
-                length = int(self.headers.get("Content-Length", 0))
-                obj = json.loads(self.rfile.read(length).decode("utf-8"))
-                d = obj.get("dir", "").strip()
-                name = (obj.get("name") or "未命名.md").strip()
-                content = obj.get("content", "")
-                if not d or not os.path.isdir(d):
-                    self._send(400, json.dumps({"ok": False,
-                        "error": "目录不存在"}, ensure_ascii=False))
-                    return
-                if not name.lower().endswith(".md"):
-                    name += ".md"
-                path = os.path.join(d, name)
-                if materialize_images:
-                    content, added = materialize_images(path, content)
-                else:
-                    added = []
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(content)
-                _LAST_DOC_DIR[0] = d
-                self._send(200, json.dumps({"ok": True, "path": path,
-                                            "images": added},
-                                           ensure_ascii=False))
-            except Exception as e:
-                self._send(500, json.dumps({"ok": False, "error": str(e)},
-                                           ensure_ascii=False))
-            return
-        if u.path == "/api/paste-image":
-            try:
-                length = int(self.headers.get("Content-Length", 0))
-                obj = json.loads(self.rfile.read(length).decode("utf-8"))
-                doc_path = obj.get("docPath") or ""
-                data_url = obj.get("dataUrl") or ""
-                if not doc_path:
-                    self._send(400, json.dumps({"ok": False,
-                        "error": "文档尚未保存"}, ensure_ascii=False))
-                    return
-                head, _, b64 = data_url.partition(",")
-                ext = ".png"
-                if "jpeg" in head: ext = ".jpg"
-                elif "webp" in head: ext = ".webp"
-                elif "gif" in head: ext = ".gif"
-                stem = os.path.splitext(os.path.basename(doc_path))[0]
-                assets = os.path.join(os.path.dirname(doc_path), stem + ".assets")
-                os.makedirs(assets, exist_ok=True)
-                fname = "%s_%s%s" % (time.strftime("%Y%m%d_%H%M%S"),
-                                     str(int(time.time() * 1000))[-4:], ext)
-                with open(os.path.join(assets, fname), "wb") as f:
-                    f.write(base64.b64decode(b64))
-                self._send(200, json.dumps({"ok": True,
-                    "rel": "%s.assets/%s" % (stem, fname)}, ensure_ascii=False))
-            except Exception as e:
-                self._send(500, json.dumps({"ok": False, "error": str(e)},
-                                           ensure_ascii=False))
-            return
-        if u.path == "/api/save-as":
-            try:
-                length = int(self.headers.get("Content-Length", 0))
-                obj = json.loads(self.rfile.read(length).decode("utf-8"))
-                d = obj.get("dir", "").strip()
-                name = (obj.get("name") or "未命名.md").strip()
-                content = obj.get("content", "")
-                if not d or not os.path.isdir(d):
-                    self._send(400, json.dumps({"ok": False,
-                        "error": "目录不存在"}, ensure_ascii=False))
-                    return
-                if not name.lower().endswith(".md"):
-                    name += ".md"
-                path = os.path.join(d, name)
+                added = []
                 if materialize_images:
                     content, added = materialize_images(path, content)
                 else:

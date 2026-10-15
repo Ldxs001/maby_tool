@@ -11,7 +11,6 @@ Explorer 右键 / 双击传入 .md 路径时：
 """
 import sys
 import os
-import io
 import json
 import socket
 import subprocess
@@ -182,7 +181,7 @@ def load_settings():
     defaults = {"embed_window": False, "disable_gpu": False}
     try:
         p = os.path.join(HERE, "runtime", "settings.json")
-        d = json.loads(io.open(p, encoding="utf-8").read())             if False else json.loads(open(p, encoding="utf-8").read())
+        d = json.loads(open(p, encoding="utf-8").read())
         if isinstance(d, dict):
             defaults.update({k: d[k] for k in defaults if k in d})
     except Exception:

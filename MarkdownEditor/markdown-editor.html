@@ -247,7 +247,8 @@
       <div class="ts-row"><label>正文</label><select data-ts="p"></select><input data-tssz="p" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="p"></select></div>
       <div class="ts-row"><label>H1 标题</label><select data-ts="h1"></select><input data-tssz="h1" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="h1"></select></div>
       <div class="ts-row"><label>H2 标题</label><select data-ts="h2"></select><input data-tssz="h2" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="h2"></select></div>
-      <div class="ts-row"><label>H3~H6 标题</label><select data-ts="h3"></select><input data-tssz="h3" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="h3"></select></div>
+      <div class="ts-row"><label>H3 标题</label><select data-ts="h3"></select><input data-tssz="h3" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="h3"></select></div>
+      <div class="ts-row"><label>H4~H6 标题</label><select data-ts="h4"></select><input data-tssz="h4" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="h4"></select></div>
       <div class="ts-row"><label>引用块</label><select data-ts="quote"></select><input data-tssz="quote" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="quote"></select></div>
       <div class="ts-row"><label>列表</label><select data-ts="li"></select><input data-tssz="li" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="li"></select></div>
       <div class="ts-row"><label>表格</label><select data-ts="table"></select><input data-tssz="table" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="table"></select></div>
@@ -301,16 +302,23 @@ function parseInline(text){
   var codes=[];
   text=text.replace(/`([^`]+)`/g,function(m,c){codes.push(c);return '@@C'+(codes.length-1)+'@@';});
   text=escapeHtml(text);
+  /* 生成的标签先进占位符：后续强调/加粗等行内语法绝不能触碰属性值
+     （否则下划线文件名 20261015_181923_3419.png 会被 _.._ 改写成 <em>，图片必 404）。
+     链接只占位开标签，链接文字仍参与行内格式化。 */
+  var toks=[];
   text=text.replace(/!\[([^\]]*)\]\(([^)]+?)(?:\s+"([^"]*)")?\)/g,function(m,alt,src,title){
-    return '<img src="'+escAttr(src)+'" alt="'+escAttr(alt)+'"'+(title?' title="'+escAttr(title)+'"':'')+'>';
+    toks.push('<img src="'+escAttr(src)+'" alt="'+escAttr(alt)+'"'+(title?' title="'+escAttr(title)+'"':'')+'>');
+    return '\x00T'+(toks.length-1)+'\x00';
   });
   text=text.replace(/\[([^\]]+)\]\(([^)]+?)(?:\s+"([^"]*)")?\)/g,function(m,txt,href,title){
-    return '<a href="'+escAttr(sanitizeUrl(href))+'"'+(title?' title="'+escAttr(title)+'"':'')+' target="_blank" rel="noopener">'+txt+'</a>';
+    toks.push('<a href="'+escAttr(sanitizeUrl(href))+'"'+(title?' title="'+escAttr(title)+'"':'')+' target="_blank" rel="noopener">');
+    return '\x00T'+(toks.length-1)+'\x00'+txt+'</a>';
   });
   text=text.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/__([^_]+)__/g,'<strong>$1</strong>');
   text=text.replace(/\*([^*]+)\*/g,'<em>$1</em>').replace(/_([^_]+)_/g,'<em>$1</em>');
   text=text.replace(/~~([^~]+)~~/g,'<del>$1</del>');
   text=text.replace(/@@C([0-9]+)@@/g,function(m,i){return '<code>'+escapeHtml(codes[+i])+'</code>';});
+  text=text.replace(/\x00T(\d+)\x00/g,function(m,i){return toks[+i];});
   return text;
 }
 function parseList(lines,start,indent){
@@ -839,9 +847,6 @@ function parseMarkdown(src){
   });
 
 
-  try{fetch('/static/katex/katex.min.css').then(function(r){return r.text();}).then(function(t){katexCssText=t.replace(/url\((['\"]?)fonts\//g,'url($1/static/katex/fonts/');}).catch(function(){});}catch(e){}
-
-  try{fetch('/static/katex/katex.min.css').then(function(r){return r.text();}).then(function(t){katexCssText=t.replace(/url\((['\"]?)fonts\//g,'url($1/static/katex/fonts/');}).catch(function(){});}catch(e){}
   function download(content,name,type){
     var blob=new Blob([content],{type:type+';charset=utf-8'});
     var url=URL.createObjectURL(blob);
@@ -1037,13 +1042,14 @@ function parseMarkdown(src){
   var ALGN_VALS=['','left','center','right','justify'];
   var ALGN_LBLS=['默认','左对齐','居中','右对齐','两端对齐'];
   var IND_VALS=['none','first','hang'],IND_LBLS=['无','首行缩进','悬挂缩进'];
-  var TS_KEYS=['p','h1','h2','h3','quote','li','table','code','math'];
+  var TS_KEYS=['p','h1','h2','h3','h4','quote','li','table','code','math'];
   var IND_KEYS=['p','quote','li'];
   var TS_MAP={
     p:'#preview p, .markdown-body p',
     h1:'#preview h1, .markdown-body h1',
     h2:'#preview h2, .markdown-body h2',
-    h3:'#preview h3, #preview h4, #preview h5, #preview h6, .markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6',
+    h3:'#preview h3, .markdown-body h3',
+    h4:'#preview h4, #preview h5, #preview h6, .markdown-body h4, .markdown-body h5, .markdown-body h6',
     quote:'#preview blockquote, .markdown-body blockquote',
     li:'#preview li, .markdown-body li',
     table:'#preview table, .markdown-body table',
@@ -1090,7 +1096,12 @@ function parseMarkdown(src){
     }
     for(var ik in IND_SEL){
       var ind=tsCfg.indent[ik];
-      if(!ind||ind.mode==='none'||!ind.chars)continue;
+      if(!ind||ind.mode==='none'||!ind.chars){
+        /* 独立设置语义：引用/列表为"无"时，中性化正文规则向其内部段落的泄漏 */
+        if(ik==='quote')css+='#preview blockquote p, .markdown-body blockquote p{text-indent:0 !important;padding-left:0 !important;}';
+        if(ik==='li')css+='#preview li p, .markdown-body li p{text-indent:0 !important;padding-left:0 !important;}';
+        continue;
+      }
       if(ind.mode==='first'){
         css+=IND_SEL[ik]+'{text-indent:'+ind.chars+'em !important;}';
       }else{
