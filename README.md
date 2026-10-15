@@ -52,3 +52,7 @@ maby_tool/
 
 - 本仓库由 **git-sync** 技能同步维护（筛除 → 脱敏 → 提交 → 双端推送）
 - 仅同步工具运行所需文件；过程/缓存/测试/宣传材料不入库
+
+
+https://github.com/user-attachments/assets/148ee88c-5c17-4dc2-a6ea-a867624635cb
+
