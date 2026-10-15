@@ -301,10 +301,10 @@ function parseInline(text){
   var codes=[];
   text=text.replace(/`([^`]+)`/g,function(m,c){codes.push(c);return '@@C'+(codes.length-1)+'@@';});
   text=escapeHtml(text);
-  text=text.replace(/!\[([^\]]*)\]\(([^) ]+)(?:[ ]+"([^"]*)")?\)/g,function(m,alt,src,title){
+  text=text.replace(/!\[([^\]]*)\]\(([^)]+?)(?:\s+"([^"]*)")?\)/g,function(m,alt,src,title){
     return '<img src="'+escAttr(src)+'" alt="'+escAttr(alt)+'"'+(title?' title="'+escAttr(title)+'"':'')+'>';
   });
-  text=text.replace(/\[([^\]]+)\]\(([^) ]+)(?:[ ]+"([^"]*)")?\)/g,function(m,txt,href,title){
+  text=text.replace(/\[([^\]]+)\]\(([^)]+?)(?:\s+"([^"]*)")?\)/g,function(m,txt,href,title){
     return '<a href="'+escAttr(sanitizeUrl(href))+'"'+(title?' title="'+escAttr(title)+'"':'')+' target="_blank" rel="noopener">'+txt+'</a>';
   });
   text=text.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/__([^_]+)__/g,'<strong>$1</strong>');
@@ -635,8 +635,7 @@ function parseMarkdown(src){
     if(saveTimer)clearTimeout(saveTimer);
     saveTimer=setTimeout(function(){
       try{
-        if(currentFile){ setDraft(currentFile, editor.value); }   /* 按文件路径存草稿 */
-        else{ localStorage.setItem(STORE_KEY, editor.value); }    /* 无文件路径：暂存 */
+        if(currentFile){ setDraft(currentFile, editor.value); }   /* 按文件路径存草稿（SSOT） */
       }catch(e){}
       document.getElementById('statSave').textContent='已存入缓存';
       document.getElementById('statSave').className='saved';
@@ -987,11 +986,12 @@ function parseMarkdown(src){
       'h1,h2{border-bottom:1px solid #eee;padding-bottom:.3em;}code{background:#f4f4f4;padding:.15em .4em;border-radius:4px;font-family:Consolas,monospace;}pre{background:#f4f4f4;padding:14px;border-radius:8px;overflow:auto;}blockquote{border-left:3px solid #4a6cf7;background:#f5f7ff;padding:.4em 1em;margin:1em 0;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ddd;padding:7px 12px;}img{max-width:100%;}a{color:#4a6cf7;}</style></head><body class="markdown-body">'+body+'</body></html>';
   }
 
-  var saved=null;
-  try{saved=localStorage.getItem(STORE_KEY);}catch(e){}
+  /* 启动一律进默认文档（草稿感知载入）。旧全局缓存键退役（2026-10-15）：
+     该键无文件上下文——恢复它会让相对路径图片丢失基址（404）且内容陈旧。
+     此处一次性清理历史残留。 */
+  try{localStorage.removeItem(STORE_KEY);}catch(e){}
   var hasFileParam=/[?&]file=/.test(location.search);
-  if(saved!==null && saved!=='' && !hasFileParam){editor.value=saved;updateSaveBtn();}
-  else if(!hasFileParam){loadDefault();}   /* ?file= 模式：由 loadFromUrl 草稿感知载入 */
+  if(!hasFileParam){loadDefault();}   /* ?file= 模式：由 loadFromUrl 草稿感知载入 */
   var sv=null;try{sv=localStorage.getItem(VIEW_KEY);}catch(e){}
   if(sv)viewIdx=views.indexOf(sv);
   var st=null;try{st=localStorage.getItem(THEME_KEY);}catch(e){}
