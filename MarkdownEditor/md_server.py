@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 """
 MD 编辑器本地后端 + 系统托盘（纯标准库，零第三方依赖）
 - 标准库 http.server 提供页面 / 读文件 / 写文件路由
@@ -9,6 +11,10 @@ MD 编辑器本地后端 + 系统托盘（纯标准库，零第三方依赖）
 import http.server
 import hashlib
 import io
+import base64
+import time
+import subprocess
+import tempfile
 import socketserver
 import threading
 import os
@@ -23,7 +29,7 @@ import html as html_module
 PORT = 18765
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 2  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 35  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 
 class ReuseTCPServer(socketserver.TCPServer):
@@ -55,6 +61,55 @@ class Handler(http.server.BaseHTTPRequestHandler):
             html = html.replace("<body>", '<body data-build="%s">' % build, 1)
             self._send(200, html, "text/html; charset=utf-8",
                        {"Cache-Control": "no-store"})
+            return
+        if u.path == "/api/version":
+            self._send(200, json.dumps({"ok": True, "version": MD_SERVER_VERSION},
+                                       ensure_ascii=False))
+            return
+        if u.path == "/api/ping":
+            # 页面心跳：仅用于"页面卸载后确认是否真关闭"的宽限判断。
+            # 注意：闲置（切标签页/最小化）绝不触发退出。
+            _LAST_PING[0] = time.time()
+            _BYE_AT[0] = 0.0        # 收到新心跳 => 撤销待退出（刷新/重开场景）
+            self._send(200, '{"ok":true}', "application/json; charset=utf-8")
+            return
+        if u.path == "/api/bye":
+            # 页面卸载通知（pagehide -> sendBeacon）。刷新也会走到这里，
+            # 因此只"登记"，由看门狗在宽限期后再决定是否退出。
+            _BYE_AT[0] = time.time()
+            self._send(200, '{"ok":true}', "application/json; charset=utf-8")
+            return
+        if u.path == "/api/browse-dir":
+            try:
+                d = _pick_dir_subprocess()
+                self._send(200, json.dumps({"ok": True, "dir": d or ""},
+                                           ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
+            return
+        if u.path == "/api/open-file":
+            # 浏览器模式专用：用原生"打开"框拿真实完整路径
+            try:
+                q = urllib.parse.parse_qs(u.query)
+                initdir = q.get("dir", [""])[0]
+                p = _pick_file_subprocess(initdir)
+                if p:
+                    _LAST_DOC_DIR[0] = os.path.dirname(p)
+                self._send(200, json.dumps({"ok": True, "path": p},
+                                           ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
+            return
+        if u.path == "/api/common-dirs":
+            try:
+                out = _common_dirs()
+                self._send(200, json.dumps({"ok": True, "dirs": out},
+                                           ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
             return
         if u.path == "/api/version":
             self._send(200, json.dumps({"ok": True, "version": MD_SERVER_VERSION},
@@ -122,6 +177,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(400, json.dumps({"ok": False, "error": "missing path"}, ensure_ascii=False))
                 return
             try:
+                _LAST_DOC_DIR[0] = os.path.dirname(p)
                 with open(p, "r", encoding="utf-8", errors="replace") as f:
                     data = f.read()
             except Exception as e:
@@ -141,17 +197,90 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     ".bmp": "image/bmp"}
             ext = os.path.splitext(p)[1].lower()
             try:
+                st = os.stat(p)
                 with open(p, "rb") as f:
                     data = f.read()
             except Exception:
                 self._send(404, "image not found")
                 return
+            # 协商缓存：ETag=mtime-size，浏览器每次请求都回源校验，
+            # 文件没变回 304（不重传），变了立刻拿到新图 —— F5 即见效
+            etag = '"%d-%d"' % (int(st.st_mtime), st.st_size)
+            if self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("ETag", etag)
+                self.end_headers()
+                return
             self.send_response(200)
             self.send_header("Content-Type", exts.get(ext, "application/octet-stream"))
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "max-age=3600")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("ETag", etag)
             self.end_headers()
             self.wfile.write(data)
+            return
+        if u.path == "/docs-list":
+            docs_dir = os.path.join(HERE, "docs")
+            items = []
+            try:
+                for f in sorted(os.listdir(docs_dir)):
+                    if f.lower().endswith(".md"):
+                        items.append({"name": os.path.splitext(f)[0],
+                                      "file": f})
+            except Exception:
+                pass
+            self._send(200, json.dumps({"ok": True, "docs": items},
+                                       ensure_ascii=False))
+            return
+        if u.path == "/api/log":
+            q = urllib.parse.parse_qs(u.query)
+            msg = q.get("msg", [""])[0][:500]
+            try:
+                rt = os.path.join(HERE, "runtime")
+                os.makedirs(rt, exist_ok=True)
+                with io.open(os.path.join(rt, "ui.log"), "a",
+                             encoding="utf-8") as f:
+                    f.write("%s %s\n" % (time.strftime("%H:%M:%S"), msg))
+            except Exception:
+                pass
+            self._send(200, json.dumps({"ok": True}, ensure_ascii=False))
+            return
+        if u.path == "/api/open-external":
+            q = urllib.parse.parse_qs(u.query)
+            url = q.get("url", [""])[0]
+            # 仅允许本机服务的 URL，防止被用作任意程序启动器
+            if url.startswith("/"):
+                url = "http://127.0.0.1:%d%s" % (PORT, url)
+            if url.startswith("http://127.0.0.1:%d/" % PORT)                     or url.startswith("http://localhost:%d/" % PORT):
+                threading.Thread(target=lambda: webbrowser.open(url),
+                                 daemon=True).start()
+                self._send(200, json.dumps({"ok": True},
+                                           ensure_ascii=False))
+            else:
+                self._send(400, json.dumps({"ok": False,
+                    "error": "仅允许打开本机服务地址"}, ensure_ascii=False))
+            return
+        if u.path == "/doc":
+            q = urllib.parse.parse_qs(u.query)
+            fname = q.get("file", [""])[0]
+            docs_dir = os.path.normpath(os.path.join(HERE, "docs"))
+            full = os.path.normpath(os.path.join(docs_dir, fname))
+            if (fname and full.startswith(docs_dir + os.sep)
+                    and os.path.isfile(full)):
+                try:
+                    with io.open(full, "r", encoding="utf-8") as f:
+                        body = f.read()
+                    _LAST_DOC_DIR[0] = os.path.dirname(full)
+                    self._send(200, json.dumps(
+                        {"ok": True, "path": full, "content": body},
+                        ensure_ascii=False))
+                except Exception as e:
+                    self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                               ensure_ascii=False))
+            else:
+                self._send(404, json.dumps({"ok": False,
+                    "error": "文档不存在"}, ensure_ascii=False))
             return
         if u.path == "/open":
             q = urllib.parse.parse_qs(u.query)
@@ -161,8 +290,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 target = "/?file=" + urllib.parse.quote(f) + "&v=%d" % v
             else:
                 target = "/?v=%d" % v
-            webbrowser.open("http://127.0.0.1:%d%s" % (PORT, target))
+            # 先回响应、再异步开浏览器：避免启动器等待超时后重复打开
             self._send(200, "ok")
+            _url = "http://127.0.0.1:%d%s" % (PORT, target)
+            threading.Timer(0.25, lambda: webbrowser.open(_url)).start()
             return
         # 根级静态兜底：工具目录内的图片/常见静态文件（防穿越，白名单扩展名）
         root = os.path.normpath(HERE)
@@ -195,11 +326,183 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not p:
                     self._send(400, json.dumps({"ok": False, "error": "missing path"}, ensure_ascii=False))
                     return
+                if materialize_images:
+                    content, added = materialize_images(p, content)
                 with open(p, "w", encoding="utf-8") as f:
                     f.write(content)
-                self._send(200, json.dumps({"ok": True}, ensure_ascii=False))
+                _LAST_DOC_DIR[0] = os.path.dirname(p)
+                self._send(200, json.dumps({"ok": True,
+                                            "images": added}, ensure_ascii=False))
             except Exception as e:
                 self._send(500, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
+            return
+        if u.path == "/api/save-as":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                obj = json.loads(self.rfile.read(length).decode("utf-8"))
+                d = obj.get("dir", "").strip()
+                name = (obj.get("name") or "未命名.md").strip()
+                content = obj.get("content", "")
+                if not d or not os.path.isdir(d):
+                    self._send(400, json.dumps({"ok": False,
+                        "error": "目录不存在"}, ensure_ascii=False))
+                    return
+                if not name.lower().endswith(".md"):
+                    name += ".md"
+                path = os.path.join(d, name)
+                if materialize_images:
+                    content, added = materialize_images(path, content)
+                else:
+                    added = []
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                _LAST_DOC_DIR[0] = d
+                self._send(200, json.dumps({"ok": True, "path": path,
+                                            "images": added},
+                                           ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
+            return
+        if u.path == "/api/paste-image":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                obj = json.loads(self.rfile.read(length).decode("utf-8"))
+                doc_path = obj.get("docPath") or ""
+                data_url = obj.get("dataUrl") or ""
+                if not doc_path:
+                    self._send(400, json.dumps({"ok": False,
+                        "error": "文档尚未保存"}, ensure_ascii=False))
+                    return
+                head, _, b64 = data_url.partition(",")
+                ext = ".png"
+                if "jpeg" in head: ext = ".jpg"
+                elif "webp" in head: ext = ".webp"
+                elif "gif" in head: ext = ".gif"
+                stem = os.path.splitext(os.path.basename(doc_path))[0]
+                assets = os.path.join(os.path.dirname(doc_path), stem + ".assets")
+                os.makedirs(assets, exist_ok=True)
+                fname = "%s_%s%s" % (time.strftime("%Y%m%d_%H%M%S"),
+                                     str(int(time.time() * 1000))[-4:], ext)
+                with open(os.path.join(assets, fname), "wb") as f:
+                    f.write(base64.b64decode(b64))
+                self._send(200, json.dumps({"ok": True,
+                    "rel": "%s.assets/%s" % (stem, fname)}, ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
+            return
+        if u.path == "/api/save-as":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                obj = json.loads(self.rfile.read(length).decode("utf-8"))
+                d = obj.get("dir", "").strip()
+                name = (obj.get("name") or "未命名.md").strip()
+                content = obj.get("content", "")
+                if not d or not os.path.isdir(d):
+                    self._send(400, json.dumps({"ok": False,
+                        "error": "目录不存在"}, ensure_ascii=False))
+                    return
+                if not name.lower().endswith(".md"):
+                    name += ".md"
+                path = os.path.join(d, name)
+                if materialize_images:
+                    content, added = materialize_images(path, content)
+                else:
+                    added = []
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                _LAST_DOC_DIR[0] = d
+                self._send(200, json.dumps({"ok": True, "path": path,
+                                            "images": added},
+                                           ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
+            return
+        if u.path == "/api/paste-image":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                obj = json.loads(self.rfile.read(length).decode("utf-8"))
+                doc_path = obj.get("docPath") or ""
+                data_url = obj.get("dataUrl") or ""
+                if not doc_path:
+                    self._send(400, json.dumps({"ok": False,
+                        "error": "文档尚未保存"}, ensure_ascii=False))
+                    return
+                head, _, b64 = data_url.partition(",")
+                ext = ".png"
+                if "jpeg" in head: ext = ".jpg"
+                elif "webp" in head: ext = ".webp"
+                elif "gif" in head: ext = ".gif"
+                stem = os.path.splitext(os.path.basename(doc_path))[0]
+                assets = os.path.join(os.path.dirname(doc_path), stem + ".assets")
+                os.makedirs(assets, exist_ok=True)
+                fname = "%s_%s%s" % (time.strftime("%Y%m%d_%H%M%S"),
+                                     str(int(time.time() * 1000))[-4:], ext)
+                with open(os.path.join(assets, fname), "wb") as f:
+                    f.write(base64.b64decode(b64))
+                self._send(200, json.dumps({"ok": True,
+                    "rel": "%s.assets/%s" % (stem, fname)}, ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
+            return
+        if u.path == "/api/save-as":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                obj = json.loads(self.rfile.read(length).decode("utf-8"))
+                d = obj.get("dir", "").strip()
+                name = (obj.get("name") or "未命名.md").strip()
+                content = obj.get("content", "")
+                if not d or not os.path.isdir(d):
+                    self._send(400, json.dumps({"ok": False,
+                        "error": "目录不存在"}, ensure_ascii=False))
+                    return
+                if not name.lower().endswith(".md"):
+                    name += ".md"
+                path = os.path.join(d, name)
+                if materialize_images:
+                    content, added = materialize_images(path, content)
+                else:
+                    added = []
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                _LAST_DOC_DIR[0] = d
+                self._send(200, json.dumps({"ok": True, "path": path,
+                                            "images": added},
+                                           ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
+            return
+        if u.path == "/api/paste-image":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                obj = json.loads(self.rfile.read(length).decode("utf-8"))
+                doc_path = obj.get("docPath") or ""
+                data_url = obj.get("dataUrl") or ""
+                if not doc_path:
+                    self._send(400, json.dumps({"ok": False,
+                        "error": "文档尚未保存"}, ensure_ascii=False))
+                    return
+                head, _, b64 = data_url.partition(",")
+                ext = ".png"
+                if "jpeg" in head: ext = ".jpg"
+                elif "webp" in head: ext = ".webp"
+                elif "gif" in head: ext = ".gif"
+                stem = os.path.splitext(os.path.basename(doc_path))[0]
+                assets = os.path.join(os.path.dirname(doc_path), stem + ".assets")
+                os.makedirs(assets, exist_ok=True)
+                fname = "%s_%s%s" % (time.strftime("%Y%m%d_%H%M%S"),
+                                     str(int(time.time() * 1000))[-4:], ext)
+                with open(os.path.join(assets, fname), "wb") as f:
+                    f.write(base64.b64decode(b64))
+                self._send(200, json.dumps({"ok": True,
+                    "rel": "%s.assets/%s" % (stem, fname)}, ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
             return
         if u.path == "/api/export-html":
             try:
@@ -226,6 +529,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 ts_css = obj.get("tsCss", "")
                 page_cfg = obj.get("cfg", {}) or {}
                 html = build_paged_html(md_path, body_html, ts_css, page_cfg)
+                # /static/ 路由会把前缀剥掉后映射到工具目录（/static/x -> HERE/x），
+                # 因此文件写在 HERE 下、URL 用 /static/<name> 即可正确访问
                 name = "document.paged.html"
                 with open(os.path.join(HERE, name), "w", encoding="utf-8") as f:
                     f.write(html)
@@ -297,6 +602,21 @@ def build_tray(server):
     NIF_TIP = 0x4
     NIM_ADD = 0x0
     NIM_DELETE = 0x1
+
+    user32.EnumWindows.restype = wintypes.BOOL
+    _ENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user32.EnumWindows.argtypes = [_ENUMPROC, wintypes.LPARAM]
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.IsIconic.argtypes = [wintypes.HWND]
+    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    user32.GetWindowTextLengthW.restype = ctypes.c_int
+    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetWindowTextW.restype = ctypes.c_int
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.PostMessageW.argtypes = [wintypes.HWND, ctypes.c_uint,
+                                    wintypes.WPARAM, wintypes.LPARAM]
 
     TPM_RIGHTBUTTON = 0x0002
     TPM_RETURNCMD = 0x0100
@@ -381,7 +701,20 @@ def build_tray(server):
 
     hinst = kernel32.GetModuleHandleW(None)
     # 资源 ID 按 Windows 约定以 (LPWSTR)(UINT_PTR)id 形式传入
-    hicon = user32.LoadIconW(0, ctypes.c_wchar_p(IDI_APPLICATION))
+    # 托盘图标：优先用工具自带 md-editor.ico，取不到才退回系统默认
+    hicon = None
+    _ico = os.path.join(HERE, "md-editor.ico")
+    try:
+        if os.path.exists(_ico):
+            user32.LoadImageW.restype = wintypes.HANDLE
+            user32.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR,
+                                          ctypes.c_uint, ctypes.c_int,
+                                          ctypes.c_int, ctypes.c_uint]
+            hicon = user32.LoadImageW(None, _ico, 1, 16, 16, 0x10)
+    except Exception:
+        hicon = None
+    if not hicon:
+        hicon = user32.LoadIconW(0, ctypes.c_wchar_p(IDI_APPLICATION))
 
     class Tray:
         def __init__(self):
@@ -389,13 +722,59 @@ def build_tray(server):
             self._wndproc = None  # 防止回调被 GC
 
         def wndproc(self, hwnd, msg, wparam, lparam):
-            if msg == WM_TRAY and lparam in (WM_RBUTTONUP, WM_LBUTTONUP):
+            if msg == WM_TRAY and lparam == WM_LBUTTONUP:
+                self.toggle_editor()
+                return 0
+            if msg == WM_TRAY and lparam == WM_RBUTTONUP:
                 self.show_menu()
                 return 0
             if msg == WM_DESTROY:
                 user32.PostQuitMessage(0)
                 return 0
             return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+        def find_editor_windows(self):
+            found = []
+            _ENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND,
+                                           wintypes.LPARAM)
+
+            def cb(h, l):
+                try:
+                    if not user32.IsWindowVisible(h):
+                        return True
+                    n = user32.GetWindowTextLengthW(h)
+                    if n > 0:
+                        buf = ctypes.create_unicode_buffer(n + 1)
+                        user32.GetWindowTextW(h, buf, n + 1)
+                        if ("MDEditor" in buf.value
+                                or "Markdown 编辑器" in buf.value):
+                            found.append(h)
+                except Exception:
+                    pass
+                return True
+
+            try:
+                user32.EnumWindows(_ENUMPROC(cb), 0)
+            except Exception:
+                pass
+            return found
+
+        def toggle_editor(self):
+            wins = self.find_editor_windows()
+            if not wins:
+                webbrowser.open("http://127.0.0.1:%d/" % PORT)
+                return
+            h = wins[0]
+            try:
+                if user32.IsIconic(h):
+                    user32.ShowWindow(h, 9)          # SW_RESTORE
+                    user32.SetForegroundWindow(h)
+                elif user32.GetForegroundWindow() == h:
+                    user32.ShowWindow(h, 6)          # SW_MINIMIZE
+                else:
+                    user32.SetForegroundWindow(h)    # 前置已开窗口
+            except Exception:
+                pass
 
         def show_menu(self):
             hmenu = user32.CreatePopupMenu()
@@ -413,6 +792,13 @@ def build_tray(server):
                 self.quit()
 
         def quit(self):
+            # 关闭编辑器窗口（“退出”= 整个应用都关掉）
+            for h in self.find_editor_windows():
+                try:
+                    user32.PostMessageW(h, 0x0010, 0, 0)  # WM_CLOSE
+                except Exception:
+                    pass
+            time.sleep(0.25)
             nid = NOTIFYICONDATAW()
             nid.cbSize = ctypes.sizeof(nid)
             nid.hWnd = self.hwnd
@@ -633,21 +1019,171 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
     return html
 
 
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+try:
+    from md_assets import materialize_images
+except Exception:
+    import traceback as _tb
+    try:
+        with open(os.path.join(HERE, "runtime", "md_assets.err"), "a",
+                  encoding="utf-8") as _ef:
+            _ef.write(_tb.format_exc() + "\n")
+    except Exception:
+        pass
+    materialize_images = None
+
+
+_SHELL_FOLDERS_KEY = ("Software\\Microsoft\\Windows\\CurrentVersion\\"
+                      "Explorer\\User Shell Folders")
+
+
+def _shell_folder(regval, fallback=""):
+    """读取 HKCU User Shell Folders 中的真实路径。
+    这样能正确处理 OneDrive 重定向（例如桌面实际在 D:\\...\\OneDrive\\Desktop），
+    而不是想当然地拼 C:\\Users\\<name>\\Desktop。失败则用 fallback。"""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            _SHELL_FOLDERS_KEY) as k:
+            v, _ = winreg.QueryValueEx(k, regval)
+            v = os.path.expandvars(v)
+            if v and os.path.isdir(v):
+                return v
+    except Exception:
+        pass
+    return fallback
+
+
+def _common_dirs():
+    home = os.path.expanduser("~")
+    cands = {
+        "desktop": _shell_folder("Desktop", os.path.join(home, "Desktop")),
+        "docs": _shell_folder("Personal", os.path.join(home, "Documents")),
+        "downloads": _shell_folder(
+            "{374DE290-123F-4565-9164-39C4925E467B}",
+            os.path.join(home, "Downloads")),
+        "home": home,
+    }
+    return {k: v for k, v in cands.items() if v and os.path.isdir(v)}
+
+
+_LAST_DOC_DIR = [""]
+_LAST_PING = [time.time()]          # 最近一次页面心跳时间
+_START_TIME = [time.time()]         # 服务启动时间（用于宽限期）
+_BYE_AT = [0.0]                     # 收到"页面卸载"通知的时间（0=无待退出）   # 最近打开/保存的文档所在目录（供相对路径解析）
+
+
+def _run_picker(script, tmpname):
+    """在独立进程中弹选择框；结果经临时文件回传（空串=取消或不可用）。"""
+    here = os.path.dirname(os.path.abspath(__file__))
+    picker = os.path.join(here, script)
+    if not os.path.exists(picker):
+        return ""
+    tmp = os.path.join(tempfile.gettempdir(), tmpname)
+    try:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    except Exception:
+        pass
+    exe_dir = os.path.dirname(sys.executable)
+    py_exe = os.path.join(exe_dir, "python.exe")
+    if not os.path.exists(py_exe):
+        py_exe = sys.executable
+    try:
+        subprocess.run([py_exe, picker, tmp], timeout=900,
+                       creationflags=0x08000000)
+    except Exception:
+        pass
+    try:
+        return io.open(tmp, encoding="utf-8").read().strip()
+    except Exception:
+        return ""
+
+
+def _pick_dir_subprocess():
+    """只使用现代文件夹选择框（IFileOpenDialog + FOS_PICKFOLDERS）。
+    用户取消 -> 返回空串，不再回退（回退会二次弹老式框，用户已明确弃用）。
+    现代框不可用时返回空串并写诊断日志。"""
+    r = _run_picker("_pickdir_modern.py", "mdeditor_pickdir2.txt")
+    if r == "@CANCEL@":
+        _pickdir_log("modern: 用户取消")
+        return ""
+    if r:
+        _pickdir_log("modern: 选中 %s" % r)
+        return r
+    _pickdir_log("modern: 不可用/无返回（未回退）")
+    return ""
+
+
+def _pickdir_log(msg):
+    try:
+        import time as _t
+        with io.open(os.path.join(HERE, "runtime", "pickdir.log"), "a",
+                     encoding="utf-8") as f:
+            f.write("%s %s\n" % (_t.strftime("%H:%M:%S"), msg))
+    except Exception:
+        pass
+
+
+def _idle_watchdog(grace=None, check=0.5):
+    """只在【用户确实关闭了页面】时退出服务。
+
+    判定：收到页面卸载通知(/api/bye，由 pagehide 触发)，且宽限期内
+    没有恢复心跳 → 认定用户真的关掉了编辑器，服务退出。
+
+    明确不做的事：**不做"空闲超时"判定**。
+    切换标签页、最小化、长时间不操作都不等于关闭 —— 编辑器必须由
+    用户明确关闭才停。刷新页面会重新发心跳，从而撤销待退出。
+    可用环境变量 MD_EXIT_GRACE 覆盖宽限期（便于测试）。"""
+    if grace is None:
+        grace = float(os.environ.get("MD_EXIT_GRACE", "8"))
+    _START_TIME[0] = time.time()
+    if not _auto_stop_enabled():
+        return
+    while True:
+        time.sleep(check)
+        now = time.time()
+        bye = _BYE_AT[0]
+        if not bye:
+            continue
+        if now - bye < grace:
+            continue
+        # 宽限期内又收到过心跳 => 是刷新/重开，撤销退出
+        if now - _LAST_PING[0] < grace:
+            continue
+        try:
+            with io.open(os.path.join(HERE, "runtime", "lifecycle.log"),
+                         "a", encoding="utf-8") as f:
+                f.write("%s page closed -> stop service\n"
+                        % time.strftime("%H:%M:%S"))
+        except Exception:
+            pass
+        os._exit(0)
+
+
+def _auto_stop_enabled():
+    """runtime/settings.json 里的 auto_stop（默认开启）。"""
+    try:
+        import json as _json
+        p = os.path.join(HERE, "runtime", "settings.json")
+        d = _json.loads(io.open(p, encoding="utf-8").read())
+        return bool(d.get("auto_stop", True))
+    except Exception:
+        return True
+
+
 def main():
     srv = Server()
     srv.start()
     atexit.register(srv.stop)
+    # 空闲自动退出：页面关闭后无人使用，服务自行结束（无需手动 md_stop）
+    threading.Thread(target=_idle_watchdog, daemon=True).start()
+    ev = threading.Event()
     try:
-        build_tray(srv)
-    except Exception as e:  # 无 GUI 会话 / 无窗口站：降级常驻
-        sys.stderr.write(
-            "托盘不可用（%s），服务持续运行。用 md_stop.cmd 停止。\n" % e
-        )
-        ev = threading.Event()
-        try:
-            ev.wait()
-        except KeyboardInterrupt:
-            pass
+        ev.wait()
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":

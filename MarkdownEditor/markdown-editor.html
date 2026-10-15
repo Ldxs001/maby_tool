@@ -1,4 +1,6 @@
 <!DOCTYPE html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later). -->
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -137,7 +139,18 @@
   <style id="ts-ui">
     #tsOverlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99;display:flex;align-items:center;justify-content:center;}
     #tsOverlay[hidden]{display:none !important;}
-    #tsPanel{width:530px;max-height:84vh;overflow:auto;background:#23272f;color:#e8eaed;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.5);}
+    #svOverlay[hidden]{display:none !important;}
+  .sv-btn{padding:9px 26px;border-radius:8px;font-size:17px;line-height:1.25;
+          background:#2b3242;border:1px solid #3a4358;color:#e8eaed;cursor:pointer;
+          display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;
+          transition:background .15s;}
+  .sv-btn:hover{background:#343d52;}
+  .sv-primary{background:#3d5bd6;border-color:#3d5bd6;color:#fff;}
+  .sv-primary:hover{background:#4a68e0;}
+  .sv-mini{padding:5px 14px;border-radius:7px;font-size:14px;background:#262c38;
+           border:1px solid #333c4e;color:#aab2c4;cursor:pointer;}
+  .sv-mini:hover{background:#2f3746;color:#e8eaed;}
+  #tsPanel{width:530px;max-height:84vh;overflow:auto;background:#23272f;color:#e8eaed;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.5);}
     body.light #tsPanel{background:#ffffff;color:#222;}
     .ts-head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;font-weight:600;border-bottom:1px solid rgba(128,128,128,.25);}
     #tsClose{background:none;border:none;color:inherit;font-size:20px;cursor:pointer;}
@@ -176,6 +189,7 @@
 <header id="toolbar">
   <div class="tb-group brand" title="本工具由 AI 辅助生成 (AI-assisted)">MDEditor</div>
   <div class="tb-group" id="fmtBtns"></div>
+  <div class="tb-group"><button id="btnNew" class="tb-btn" title="新建文档 (Ctrl+N)">新建</button></div>
   <div class="tb-group right">
     <button id="btnView" class="tb-btn" title="视图切换">分屏</button>
     <button id="btnTheme" class="tb-btn" title="主题切换">暗色</button>
@@ -185,7 +199,8 @@
     
     <button id="btnExportPaged" class="tb-btn" title="导出分页版 HTML（纸张/页码/目录；打开后 Ctrl+P 即得 PDF）">分页</button><button id="btnExportHtml" class="tb-btn" title="导出 HTML">.html</button>
     <button id="btnTypeset" class="tb-btn" title="排版设置：字体/表格/缩进/自动落盘">排版</button>
-    <button id="btnSave" class="tb-btn" title="保存到原文件（仅通过右键或关联打开时可用）" disabled style="opacity:.4">保存</button>
+    <button id="btnSave" class="tb-btn" title="保存（Ctrl+S）">保存</button>
+    <button id="btnSaveAs" class="tb-btn" title="另存为…">另存为</button>
     <button id="btnPrint" class="tb-btn" title="打印 / 导出 PDF">打印</button>
   </div>
 </header>
@@ -206,10 +221,27 @@
   <span id="statSave" class="saved">已存入缓存</span>
   <span class="ai-mark" title="本工具由 AI 辅助生成">由 AI 生成</span>
 </footer>
+      <div id="svOverlay" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:60;display:flex;align-items:center;justify-content:center;">
+    <div style="width:520px;background:#23272f;border-radius:14px;padding:26px 30px;box-shadow:0 24px 70px rgba(0,0,0,.55);">
+      <div style="font-size:24px;font-weight:700;margin-bottom:18px;">保存文档</div>
+      <div style="font-size:16px;color:#8a93a6;margin-bottom:6px;">文件名</div>
+      <input id="svName" type="text" value="未命名.md" style="width:100%;background:#1a1d24;color:#e8eaed;border:1px solid #3a4358;border-radius:8px;padding:10px 12px;font-size:17px;margin-bottom:14px;">
+      <div style="font-size:16px;color:#8a93a6;margin-bottom:6px;">保存目录</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <input id="svDir" type="text" placeholder="可直接粘贴路径，或点「浏览…」" style="flex:1;background:#1a1d24;color:#e8eaed;border:1px solid #3a4358;border-radius:8px;padding:10px 12px;font-size:16px;">
+        <div id="svBrowse" class="sv-btn">浏览…</div>
+      </div>
+      <div id="svQuick" style="display:flex;gap:8px;margin-bottom:18px;"></div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;">
+        <div id="svCancel" class="sv-btn">取消</div>
+        <div id="svGo" class="sv-btn sv-primary">保存</div>
+      </div>
+    </div>
+  </div>
 <div id="tsOverlay" hidden>
   <div id="tsPanel">
     <div class="ts-head"><span>排版设置</span><button id="tsClose" title="关闭">×</button></div>
-    <div class="ts-body">
+  <div class="ts-body">
       <div class="ts-row"><label>自动落盘间隔（分钟，0=仅手动）</label><input id="tsAuto" type="number" min="0" max="60" step="1"></div>
       <div class="ts-sep"><span>字体 / 字号 / 对齐（字号留空 = 保持默认，单位磅；本机字体由后端自动枚举）</span></div>
       <div class="ts-row"><label>正文</label><select data-ts="p"></select><input data-tssz="p" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="p"></select></div>
@@ -435,9 +467,8 @@ function parseMarkdown(src){
   var STORE_KEY='md-editor-content-v1';
   var THEME_KEY='md-editor-theme';
   var VIEW_KEY='md-editor-view';
-  var COPYRIGHT_DOC='# 版权与开源组件声明\n\n**本工具由 AI 辅助生成**。编辑器自身代码（HTML / Python / CSS / JS 与图标）供所有者自由使用。\n\n工具本地分发了以下第三方开源组件，按其原始许可证提供（完整许可文本见工具目录 **LICENSES/** 文件夹）：\n\n| 组件 | 版本 | 许可证 | 本地位置 | 用途 |\n| --- | --- | --- | --- | --- |\n| KaTeX | 0.16.21 | MIT | katex/ | 数学公式渲染 |\n| KaTeX 内置字体 | 随 KaTeX | SIL OFL 1.1 | katex/fonts/ | 公式字体 |\n| Paged.js | 0.4.3 | MIT | pagedjs/ | 分页排版引擎 |\n| Python | 3.11.9（嵌入式） | PSF License 2 | python/ | 便携运行时与标准库 |\n\n## 许可证要点\n\n- **MIT（KaTeX / Paged.js）**：允许自由使用、复制、修改、再分发（含商用），条件是保留原作者的版权声明与许可文本。分发本工具时请连同 LICENSES/ 目录一并保留。\n- **SIL OFL 1.1（KaTeX 字体）**：允许在软件内嵌入与分发，不得单独出售字体本身。\n- **PSF License 2（Python）**：允许自由使用与再分发，须保留 PSF 版权声明；对 Python 的修改需按第 3 条做变更摘要。\n- 以上为要点摘要，具体以 LICENSES/ 内各许可证全文与各组件官方仓库为准。\n\n## 本工具的打开方式说明\n\n本工具运行于本地服务之上：正确入口为**右键 .md 文件**、**双击 .md 文件**（已关联时）或**桌面快捷方式 / MarkdownEditor.exe**。直接双击 markdown-editor.html（file:// 方式）会被自动引导到正确入口。';
-  var SAMPLE='# MDEditor 使用指南\n\n**本工具由 AI 辅助生成**：零依赖单文件 Markdown 编辑器，左侧写作、右侧实时渲染，全程本地运行。\n\n## 基础语法\n\n支持 *斜体*、**加粗**、~~删除线~~、`行内代码`，以及 [链接](https://example.com)。\n\n> 引用块：把「>」放在行首。引用内部同样支持**加粗**等行内语法。\n\n## 列表与任务\n\n- 无序列表项一\n- 无序列表项二\n  - 支持嵌套子项\n\n1. 有序列表项一\n2. 有序列表项二\n\n- [x] 已完成任务\n- [ ] 待办任务\n\n## 代码块\n\n```python\nprint("hello markdown")\n```\n\n## 表格\n\n| 功能 | 状态 |\n| --- | --- |\n| 实时预览 | 支持 |\n| 导出 HTML / 分页 PDF | 支持 |\n| 图片渲染（png/jpg/webp/gif） | 支持 |\n| LaTeX 公式 | 支持 |\n\n## 数学公式（KaTeX，本地渲染、离线可用）\n\n行内公式：质能方程 $E=mc^2$，欧拉公式 $e^{i\\pi}+1=0$。\n\n块级公式：\n\n$$\\int_a^b f(x)\\,dx = F(b)-F(a)$$\n\n$$\\sum_{k=1}^{n} k = \\frac{n(n+1)}{2}$$\n\n## 图片\n\n图片语法：`![说明](图片路径或网址)`。下面这张是**内嵌图片**（base64 直接嵌在文档里，离线可用，不依赖任何外部图源）：\n\n![内嵌示例图](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPAAAACWCAIAAABvmpKCAAAE2ElEQVR4nO3doW4bQRRG4U3VBwkIDjYIcUlhCgJLAyyVlBYEBJSWVDIILQxIYElNCoKLC/ooBStF68nee72bXc/Mv+eDmamdSEdTy3NlNw0AAMDsTg7fenp2PudvAnj+/f3TTBI0HaOist/4/5iaURq/SfOEJmXUeFT3n9DUjPL1VtoTNDWjFi9bDV5DA3VJg+Z4Rl2SYveCpmbUqNstLzkghaAhGjSvN1Cv53o5oSGFoCGFoCGFoCGFoCGFoCGFoCGFoCGFoCGFoCGFoCGFoCGFoCGFoCGFoCHl7YSPdfH42Pvz35eXjZZ3q/6/9NfTmL/0k/Fo3/cf7dbYdrO/bWts2+xvuze2XY36EwRPaKtmf0mpZn9paM3JklVzsrS1t3WXrJr9pQUFHSYr03SY7KCmnZq7G5yaW+2GbbSt3RAmW3XTvIaGFIKGFIKGFIKGFIKGFIKGFIKGlGmCDu8CZS4Lw7vAQZeFyV2gtSG5C3yp3bCJtrUbwrvAqi8LJzuhnWRlag6THXH17TTdXXKa7i5t7G3dJSfZqmve+44VPtsOAl+5kmE46eLO2Had/2y4eG/8bj8vsw8nZbFbPfT+fP30oSnSsYeTrJr9pbw1J0tZhpOKqrlxlxY0nBQmm7Fpp+buhizDSVnsomTLbJq37SCFoCGFoCGFoCGFoCGFoCGFoCHlqMNJ4V1gxsvC5C7Q2pBlOCmLdXQXWOZl4bGHk5xks199O013l7IMJ2WxtpMts2aGk6Aj23DSoY/21Xi0L6Me7aPxaD/GPNpyhpMOtFvd9f58/XTdHFehn5xk1ewvDa3ZX7IsZzjplTX7Swv65KQw2UFNh8kOano5w0kHCpM9ctO8bQcpBA0pBA0pBA0pBA0pBA0pBA0pJX5yUngXOOiyMLwLHHRZuJzhpAOFd4FHviws9JOTnGRHXH07yY64+l7OcNKBnGSPf/XNJydBROnDSYc+6WfjSb/N+KQMJyUYTpq3Zn/plRhOSjCcNI0w2TmaZjgpwXASMCPeh4YUgoYUgoYUgoYUgoYUgoaUEoeTDn3S6C5wjstChpMSDCdNyUl2vqtvhpMSDCcB0xMZTsqC4aQEw0kVYzgpwXBSxRhOSjCcBMyI96EhhaAhhaAhhaAhhaAhhaAhpeLhpCwYTkownFQ9hpMSDCcB02M4abzlDCftVg91ffFmoV/rVrLlDCftjJr9pbxK/Fq3ki1nOGkXJVtm07xtBykEDSkEDSkEDSkEDSkEDSkEDSkMJw2znOGkdXQXWOZlYaFf61ay5Qwnre1ky6yZr3WDDoaTKhtOujW23exv2xrbNvvb7o1tV7n/W3glhpPqGE6yak6Wtva27pJVs79UBYaTKhhOcmputRu20bZ2Q5hs1U3zth2kEDSkEDSkEDSkEDSkEDSkEDSkMJxUwXBSchf4UrthE21rN4R3gVVfFjKcVMdwktN0d2ljb+suOclWXTPDSVAbTuI1NKQQNKQQNKQQNKQQNKQQNKQQNKQQNKQQNKQQNKQQNKQQNKQQNKQQNKQQNKQQNESDbuejgRo918sJDSkEDd2gedWBGnW7TU9omkZdkmJ5yQEpPUFzSKMWL1vtP6FpGuXrrfTE/zenZ+ez/T7ASM6BG7yG5qhGafwmgxO6i9MaGXG2AkBTt/9ZXHRDIlRWUAAAAABJRU5ErkJggg==)\n\n网络图片写法相同，把括号内换成 https:// 图片网址即可（需联网）。本地图片写盘符路径，或写**相对路径**（相对当前文档所在目录，推荐——文档和图片放在一起，拷走就能用）：\n\n![本地图片示例](sample-image.png)\n\n## 排版（工具栏「排版」按钮）\n\n- 每种元素（正文 / H1 / H2 / H3~H6 / 引用 / 列表 / 表格 / 代码）可分别设置**字体、字号、对齐**\n- 对齐支持：默认 / 左 / **居中** / 右 / 两端\n- 段落缩进按元素独立：**首行缩进**或**悬挂缩进**，字符数可调，随字号自动换算\n- 表格样式：三线表、表头底色、首列底色（颜色可选）\n\n## 保存与导出\n\n- 编辑停顿即**存入浏览器缓存**，防丢稿\n- 「排版」面板可设置**自动落盘间隔**（0~60 分钟），到点自动写回原文件\n- 「保存」按钮立即写回原 .md 文件\n- 导出三件套：**.md**（纯文本）、**.html**（带排版与公式）、**分页**（纸张 / 页边距 / 页码 / 自动目录，Ctrl+P 直接出 PDF）\n\n## 离线可用\n\n公式渲染（KaTeX）与分页引擎（Paged.js）均已本地部署，**断网不影响任何功能**；仅内容中的网络图片与链接需要联网。\n\n---\n\n试着修改左侧内容，右侧会实时更新。';
-  var BUILTIN_DOCS=[{name:'使用指南',content:SAMPLE},{name:'版权与开源组件声明',content:COPYRIGHT_DOC}];
+  var BUILTIN_DOCS=[{name:'使用指南',file:'MDEditor 使用指南.md'},
+                    {name:'版权与开源组件声明',file:'版权与开源组件声明.md'}];
 
   var mathStore=[];
   function extractMath(src){
@@ -603,7 +634,10 @@ function parseMarkdown(src){
     document.getElementById('statSave').className='dirty';
     if(saveTimer)clearTimeout(saveTimer);
     saveTimer=setTimeout(function(){
-      try{localStorage.setItem(STORE_KEY,editor.value);}catch(e){}
+      try{
+        if(currentFile){ setDraft(currentFile, editor.value); }   /* 按文件路径存草稿 */
+        else{ localStorage.setItem(STORE_KEY, editor.value); }    /* 无文件路径：暂存 */
+      }catch(e){}
       document.getElementById('statSave').textContent='已存入缓存';
       document.getElementById('statSave').className='saved';
     },600);
@@ -695,7 +729,32 @@ function parseMarkdown(src){
     applyTheme(document.body.classList.contains('light')?'dark':'light');
   });
 
-  document.getElementById('btnOpen').addEventListener('click',function(){fileInput.click();});
+  document.getElementById('btnOpen').addEventListener('click',function(){ openFileNative(); });
+  // 优先用后端原生"打开"框（能拿到完整路径 → 打开后可直接保存/归档图片）；
+  // 后端不可用时退回浏览器 <input type=file>（只拿得到文件名）。
+  function openFileNative(){
+    uiLog('click 打开');
+    fetch('/api/open-file?dir='+encodeURIComponent(lastDir||''))
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if(!(j&&j.ok)){ fileInput.click(); return; }   // 服务端弹框失败 → 兜底
+        if(!j.path){ return; }                          // 用户取消
+        return fetch('/api/file?path='+encodeURIComponent(j.path))
+          .then(function(r){return r.text();})
+          .then(function(txt){
+            applyDocWithDraft(j.path, txt, '已载入原文件');
+            currentFile = j.path;
+            lastDir = j.path.replace(/[\\\/][^\\\/]*$/,'');
+            try { localStorage.setItem('md-lastdir', lastDir); } catch(e) {}
+            var base = j.path.split(/[\\\/]/).pop();
+            updateFileIndicator(base);
+            updateSaveBtn();
+            addRecent(j.path, base);
+            showToast('已打开：'+base);
+          });
+      })
+      .catch(function(){ fileInput.click(); });
+  }
   fileInput.addEventListener('change',function(){
     var f=fileInput.files[0];if(!f)return;
     var rd=new FileReader();
@@ -705,21 +764,67 @@ function parseMarkdown(src){
   });
 
   document.getElementById('btnExportMd').addEventListener('click',function(){
+    uiLog('click 导出md');
     download(editor.value,'document.md','text/markdown');
   });
   document.getElementById('btnExportHtml').addEventListener('click',function(){
+    uiLog('click 导出html');
     fetch('/api/export-html',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({path:currentFile,
         bodyHtml:document.getElementById('preview').innerHTML,
         tsCss:(document.getElementById('ts-style')||{textContent:''}).textContent})})
       .then(function(r){return r.json();})
       .then(function(j){
-        if(j&&j.ok){window.open(j.url+'?t='+Date.now(),'_blank');}
-        else{alert('导出失败：'+((j&&j.error)||'未知错误'));}
-      }).catch(function(e){alert('导出失败：'+e.message);});
+        if(j&&j.ok){openExternal(j.url+'?t='+Date.now());}
+        else{showToast('导出失败：'+((j&&j.error)||'未知错误'));}
+      }).catch(function(e){showToast('导出失败：'+e.message);});
   });
+  var pagedBusy = false;
   document.getElementById('btnExportPaged').addEventListener('click',function(){
-    /* html 只管渲染：分页组装全部交给 Python 后端 */
+    uiBeacon('分页:1 进入');
+    if (pagedBusy) { showToast('分页导出正在进行中，请稍候…'); return; }
+    pagedBusy = true;
+    var pv = document.getElementById('preview');
+    uiBeacon('分页:2 preview存在=' + (!!pv));
+    var bh = pv ? pv.innerHTML : '';
+    uiBeacon('分页:3 html长度=' + bh.length);
+    var payload;
+    try {
+      payload = JSON.stringify({
+        path: currentFile,
+        bodyHtml: bh,
+        tsCss: (document.getElementById('ts-style')||{textContent:''}).textContent,
+        cfg: (function(){try{return JSON.parse(localStorage.getItem('md-editor-typeset-v3')||'{}').page||{};}catch(e){return {};}})()
+      });
+    } catch(e) {
+      pagedBusy = false;
+      uiBeacon('分页:4 stringify失败 ' + e.message);
+      showToast('分页导出失败（数据序列化错误）：' + e.message);
+      return;
+    }
+    uiBeacon('分页:4 json长度=' + payload.length);
+    var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = setTimeout(function(){ if (ctl) ctl.abort(); }, 45000);
+    fetch('/api/export-paged',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:payload, signal: ctl ? ctl.signal : undefined})
+      .then(function(r){ uiBeacon('分页:5 收到响应 status=' + r.status); return r.json(); })
+      .then(function(j){
+        clearTimeout(timer);
+        uiBeacon('分页:6 解析完成 ok=' + (j && j.ok));
+        pagedBusy = false;
+        if(j&&j.ok){openExternal(j.url+'?t='+Date.now());}
+        else{showToast('导出失败：'+((j&&j.error)||'未知错误'));}
+      }).catch(function(e){
+        clearTimeout(timer);
+        pagedBusy = false;
+        uiBeacon('分页:ERR ' + (e && e.message));
+        showToast('导出失败：'+(e && e.message));
+      });
+  });
+  document.getElementById('btnPrint').addEventListener('click',function(){
+    uiLog('click 打印');
+    /* 内嵌窗口下 window.print() 会阻塞；改为生成分页版 HTML 交给系统浏览器，
+       用户在浏览器里 Ctrl+P 即可存为 PDF（与按钮提示一致） */
     fetch('/api/export-paged',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         path:currentFile,
@@ -729,29 +834,14 @@ function parseMarkdown(src){
       })})
       .then(function(r){return r.json();})
       .then(function(j){
-        if(j&&j.ok){window.open(j.url+'?t='+Date.now(),'_blank');}
-        else{alert('导出失败：'+((j&&j.error)||'未知错误'));}
-      }).catch(function(e){alert('导出失败：'+e.message);});
+        if(j&&j.ok){openExternal(j.url+'?t='+Date.now());}
+        else{showToast('生成打印版失败：'+((j&&j.error)||'未知错误'));}
+      }).catch(function(e){showToast('生成打印版失败：'+e.message);});
   });
-  document.getElementById('btnPrint').addEventListener('click',function(){window.print();});
 
-  function download(content,name,type){
-    var blob=new Blob([content],{type:type+';charset=utf-8'});
-    var url=URL.createObjectURL(blob);
-    var a=document.createElement('a');
-    a.href=url;a.download=name;document.body.appendChild(a);a.click();
-    document.body.removeChild(a);
-    setTimeout(function(){URL.revokeObjectURL(url);},1000);
-  }
-  function download(content,name,type){
-    var blob=new Blob([content],{type:type+';charset=utf-8'});
-    var url=URL.createObjectURL(blob);
-    var a=document.createElement('a');
-    a.href=url;a.download=name;document.body.appendChild(a);a.click();
-    document.body.removeChild(a);
-    setTimeout(function(){URL.revokeObjectURL(url);},1000);
-  }
-  var katexCssText='';
+
+  try{fetch('/static/katex/katex.min.css').then(function(r){return r.text();}).then(function(t){katexCssText=t.replace(/url\((['\"]?)fonts\//g,'url($1/static/katex/fonts/');}).catch(function(){});}catch(e){}
+
   try{fetch('/static/katex/katex.min.css').then(function(r){return r.text();}).then(function(t){katexCssText=t.replace(/url\((['\"]?)fonts\//g,'url($1/static/katex/fonts/');}).catch(function(){});}catch(e){}
   function download(content,name,type){
     var blob=new Blob([content],{type:type+';charset=utf-8'});
@@ -763,6 +853,122 @@ function parseMarkdown(src){
   }
   var katexCssText='';
   try{fetch('/static/katex/katex.min.css').then(function(r){return r.text();}).then(function(t){katexCssText=t.replace(/url\((['\"]?)fonts\//g,'url($1/static/katex/fonts/');}).catch(function(){});}catch(e){}
+  function showToast(msg, isErr, opts){
+    /* 非阻塞提示：绝不用 alert（alert 同步阻塞 JS 线程 → 整个窗口"未响应"） */
+    var s = String(msg == null ? '' : msg);
+    if (isErr === undefined) { isErr = /失败|错误|无法|请先|不能|不存在/.test(s); }
+    if (!document.getElementById('mdToastStyle')) {
+      var st = document.createElement('style');
+      st.id = 'mdToastStyle';
+      st.textContent =
+        "#mdToast{position:fixed;top:14px;right:14px;z-index:99999;display:flex;" +
+        "flex-direction:column;gap:8px;pointer-events:none;max-width:min(440px,46vw);}" +
+        ".md-toast{background:#2b2f36;color:#f2f4f8;padding:10px 13px;border-radius:8px;" +
+        "box-shadow:0 8px 26px rgba(0,0,0,.32);font-size:13px;line-height:1.5;" +
+        "border-left:3px solid #4c9aff;word-break:break-word;white-space:pre-wrap;" +
+        "opacity:0;transform:translateY(-8px);transition:opacity .18s,transform .18s;" +
+        "pointer-events:auto;font-family:inherit;}" +
+        ".md-toast.err{border-left-color:#e5534b;}" +
+        ".md-toast.show{opacity:1;transform:none;}" +
+        ".md-toast-act{margin-left:10px;padding:2px 10px;font-size:12px;cursor:pointer;" +
+        "background:transparent;color:#8ec2ff;border:1px solid #4c9aff;border-radius:5px;" +
+        "font-family:inherit;}" +
+        ".md-toast-act:hover{background:rgba(76,154,255,.15);}";
+      document.head.appendChild(st);
+    }
+    var box = document.getElementById('mdToast');
+    if (!box) { box = document.createElement('div'); box.id = 'mdToast';
+                document.body.appendChild(box); }
+    var d = document.createElement('div');
+    d.className = 'md-toast' + (isErr ? ' err' : '');
+    d.textContent = s;
+    if (opts && opts.label) {
+      var b = document.createElement('button');
+      b.className = 'md-toast-act';
+      b.textContent = String(opts.label);
+      b.addEventListener('click', function(){
+        if (d.parentNode) d.parentNode.removeChild(d);
+        try { if (opts.fn) opts.fn(); } catch (e) {}
+      });
+      d.appendChild(b);
+    }
+    box.appendChild(d);
+    requestAnimationFrame(function(){ d.classList.add('show'); });
+    var ttl = (opts && opts.label) ? 9000 : (isErr ? 6000 : 3200);
+    setTimeout(function(){
+      d.classList.remove('show');
+      setTimeout(function(){ if (d.parentNode) d.parentNode.removeChild(d); }, 260);
+    }, ttl);
+  }
+  /* ---- 未落盘草稿保护（按文件路径隔离）----
+     规则：打开文档时，若本地草稿与磁盘内容不一致 → 恢复草稿（磁盘版本绝不覆盖），
+     toast 给「用磁盘版本」动作按钮；一致或无草稿 → 直接载入磁盘版。
+     草稿在成功落盘（手动保存/自动落盘/另存为）后清除。 */
+  var DRAFT_KEY='md-editor-drafts-v1';
+  function loadDrafts(){ try{return JSON.parse(localStorage.getItem(DRAFT_KEY)||'{}')||{};}catch(e){return {};} }
+  function saveDrafts(m){ try{localStorage.setItem(DRAFT_KEY,JSON.stringify(m));}catch(e){} }
+  function getDraft(p){ if(!p)return null; var m=loadDrafts(); return Object.prototype.hasOwnProperty.call(m,p)?m[p]:null; }
+  function setDraft(p,v){ if(!p)return; var m=loadDrafts(); if(v===undefined||v===null){delete m[p];}else{m[p]=v;} saveDrafts(m); }
+  function applyDocWithDraft(path, txt, okLabel){
+    var sb=document.getElementById('btnSave');
+    sb.disabled=false; sb.style.opacity='1';
+    var ss=document.getElementById('statSave');
+    var draft=getDraft(path);
+    if(draft!==null && draft!==txt){
+      editor.value=draft;
+      render(); dirty=true;
+      ss.textContent='已恢复未落盘草稿'; ss.className='dirty';
+      showToast('检测到未落盘的本地草稿，已为你恢复（磁盘版本未被覆盖）', false, {
+        label:'用磁盘版本',
+        fn:function(){
+          editor.value=txt; setDraft(path,undefined);
+          render(); dirty=false;
+          ss.textContent=okLabel||'已载入原文件'; ss.className='saved';
+        }
+      });
+    } else {
+      if(draft!==null)setDraft(path,undefined);  /* 与磁盘一致，清冗余 */
+      editor.value=txt;
+      render(); dirty=false;
+      ss.textContent=okLabel||'已载入原文件'; ss.className='saved';
+    }
+  }
+  /* 心跳：让后端知道页面还开着。
+     注意：闲置（切标签页/最小化/长时间不写）不算关闭，绝不据此停服务。 */
+  (function(){
+    function beat(){
+      try { fetch('/api/ping', {cache:'no-store'}).catch(function(){}); } catch(e) {}
+    }
+    beat();
+    setInterval(beat, 5000);
+  })();
+  /* 用户【真的关闭】页面时通知后端停止服务（sendBeacon 在 pagehide 中可靠）。
+     刷新页面也会触发它，但后端有宽限期：只要新页面很快恢复心跳就撤销退出。 */
+  window.addEventListener('pagehide', function(){
+    try { navigator.sendBeacon('/api/bye'); } catch(e) {}
+  });
+  function uiBeacon(msg){
+    /* 分步探针：sendBeacon 走独立通道，不受连接池/主线程繁忙影响 */
+    try {
+      var d = String(msg == null ? '' : msg);
+      if (!navigator.sendBeacon || !navigator.sendBeacon('/api/log?msg=' + encodeURIComponent(d))) {
+        fetch('/api/log?msg=' + encodeURIComponent(d)).catch(function(){});
+      }
+    } catch (e) {}
+  }
+  function uiLog(msg){
+    /* fire-and-forget：把界面动作写到服务端 runtime/ui.log，便于定位卡点 */
+    try{ fetch('/api/log?msg='+encodeURIComponent(msg)); }catch(e){}
+  }
+  function openExternal(url){
+    uiLog('openExternal -> '+url);
+    /* 内嵌窗口（WebView2）没有"新标签页"，window.open 会卡死；
+       统一交给本机服务，用系统默认浏览器打开 */
+    fetch('/api/open-external?url='+encodeURIComponent(url))
+      .then(function(r){return r.json();})
+      .then(function(j){ if(!j||!j.ok){ showToast('打开失败：'+((j&&j.error)||'未知错误')); } })
+      .catch(function(e){ showToast('打开失败：'+e.message); });
+  }
   function buildStandaloneHtml(){
     var body=document.getElementById('preview').innerHTML
       .replace(/src="\/img\?path=([^"]+)"/g,function(m,enc){
@@ -783,7 +989,9 @@ function parseMarkdown(src){
 
   var saved=null;
   try{saved=localStorage.getItem(STORE_KEY);}catch(e){}
-  if(saved!==null && saved!==''){editor.value=saved;}else{editor.value=SAMPLE;}
+  var hasFileParam=/[?&]file=/.test(location.search);
+  if(saved!==null && saved!=='' && !hasFileParam){editor.value=saved;updateSaveBtn();}
+  else if(!hasFileParam){loadDefault();}   /* ?file= 模式：由 loadFromUrl 草稿感知载入 */
   var sv=null;try{sv=localStorage.getItem(VIEW_KEY);}catch(e){}
   if(sv)viewIdx=views.indexOf(sv);
   var st=null;try{st=localStorage.getItem(THEME_KEY);}catch(e){}
@@ -800,29 +1008,24 @@ function parseMarkdown(src){
     fetch('/api/file?path='+encodeURIComponent(currentFile))
       .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.text();})
       .then(function(txt){
-        editor.value=txt;
-        var sb=document.getElementById('btnSave');
-        sb.disabled=false; sb.style.opacity='1';
-        scheduleRender(); scheduleSave();
-        var ss=document.getElementById('statSave');
-        ss.textContent='已载入原文件'; ss.className='saved';
+        applyDocWithDraft(currentFile, txt, '已载入原文件');
         addRecent(currentFile);
         updateFileIndicator(currentFile);
       })
-      .catch(function(e){ alert('读取文件失败：'+e.message); });
+      .catch(function(e){ showToast('读取文件失败：'+e.message); });
   }
   document.getElementById('btnSave').addEventListener('click',function(){
-    if(!currentFile) return;
+    if(!currentFile){ openSaveAs(); return; }
     var sb=document.getElementById('btnSave');
     sb.disabled=true; sb.style.opacity='.4';
     fetch('/api/file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:currentFile,content:editor.value})})
       .then(function(r){return r.json();})
       .then(function(j){
         var ss=document.getElementById('statSave');
-        if(j&&j.ok){ ss.textContent='已保存到原文件'; ss.className='saved'; }
-        else { alert('保存失败：'+((j&&j.error)||'未知错误')); }
+        if(j&&j.ok){ ss.textContent='已保存到原文件'; ss.className='saved'; setDraft(currentFile,undefined); }
+        else { showToast('保存失败：'+((j&&j.error)||'未知错误')); }
       })
-      .catch(function(e){ alert('保存失败：'+e.message); })
+      .catch(function(e){ showToast('保存失败：'+e.message); })
       .finally(function(){ sb.disabled=false; sb.style.opacity='1'; });
   });
   /* ---- typeset settings v4 (align + local fonts) + auto disk save ---- */
@@ -980,6 +1183,200 @@ function parseMarkdown(src){
   document.getElementById('btnTypeset').addEventListener('click',tsOpen);
   document.getElementById('tsClose').addEventListener('click',function(){document.getElementById('tsOverlay').hidden=true;});
   document.getElementById('tsOverlay').addEventListener('click',function(e){if(e.target===this)this.hidden=true;});
+  /* ── 内嵌模式检测（pywebview 直连 py API；否则走 HTTP）───────────────── */
+  var HAS_PY = false;
+  window.addEventListener('pywebviewready', function(){
+    HAS_PY = true;
+    try { var a = pyApi(); if (a && a.api_version) a.api_version(); } catch(e) {}
+  });
+  function pyApi(){
+    return (window.pywebview && window.pywebview.api) ? window.pywebview.api : null;
+  }
+  function pyReady(){
+    var a = pyApi();
+    return !!(a && a.pick_folder);
+  }
+  /* ── 新建 / 另存为 / 粘贴图片 ─────────────────────────── */
+  var lastDir = '';
+  try { lastDir = localStorage.getItem('md-lastdir') || ''; } catch(e) {}
+  function updateSaveBtn(){
+    var sb = document.getElementById('btnSave');
+    var has = !!currentFile;
+    sb.disabled = !has;
+    sb.style.opacity = has ? '1' : '.45';
+    sb.title = has ? '保存到 ' + currentFile : '尚无文件路径，请先「另存为」';
+    if (!has) {
+      var ss = document.getElementById('statSave');
+      ss.textContent = '未另存为';
+      ss.className = '';
+    }
+  }
+  function newDoc(){
+    currentFile = null; currentBuiltin = -1;
+    editor.value = '';
+    dirty = false;
+    render();
+    updateFileIndicator('未命名.md');
+    updateSaveBtn();
+    editor.focus();
+  }
+  document.getElementById('btnNew').addEventListener('click', newDoc);
+  document.getElementById('btnSaveAs').addEventListener('click', openSaveAs);
+  document.addEventListener('keydown', function(e){
+    if ((e.ctrlKey||e.metaKey) && (e.key==='n'||e.key==='N')){
+      e.preventDefault(); newDoc();
+    }
+  });
+  var quickDirs = null;
+  function fillQuickDirs(){
+    if (quickDirs) return;
+    var __a = pyApi();
+    var __p;
+    if (pyReady() && __a.common_dirs) {
+      __p = __a.common_dirs().then(function(d){ return {ok: true, dirs: d}; });
+    } else {
+      __p = fetch('/api/common-dirs').then(function(r){return r.json();});
+    }
+    Promise.resolve(__p).then(function(j){
+      if (!(j && j.ok)) return;
+      quickDirs = j.dirs || {};
+      var box = document.getElementById('svQuick');
+      box.innerHTML = '';
+      var labels = {docs:'文档', desktop:'桌面', downloads:'下载', home:'用户目录'};
+      Object.keys(labels).forEach(function(k){
+        if (!quickDirs[k]) return;
+        var el = document.createElement('div');
+        el.className = 'sv-mini';
+        el.textContent = labels[k];
+        el.addEventListener('click', function(){ document.getElementById('svDir').value = quickDirs[k]; });
+        box.appendChild(el);
+      });
+      var lb = document.createElement('div');
+      lb.className = 'sv-mini';
+      lb.textContent = '上次目录';
+      lb.addEventListener('click', function(){ if (lastDir) document.getElementById('svDir').value = lastDir; });
+      box.appendChild(lb);
+    }).catch(function(){});
+  }
+  function docTitleForSave(){
+    // 默认文件名取文档第一个一级标题（# 标题）；没有则“未命名.md”
+    try {
+      var m = (editor.value || '').match(/^[ \t]*#[ \t]+(.+?)[ \t]*$/m);
+      var t = m ? m[1] : '';
+      t = t.replace(/[\\\/:*?"<>|]/g, '').replace(/[ \t]+/g, ' ').trim();
+      t = t.slice(0, 60);
+      if (t) return t + '.md';
+    } catch(e) {}
+    return '未命名.md';
+  }
+  function openSaveAs(){
+    var cur = docTitleForSave();
+    if (currentFile) {
+      var parts = currentFile.split(/[\\/]/);
+      cur = parts[parts.length - 1] || cur;
+    }
+    doSaveAs(cur || docTitleForSave(), editor.value, function(path){
+      currentFile = path;
+      var base = path.split(/[\\/]/).pop();
+      lastDir = path.replace(/[\\/][^\\/]*$/, '');
+      try { localStorage.setItem('md-lastdir', lastDir); } catch(e) {}
+      updateFileIndicator(base || '未命名.md');
+      document.getElementById('statSave').textContent = '已保存';
+      document.getElementById('statSave').className = 'saved';
+      dirty = false;
+      updateSaveBtn();
+    });
+  }
+  document.getElementById('svCancel').addEventListener('click',function(){
+    document.getElementById('svOverlay').hidden = true;
+  });
+  function doBrowseDir(){
+    var a = pyApi();
+    if (pyReady()) {
+      a.pick_folder(lastDir).then(function(d){
+        if (d) document.getElementById('svDir').value = d;
+      }).catch(function(){});
+      return;
+    }
+    fetch('/api/browse-dir').then(function(r){return r.json();}).then(function(j){
+      if (j && j.ok && j.dir) document.getElementById('svDir').value = j.dir;
+    }).catch(function(){});
+  }
+  document.getElementById('svBrowse').addEventListener('click', doBrowseDir);
+  function doSaveAs(defaultName, content, onDone){
+    var a = pyApi();
+    if (pyReady() && a.save_as) {
+      a.save_as(defaultName, content, lastDir).then(function(r){
+        if (r && r.ok) { onDone(r.path); return; }
+        if (r && r.cancelled) { return; }
+        showToast('保存失败：' + ((r && r.error) || '未知错误'));
+      }).catch(function(e){ showToast('保存失败：' + e); });
+      return;
+    }
+    // 浏览器模式：打开保存模态框
+    document.getElementById('svName').value = defaultName || '未命名.md';
+    document.getElementById('svDir').value = lastDir;
+    document.getElementById('svOverlay').hidden = false;
+    fillQuickDirs();
+  }
+  document.getElementById('svGo').addEventListener('click',function(){
+    var dir = document.getElementById('svDir').value.trim();
+    if (!dir) { showToast('请先选择保存目录（点「浏览…」）'); return; }
+    var name = document.getElementById('svName').value.trim() || '未命名.md';
+    fetch('/api/save-as',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({dir:dir,name:name,content:editor.value})})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if (!(j && j.ok)) { showToast('保存失败：'+((j&&j.error)||'未知错误')); return; }
+        currentFile = j.path;
+        lastDir = dir;
+        setDraft(currentFile,undefined);
+        try { localStorage.setItem('md-lastdir', lastDir); } catch(e) {}
+        document.getElementById('svOverlay').hidden = true;
+        updateFileIndicator(name);
+        document.getElementById('statSave').textContent = '已保存';
+        dirty = false;
+        updateSaveBtn();
+      }).catch(function(e){ showToast('保存失败：'+e.message); });
+  });
+  editor.addEventListener('paste', function(e){
+    var items = (e.clipboardData || window.clipboardData).items;
+    if (!items) return;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].type && items[i].type.indexOf('image') === 0) {
+        e.preventDefault();
+        if (!currentFile) {
+          showToast('粘贴图片前请先保存文档（Ctrl+S），图片将存入同名 .assets 目录。');
+          openSaveAs();
+          return;
+        }
+        var blob = items[i].getAsFile();
+        var fr = new FileReader();
+        fr.onload = function(){
+          var __a = pyApi(), __p;
+          if (pyReady() && __a.paste_image) {
+            __p = __a.paste_image(currentFile, fr.result);
+          } else {
+            __p = fetch('/api/paste-image',{method:'POST',headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({docPath:currentFile,dataUrl:fr.result})}).then(function(r){return r.json();});
+          }
+          Promise.resolve(__p)
+            .then(function(j){
+              if (j && j.ok) {
+                var ins = '![](' + j.rel + ')';
+                var pos = editor.selectionStart || editor.value.length;
+                editor.value = editor.value.slice(0,pos) + ins + editor.value.slice(editor.selectionEnd || pos);
+                editor.selectionStart = editor.selectionEnd = pos + ins.length;
+                editor.dispatchEvent(new Event('input'));
+              } else { showToast('图片保存失败：'+((j&&j.error)||'未知错误')); }
+            }).catch(function(er){ showToast('图片保存失败：'+er.message); });
+        };
+        fr.readAsDataURL(blob);
+        return;
+      }
+    }
+  });
+
   function fillServerFonts(){
     try{
       fetch('/api/fonts').then(function(r){return r.json();}).then(function(j){
@@ -1039,11 +1436,13 @@ function parseMarkdown(src){
   var dirty=false,diskTimer=null;
   editor.addEventListener('input',function(){dirty=true;});
   function diskNow(){
-    if(!currentFile||!dirty)return;
+    if(!dirty)return;
+    if(!currentFile){ openSaveAs(); return; }
     fetch('/api/file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:currentFile,content:editor.value})})
       .then(function(r){return r.json();})
       .then(function(j){
         if(j&&j.ok){dirty=false;
+          setDraft(currentFile,undefined);
           var ss=document.getElementById('statSave');
           ss.textContent='已落盘 '+new Date().toLocaleTimeString();ss.className='saved';
         }
@@ -1100,47 +1499,41 @@ function parseMarkdown(src){
     fetch('/api/file?path='+encodeURIComponent(p))
       .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.text();})
       .then(function(txt){
-        editor.value=txt;
         currentFile=p;
+        applyDocWithDraft(p, txt, '已载入');
         addRecent(p);
-        var sb=document.getElementById('btnSave');
-        sb.disabled=false; sb.style.opacity='1';
-        render(); dirty=false;
         updateFileIndicator(p);
-        var ss=document.getElementById('statSave');
-        ss.textContent='已载入'; ss.className='saved';
       })
-      .catch(function(e){ alert('读取文件失败：'+e.message); });
+      .catch(function(e){ showToast('读取文件失败：'+e.message); });
   }
   var currentBuiltin=-1;
   function loadBuiltin(idx){
     if(idx<0||idx>=BUILTIN_DOCS.length)return;
-    currentFile=null;
-    currentBuiltin=idx;
-    editor.value=BUILTIN_DOCS[idx].content;
-    var sb=document.getElementById('btnSave');
-    sb.disabled=true; sb.style.opacity='.4';
-    render(); dirty=false;
-    updateFileIndicator(BUILTIN_DOCS[idx].name);
-    var ss=document.getElementById('statSave');
-    ss.textContent='内置文档'; ss.className='saved';
+    var d=BUILTIN_DOCS[idx];
+    if(!d.file){ return; }
+    fetch('/doc?file='+encodeURIComponent(d.file))
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if(!j||!j.ok){ showToast('载入内置文档失败：'+((j&&j.error)||'未知错误')); return; }
+        currentFile=j.path;          /* 实体文件路径：保存直接落盘，不弹窗 */
+        currentBuiltin=idx;
+        applyDocWithDraft(j.path, j.content, '已保存');
+        updateFileIndicator(d.name);
+        updateSaveBtn();
+        addRecent(j.path, d.name);
+      })
+      .catch(function(e){ showToast('载入内置文档失败：'+e.message); });
   }
   function loadDefault(){
-    currentFile=null;
-    currentBuiltin=-1;
-    editor.value=SAMPLE;
-    var sb=document.getElementById('btnSave');
-    sb.disabled=true; sb.style.opacity='.4';
-    render(); dirty=false;
-    updateFileIndicator(null);
+    loadBuiltin(0);   /* 默认文档 = 使用指南（实体文件） */
   }
   function renderFileList(){
     var el=document.getElementById('fmList');
     var rec=recentList();
     var html='<div class="fm-sub" style="padding:2px 4px 6px;font-weight:600;">内置文档</div>';
     for(var b=0;b<BUILTIN_DOCS.length;b++){
-      var cur=(!currentFile&&currentBuiltin===b)?' cur':'';
-      html+='<div class="fm-item'+cur+'" data-builtin="'+b+'"><b>'+BUILTIN_DOCS[b].name+'</b><div class="fm-sub">内置文档 · 点击载入阅读</div></div>';
+      var cur=(currentBuiltin===b)?' cur':'';
+      html+='<div class="fm-item'+cur+'" data-builtin="'+b+'"><b>'+BUILTIN_DOCS[b].name+'</b><div class="fm-sub">内置文档 · 点击载入（可编辑/另存为）</div></div>';
     }
     html+='<div class="fm-sub" style="padding:8px 4px 6px;font-weight:600;">最近文件</div>';
     html+='<div class="fm-item" data-act="default"><b>默认文档（使用指南）</b><div class="fm-sub">回到初始示例状态</div></div>';
@@ -1166,7 +1559,7 @@ function parseMarkdown(src){
         var r=recentList()[idx];
         if(!r)return;
         if(r.path){loadFile(r.path);}
-        else{alert('该文件通过「打开」按钮选择，浏览器不提供完整路径，无法自动重载。\n请通过右键菜单打开它，或再次用「打开」选择。');}
+        else{showToast('该文件通过「打开」按钮选择，浏览器不提供完整路径，无法自动重载。\n请通过右键菜单打开它，或再次用「打开」选择。');}
       });
     }
   }

@@ -1,0 +1,15 @@
+# ── Python ────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# ── 过程/临时产物（与工具运行无关，不入库）────
+.dist/
+_smoke/
+*_decisions.json
+resume_*.json
+
+# ── 系统 ─────────────────────────────────────
+.DS_Store
+Thumbs.db
