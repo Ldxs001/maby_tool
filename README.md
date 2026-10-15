@@ -17,7 +17,7 @@
 
 ## 演示
 
-<video src="https://github.com/user-attachments/assets/98d178ba-e74f-4129-adf5-ae05333df098" controls width="680"></video>
+<video src="https://github.com/user-attachments/assets/148ee88c-5c17-4dc2-a6ea-a867624635cb" controls width="680"></video>
 
 *▲ 演示视频（51 秒）：GitHub 端上方为内嵌播放器；若未加载，[点此到 Release 页播放](https://github.com/Ldxs001/maby_tool/releases/tag/v1.1.0)*
 
@@ -52,7 +52,3 @@ maby_tool/
 
 - 本仓库由 **git-sync** 技能同步维护（筛除 → 脱敏 → 提交 → 双端推送）
 - 仅同步工具运行所需文件；过程/缓存/测试/宣传材料不入库
-
-
-https://github.com/user-attachments/assets/148ee88c-5c17-4dc2-a6ea-a867624635cb
-
