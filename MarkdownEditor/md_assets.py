@@ -8,6 +8,7 @@
 纯函数模块，无副作用，供 md_server.py 与 md_app.pyw 共用。
 """
 import base64
+import hashlib
 import json
 import os
 import re
@@ -43,15 +44,33 @@ def _unique(assets, name):
     return cand
 
 
-def materialize_images(doc_path, content):
-    """返回 (新内容, 已落盘文件名列表)。失败时原样返回，绝不破坏文档。"""
-    if not doc_path or not content:
+def materialize_into(content, assets_dir, ref_prefix):
+    """核心物化：把 content 中的内嵌图（base64 data URI / blob 引用 / 本机绝对
+    路径，文件真实存在的）写入 assets_dir，引用改写为 ref_prefix/<name>。
+
+    ref_prefix = 引用前缀（不含尾斜杠）：磁盘契约传 "<stem>.assets"，
+    .smd 包内契约传 "assets"。网络图与真实不存在的路径原样保留
+    （fail-closed：破图可见，绝不伪造）。已是相对契约的引用不重复处理
+    （幂等：二次保存零收编）。纯函数，返回 (新内容, 已落盘文件名列表)。
+    """
+    if not content or not assets_dir or not ref_prefix:
         return content, []
-    stem = os.path.splitext(os.path.basename(doc_path))[0]
-    base_dir = os.path.dirname(doc_path)
-    assets = os.path.join(base_dir, stem + ".assets")
+    assets = assets_dir
     saved = []
     counter = [0]
+
+    # 内容寻址复用：assets 目录里已有同字节文件 → 直接复用其文件名，
+    # 不重复落盘（编辑区未同步的旧引用重复保存时零膨胀，真幂等）
+    _by_hash = {}
+    if os.path.isdir(assets):
+        for _fn in os.listdir(assets):
+            _fp = os.path.join(assets, _fn)
+            if os.path.isfile(_fp):
+                try:
+                    with open(_fp, "rb") as _f:
+                        _by_hash[hashlib.sha1(_f.read()).hexdigest()] = _fn
+                except Exception:
+                    pass
 
     def _handle(m):
         alt, url = m.group(1), m.group(2).strip()
@@ -103,21 +122,37 @@ def materialize_images(doc_path, content):
         if data is None:
             return m.group(0)
         counter[0] += 1
-        try:
-            os.makedirs(assets, exist_ok=True)
-            name = _unique(assets, _safe_name(alt, counter[0], ext))
-            with open(os.path.join(assets, name), "wb") as f:
-                f.write(data)
-        except Exception:
-            return m.group(0)
-        saved.append(name)
-        return "![%s](%s.assets/%s)" % (alt, stem, name)
+        h = hashlib.sha1(data).hexdigest()
+        name = _by_hash.get(h)
+        if name is None:
+            try:
+                os.makedirs(assets, exist_ok=True)
+                name = _unique(assets, _safe_name(alt, counter[0], ext))
+                with open(os.path.join(assets, name), "wb") as f:
+                    f.write(data)
+            except Exception:
+                return m.group(0)
+            _by_hash[h] = name
+            saved.append(name)
+        return "![%s](%s/%s)" % (alt, ref_prefix, name)
 
     try:
         new = IMG_RE.sub(_handle, content)
     except Exception:
         return content, []
     return new, saved
+
+
+def materialize_images(doc_path, content):
+    """磁盘契约物化薄壳：写入 <文档名>.assets/，引用改写为 <stem>.assets/<name>。
+    失败时原样返回，绝不破坏文档。"""
+    if not doc_path:
+        return content, []
+    stem = os.path.splitext(os.path.basename(doc_path))[0]
+    base_dir = os.path.dirname(doc_path)
+    return materialize_into(content,
+                            os.path.join(base_dir, stem + ".assets"),
+                            stem + ".assets")
 
 
 def materialize_images_in_file(doc_path, content, writer):

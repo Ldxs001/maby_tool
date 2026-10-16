@@ -225,7 +225,12 @@
     <div style="width:520px;background:#23272f;border-radius:14px;padding:26px 30px;box-shadow:0 24px 70px rgba(0,0,0,.55);">
       <div style="font-size:24px;font-weight:700;margin-bottom:18px;">保存文档</div>
       <div style="font-size:16px;color:#8a93a6;margin-bottom:6px;">文件名</div>
-      <input id="svName" type="text" value="未命名.md" style="width:100%;background:#1a1d24;color:#e8eaed;border:1px solid #3a4358;border-radius:8px;padding:10px 12px;font-size:17px;margin-bottom:14px;">
+      <input id="svName" type="text" value="未命名" placeholder="未命名" style="width:100%;background:#1a1d24;color:#e8eaed;border:1px solid #3a4358;border-radius:8px;padding:10px 12px;font-size:17px;margin-bottom:14px;">
+      <div style="font-size:16px;color:#8a93a6;margin-bottom:6px;">格式</div>
+      <select id="svFmt" style="width:100%;background:#1a1d24;color:#e8eaed;border:1px solid #3a4358;border-radius:8px;padding:10px 12px;font-size:16px;margin-bottom:14px;">
+        <option value=".md">Markdown 文档（.md，图片存同名 .assets 目录）</option>
+        <option value=".smd">自包含文档（.smd，单文件含全部图片）</option>
+      </select>
       <div style="font-size:16px;color:#8a93a6;margin-bottom:6px;">保存目录</div>
       <div style="display:flex;gap:8px;margin-bottom:10px;">
         <input id="svDir" type="text" placeholder="可直接粘贴路径，或点「浏览…」" style="flex:1;background:#1a1d24;color:#e8eaed;border:1px solid #3a4358;border-radius:8px;padding:10px 12px;font-size:16px;">
@@ -530,7 +535,7 @@ function parseMarkdown(src){
        支持：盘符绝对路径、file:///、相对路径（相对当前 md 文件所在目录；
        默认文档无当前文件时，相对路径交给后端按工具目录兜底解析） */
     var imgs=root.querySelectorAll('img');
-    var base=currentFile?String(currentFile).replace(/[\\/][^\\/]*$/,''):'';
+    var base=currentBase!==null?currentBase:(currentFile?String(currentFile).replace(/[\\/][^\\/]*$/,''):'');
     for(var i=0;i<imgs.length;i++){
       var s=imgs[i].getAttribute('src')||'';
       if(s.indexOf('/img?path=')===0)continue;
@@ -746,11 +751,11 @@ function parseMarkdown(src){
       .then(function(j){
         if(!(j&&j.ok)){ fileInput.click(); return; }   // 服务端弹框失败 → 兜底
         if(!j.path){ return; }                          // 用户取消
-        return fetch('/api/file?path='+encodeURIComponent(j.path))
-          .then(function(r){return r.text();})
-          .then(function(txt){
-            applyDocWithDraft(j.path, txt, '已载入原文件');
+        return fetchDocInto(j.path)
+          .then(function(d){
+            applyDocWithDraft(j.path, d.txt, '已载入原文件');
             currentFile = j.path;
+            currentBase = d.base;
             lastDir = j.path.replace(/[\\\/][^\\\/]*$/,'');
             try { localStorage.setItem('md-lastdir', lastDir); } catch(e) {}
             var base = j.path.split(/[\\\/]/).pop();
@@ -764,6 +769,12 @@ function parseMarkdown(src){
   }
   fileInput.addEventListener('change',function(){
     var f=fileInput.files[0];if(!f)return;
+    if(/\.smd$/i.test(f.name)){
+      /* 浏览器兜底拿不到完整路径也无法解包 ZIP：拒绝静默读成乱码 */
+      showToast('.smd 是自包含格式，请通过右键菜单/文件关联（MarkdownEditor.exe）打开，浏览器兜底不支持。');
+      fileInput.value='';
+      return;
+    }
     var rd=new FileReader();
     rd.onload=function(){editor.value=rd.result;scheduleRender();scheduleSave();addRecent(null,f.name);updateFileIndicator(f.name);};
     rd.readAsText(f);
@@ -1006,18 +1017,42 @@ function parseMarkdown(src){
 
   /* URL 注入适配层：通过后端 ?file= 打开时载入原文件并支持回写（解析内核不变） */
   var currentFile=null;
+  var currentBase=null;   /* .smd 解包工作目录（图片基址）；普通文档 null=用 currentFile 目录 */
+  /* 统一载入：.smd 走 JSON 响应（content+base），普通 .md 走纯文本 */
+  function fetchDocInto(p){
+    return fetch('/api/file?path='+encodeURIComponent(p))
+      .then(function(r){
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        var ct=(r.headers.get('Content-Type')||'');
+        if(ct.indexOf('json')>=0){
+          return r.json().then(function(j){
+            if(!(j&&j.ok)) throw new Error((j&&j.error)||'读取失败');
+            return {txt:j.content, base:j.base};
+          });
+        }
+        return r.text().then(function(t){ return {txt:t, base:null}; });
+      });
+  }
   function loadFromUrl(){
     var m=location.search.match(/[?&]file=([^&]+)/);
     if(!m) return;
     currentFile=decodeURIComponent(m[1]);
-    fetch('/api/file?path='+encodeURIComponent(currentFile))
-      .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.text();})
-      .then(function(txt){
-        applyDocWithDraft(currentFile, txt, '已载入原文件');
+    fetchDocInto(currentFile)
+      .then(function(d){
+        currentBase=d.base;
+        applyDocWithDraft(currentFile, d.txt, '已载入原文件');
         addRecent(currentFile);
         updateFileIndicator(currentFile);
       })
       .catch(function(e){ showToast('读取文件失败：'+e.message); });
+  }
+  /* 保存即归一（三处共享：Ctrl+S / 自动保存 / 另存为）：服务端物化/契约改写后
+     回传正文，编辑区同步——否则编辑区与磁盘脱节，重复收编同一张图 */
+  function applySavedContent(j){
+    if (typeof j.content === 'string' && j.content !== editor.value) {
+      editor.value = j.content;
+      scheduleRender();
+    }
   }
   document.getElementById('btnSave').addEventListener('click',function(){
     if(!currentFile){ openSaveAs(); return; }
@@ -1027,7 +1062,10 @@ function parseMarkdown(src){
       .then(function(r){return r.json();})
       .then(function(j){
         var ss=document.getElementById('statSave');
-        if(j&&j.ok){ ss.textContent='已保存到原文件'; ss.className='saved'; setDraft(currentFile,undefined); }
+        if(j&&j.ok){
+          applySavedContent(j);
+          ss.textContent='已保存到原文件'; ss.className='saved'; setDraft(currentFile,undefined);
+        }
         else { showToast('保存失败：'+((j&&j.error)||'未知错误')); }
       })
       .catch(function(e){ showToast('保存失败：'+e.message); })
@@ -1223,7 +1261,7 @@ function parseMarkdown(src){
     }
   }
   function newDoc(){
-    currentFile = null; currentBuiltin = -1;
+    currentFile = null; currentBuiltin = -1; currentBase = null;
     editor.value = '';
     dirty = false;
     render();
@@ -1286,17 +1324,7 @@ function parseMarkdown(src){
       var parts = currentFile.split(/[\\/]/);
       cur = parts[parts.length - 1] || cur;
     }
-    doSaveAs(cur || docTitleForSave(), editor.value, function(path){
-      currentFile = path;
-      var base = path.split(/[\\/]/).pop();
-      lastDir = path.replace(/[\\/][^\\/]*$/, '');
-      try { localStorage.setItem('md-lastdir', lastDir); } catch(e) {}
-      updateFileIndicator(base || '未命名.md');
-      document.getElementById('statSave').textContent = '已保存';
-      document.getElementById('statSave').className = 'saved';
-      dirty = false;
-      updateSaveBtn();
-    });
+    doSaveAs(cur || docTitleForSave(), editor.value);
   }
   document.getElementById('svCancel').addEventListener('click',function(){
     document.getElementById('svOverlay').hidden = true;
@@ -1314,18 +1342,43 @@ function parseMarkdown(src){
     }).catch(function(){});
   }
   document.getElementById('svBrowse').addEventListener('click', doBrowseDir);
-  function doSaveAs(defaultName, content, onDone){
+  /* 另存为写盘唯一入口（SSOT）：浏览器/内嵌两模式一律走服务端 /api/save-as，
+     桥只负责弹原生对话框选路径——物化/契约改写/回传只在服务端一份实现 */
+  function saveAsTo(dir, name, content){
+    fetch('/api/save-as',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({dir:dir,name:name,content:content,base:currentBase,src:currentFile})})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if (!(j && j.ok)) { showToast('保存失败：'+((j&&j.error)||'未知错误')); return; }
+        applySavedContent(j);
+        currentFile = j.path;
+        currentBase = j.smd ? j.base : null;
+        lastDir = dir;
+        setDraft(currentFile,undefined);
+        try { localStorage.setItem('md-lastdir', lastDir); } catch(e) {}
+        document.getElementById('svOverlay').hidden = true;
+        updateFileIndicator(name);
+        document.getElementById('statSave').textContent = '已保存';
+        document.getElementById('statSave').className = 'saved';
+        dirty = false;
+        updateSaveBtn();
+      }).catch(function(e){ showToast('保存失败：'+e.message); });
+  }
+  function doSaveAs(defaultName, content){
     var a = pyApi();
-    if (pyReady() && a.save_as) {
-      a.save_as(defaultName, content, lastDir).then(function(r){
-        if (r && r.ok) { onDone(r.path); return; }
-        if (r && r.cancelled) { return; }
-        showToast('保存失败：' + ((r && r.error) || '未知错误'));
+    if (pyReady() && a.pick_save_path) {
+      a.pick_save_path(defaultName || '未命名.md', lastDir).then(function(p){
+        if (!p) return;   /* 用户取消 */
+        var dir = p.replace(/[\\/][^\\/]*$/, '');
+        var name = p.split(/[\\/]/).pop();
+        saveAsTo(dir, name, content);
       }).catch(function(e){ showToast('保存失败：' + e); });
       return;
     }
-    // 浏览器模式：打开保存模态框
-    document.getElementById('svName').value = defaultName || '未命名.md';
+    // 浏览器模式：打开保存模态框（文件名不带后缀，格式由下拉决定）
+    var bare = (defaultName || '未命名').replace(/\.(md|smd)$/i, '');
+    document.getElementById('svName').value = bare;
+    document.getElementById('svFmt').value = (currentFile && /\.smd$/i.test(currentFile)) ? '.smd' : '.md';
     document.getElementById('svDir').value = lastDir;
     document.getElementById('svOverlay').hidden = false;
     fillQuickDirs();
@@ -1333,22 +1386,9 @@ function parseMarkdown(src){
   document.getElementById('svGo').addEventListener('click',function(){
     var dir = document.getElementById('svDir').value.trim();
     if (!dir) { showToast('请先选择保存目录（点「浏览…」）'); return; }
-    var name = document.getElementById('svName').value.trim() || '未命名.md';
-    fetch('/api/save-as',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({dir:dir,name:name,content:editor.value})})
-      .then(function(r){return r.json();})
-      .then(function(j){
-        if (!(j && j.ok)) { showToast('保存失败：'+((j&&j.error)||'未知错误')); return; }
-        currentFile = j.path;
-        lastDir = dir;
-        setDraft(currentFile,undefined);
-        try { localStorage.setItem('md-lastdir', lastDir); } catch(e) {}
-        document.getElementById('svOverlay').hidden = true;
-        updateFileIndicator(name);
-        document.getElementById('statSave').textContent = '已保存';
-        dirty = false;
-        updateSaveBtn();
-      }).catch(function(e){ showToast('保存失败：'+e.message); });
+    var fmt = document.getElementById('svFmt').value;
+    var name = (document.getElementById('svName').value.trim() || '未命名').replace(/\.(md|smd)$/i, '') + fmt;
+    saveAsTo(dir, name, editor.value);
   });
   editor.addEventListener('paste', function(e){
     var items = (e.clipboardData || window.clipboardData).items;
@@ -1364,13 +1404,10 @@ function parseMarkdown(src){
         var blob = items[i].getAsFile();
         var fr = new FileReader();
         fr.onload = function(){
-          var __a = pyApi(), __p;
-          if (pyReady() && __a.paste_image) {
-            __p = __a.paste_image(currentFile, fr.result);
-          } else {
-            __p = fetch('/api/paste-image',{method:'POST',headers:{'Content-Type':'application/json'},
-              body:JSON.stringify({docPath:currentFile,dataUrl:fr.result})}).then(function(r){return r.json();});
-          }
+          /* 写盘唯一入口（SSOT）：一律走服务端 /api/paste-image，
+             服务端按容器落位（.md→<stem>.assets，.smd→包内 assets/） */
+          var __p = fetch('/api/paste-image',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({docPath:currentFile,dataUrl:fr.result})}).then(function(r){return r.json();});
           Promise.resolve(__p)
             .then(function(j){
               if (j && j.ok) {
@@ -1453,6 +1490,7 @@ function parseMarkdown(src){
       .then(function(r){return r.json();})
       .then(function(j){
         if(j&&j.ok){dirty=false;
+          applySavedContent(j);
           setDraft(currentFile,undefined);
           var ss=document.getElementById('statSave');
           ss.textContent='已落盘 '+new Date().toLocaleTimeString();ss.className='saved';
@@ -1507,11 +1545,11 @@ function parseMarkdown(src){
   }
   function loadFile(p){
     currentBuiltin=-1;
-    fetch('/api/file?path='+encodeURIComponent(p))
-      .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.text();})
-      .then(function(txt){
+    fetchDocInto(p)
+      .then(function(d){
         currentFile=p;
-        applyDocWithDraft(p, txt, '已载入');
+        currentBase=d.base;
+        applyDocWithDraft(p, d.txt, '已载入');
         addRecent(p);
         updateFileIndicator(p);
       })
@@ -1527,6 +1565,7 @@ function parseMarkdown(src){
       .then(function(j){
         if(!j||!j.ok){ showToast('载入内置文档失败：'+((j&&j.error)||'未知错误')); return; }
         currentFile=j.path;          /* 实体文件路径：保存直接落盘，不弹窗 */
+        currentBase=null;            /* 内置文档是普通 .md，图片基址回归文件目录 */
         currentBuiltin=idx;
         applyDocWithDraft(j.path, j.content, '已保存');
         updateFileIndicator(d.name);

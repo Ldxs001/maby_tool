@@ -64,6 +64,16 @@ REM Add this editor into the Open With list
 reg add "HKCU\Software\Classes\.md\OpenWithProgids" /v MDViewer.md /t REG_SZ /d "" /f >nul 2>&1
 reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.md\OpenWithProgids" /v MDViewer.md /t REG_SZ /d "" /f >nul 2>&1
 
+REM ---- Self-contained Markdown (.smd) file association ----
+reg add "HKCU\Software\Classes\.smd" /ve /t REG_SZ /d "MDViewer.smd" /f
+reg add "HKCU\Software\Classes\.smd\shell\MDViewer" /ve /t REG_SZ /d "Open with Markdown Editor" /f
+reg add "HKCU\Software\Classes\.smd\shell\MDViewer\command" /ve /t REG_SZ /d "%HERE%\MarkdownEditor.exe \"%%1\"" /f
+reg add "HKCU\Software\Classes\MDViewer.smd" /ve /t REG_SZ /d "Self-contained Markdown Document" /f
+reg add "HKCU\Software\Classes\MDViewer.smd" /v FriendlyTypeName /t REG_EXPAND_SZ /d "Markdown Editor" /f
+reg add "HKCU\Software\Classes\MDViewer.smd\DefaultIcon" /ve /t REG_SZ /d "%HERE%\md-editor.ico" /f
+reg add "HKCU\Software\Classes\MDViewer.smd\shell\open\command" /ve /t REG_SZ /d "%HERE%\MarkdownEditor.exe \"%%1\"" /f
+reg add "HKCU\Software\Classes\.smd\OpenWithProgids" /v MDViewer.smd /t REG_SZ /d "" /f >nul 2>&1
+
 echo [3/4] Create Desktop / Start Menu shortcuts...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%HERE%\_mklnk.ps1" -Here "%HERE%"
 

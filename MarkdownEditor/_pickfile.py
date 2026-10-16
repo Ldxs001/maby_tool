@@ -59,7 +59,9 @@ def pick_file(init_dir=""):
             ofn.hwndOwner = user32.GetForegroundWindow()
         except Exception:
             ofn.hwndOwner = None
-        ofn.lpstrFilter = ("Markdown (*.md)\0*.md\0"
+        ofn.lpstrFilter = ("Markdown (*.md;*.smd)\0*.md;*.smd\0"
+                           "Markdown (*.md)\0*.md\0"
+                           "自包含文档 (*.smd)\0*.smd\0"
                            "文本文件 (*.txt)\0*.txt\0"
                            "所有文件 (*.*)\0*.*\0\0")
         ofn.lpstrFile = ctypes.cast(buf, wintypes.LPWSTR)

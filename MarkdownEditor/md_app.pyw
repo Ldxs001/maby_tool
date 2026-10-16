@@ -4,7 +4,8 @@
 """MDEditor 内嵌窗口应用
 - pywebview 开原生窗口指向本地服务（无浏览器 UI）
 - 自带 WebView2 内核优先（runtime/WebView2），不存在则用系统内核
-- 暴露 py API 供页面直接调用（原生文件/目录对话框、保存、粘贴图片、窗口控制）
+- 暴露 py API 供页面直接调用（原生目录/保存对话框选路径、常用目录、窗口控制；
+  写盘一律由页面走服务端路由——桥不落盘，SSOT 单一实现）
 用法：pythonw md_app.pyw [要打开的 .md 路径]
 """
 import io
@@ -124,47 +125,10 @@ class Api:
             log("pick_folder err: %s" % e)
         return ""
 
-    def pick_open(self):
-        """打开 .md 文件：返回 {path, content}"""
-        try:
-            import webview
-            res = self.window.create_file_dialog(
-                webview.OPEN_DIALOG, allow_multiple=False,
-                file_types=("Markdown (*.md;*.markdown;*.txt)", "All files (*.*)"))
-            if not res:
-                return None
-            path = res[0] if isinstance(res, (list, tuple)) else res
-            content = io.open(path, encoding="utf-8", errors="replace").read()
-            return {"path": path, "content": content}
-        except Exception as e:
-            log("pick_open err: %s" % e)
-            return None
-
-    def _materialize(self, doc_path, content):
-        try:
-            from md_assets import materialize_images
-            new, saved = materialize_images(doc_path, content)
-            log("materialized %d image(s): %s" % (len(saved), saved))
-            return new, saved
-        except Exception as e:
-            log("materialize err: %s" % e)
-            return content, []
-
-    def read_file(self, path):
-        try:
-            return {"path": path, "content": io.open(path, encoding="utf-8", errors="replace").read()}
-        except Exception as e:
-            return {"error": str(e)}
-
-    def save_file(self, path, content):
-        try:
-            content, added = self._materialize(path, content)
-            io.open(path, "w", encoding="utf-8", newline="").write(content)
-            return {"ok": True, "path": path, "images": added}
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
-
-    def save_as(self, default_name, content, last_dir=""):
+    def pick_save_path(self, default_name="", last_dir=""):
+        """另存为：只弹原生保存对话框选路径，写盘由页面统一走服务端
+        /api/save-as（SSOT——物化/契约改写/回传只在服务端一份实现）。
+        返回完整路径；取消返回空串。缺后缀补 .md，已带 .md/.smd 尊重用户。"""
         try:
             import webview
             res = self.window.create_file_dialog(
@@ -172,39 +136,17 @@ class Api:
                 directory=last_dir if last_dir and os.path.isdir(last_dir) else "",
                 save_filename=default_name or "未命名.md")
             if not res:
-                return {"ok": False, "cancelled": True}
+                return ""
             path = res if isinstance(res, str) else (res[0] if res else "")
             if not path:
-                return {"ok": False, "cancelled": True}
-            if not path.lower().endswith(".md"):
+                return ""
+            low = path.lower()
+            if not (low.endswith(".md") or low.endswith(".smd")):
                 path += ".md"
-            content, added = self._materialize(path, content)
-            io.open(path, "w", encoding="utf-8", newline="").write(content)
-            return {"ok": True, "path": path, "images": added}
+            return path
         except Exception as e:
-            log("save_as err: %s" % e)
-            return {"ok": False, "error": str(e)}
-
-    def paste_image(self, doc_path, data_url):
-        try:
-            import base64
-            if not doc_path:
-                return {"ok": False, "error": "文档尚未保存"}
-            head, _, b64 = data_url.partition(",")
-            ext = ".png"
-            for k, v in (("jpeg", ".jpg"), ("webp", ".webp"), ("gif", ".gif")):
-                if k in head:
-                    ext = v
-            stem = os.path.splitext(os.path.basename(doc_path))[0]
-            assets = os.path.join(os.path.dirname(doc_path), stem + ".assets")
-            os.makedirs(assets, exist_ok=True)
-            fname = "%s_%s%s" % (time.strftime("%Y%m%d_%H%M%S"),
-                                 str(int(time.time() * 1000))[-4:], ext)
-            with open(os.path.join(assets, fname), "wb") as f:
-                f.write(base64.b64decode(b64))
-            return {"ok": True, "rel": "%s.assets/%s" % (stem, fname)}
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
+            log("pick_save_path err: %s" % e)
+            return ""
 
     def common_dirs(self):
         home = os.path.expanduser("~")

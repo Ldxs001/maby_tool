@@ -29,7 +29,36 @@ import html as html_module
 PORT = 18765
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 36  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 39  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+
+# .smd 自包含文档格式（v1.2.0）；导入失败落错误日志，相关路由返回明确错误而非静默
+try:
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    import _smd
+except Exception as _e:  # embedded Python 下兜底，与 md_assets 同模式
+    _smd = None
+    try:
+        os.makedirs(os.path.join(HERE, "runtime"), exist_ok=True)
+        with io.open(os.path.join(HERE, "runtime", "_smd.err"), "w", encoding="utf-8") as _f:
+            _f.write(repr(_e))
+    except Exception:
+        pass
+
+
+def _rewrite_assets_ref(text, old, new):
+    """把文档内 "old/..." 资源引用改写为 "new/..."（.smd 打包/导出的路径契约换算）。
+
+    old/new 均为不含尾斜杠的目录引用，如 "我的文档.assets"（磁盘契约）或
+    "assets"（.smd 包内契约）。左边界断言 (?<![\\w\\-.]) 防止误伤更长名字的
+    尾段（如 "xA.assets" 不会被 "A.assets" 命中，"Xassets/" 不会被 "assets" 命中）。
+    返回 (新文本, 替换次数)。
+    """
+    if not text or not old or old == new:
+        return text, 0
+    pat = re.compile(r"(?<![\w\-.])" + re.escape(old) + r"/")
+    out, n = pat.subn(new + "/", text)
+    return out, n
 
 
 class ReuseTCPServer(socketserver.TCPServer):
@@ -175,6 +204,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             p = q.get("path", [""])[0]
             if not p:
                 self._send(400, json.dumps({"ok": False, "error": "missing path"}, ensure_ascii=False))
+                return
+            if _smd is not None and _smd.is_smd(p):
+                # .smd 自包含文档：解包（幂等）后返回 doc.md 内容 + 工作目录，
+                # 前端以 base 为图片基址（assets/ 引用经 /img 代理指向解包目录）
+                try:
+                    base = _smd.base_dir_for(p)
+                    with open(os.path.join(base, _smd.DOC_NAME), "r", encoding="utf-8") as f:
+                        content = f.read()
+                    _LAST_DOC_DIR[0] = base
+                    self._send(200, json.dumps({"ok": True, "smd": True, "base": base,
+                                                "content": content}, ensure_ascii=False),
+                               "application/json; charset=utf-8")
+                except Exception as e:
+                    self._send(500, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
                 return
             try:
                 _LAST_DOC_DIR[0] = os.path.dirname(p)
@@ -326,13 +369,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not p:
                     self._send(400, json.dumps({"ok": False, "error": "missing path"}, ensure_ascii=False))
                     return
+                if _smd is not None and _smd.is_smd(p):
+                    # .smd：正文写入解包目录 doc.md，增量追加进包（append 模式，
+                    # 仅变化 entry；阈值触发时自动全量整理）。写前物化：手写的
+                    # data URI / blob / 本机绝对路径中真实存在的图收进包内
+                    # assets/，引用统一为 assets/ 契约；save_from_dir 按目录
+                    # diff 自动追加新图。响应回传新正文供前端同步编辑区
+                    base = _smd.base_dir_for(p)
+                    if materialize_into:
+                        content, _mi = materialize_into(
+                            content, os.path.join(base, "assets"), "assets")
+                    # newline=""：禁用换行翻译，磁盘=包内=响应字节一致
+                    # （文本模式会把 LF 翻成 CRLF，save_from_dir 按原始字节进包）
+                    with open(os.path.join(base, _smd.DOC_NAME), "w", encoding="utf-8",
+                              newline="") as f:
+                        f.write(content)
+                    _n, _compacted = _smd.save_from_dir(p, base)
+                    _LAST_DOC_DIR[0] = base
+                    self._send(200, json.dumps({"ok": True, "smd": True, "base": base,
+                                                "content": content,
+                                                "images": []}, ensure_ascii=False))
+                    return
                 added = []
                 if materialize_images:
                     content, added = materialize_images(p, content)
                 with open(p, "w", encoding="utf-8") as f:
                     f.write(content)
                 _LAST_DOC_DIR[0] = os.path.dirname(p)
-                self._send(200, json.dumps({"ok": True,
+                self._send(200, json.dumps({"ok": True, "content": content,
                                             "images": added}, ensure_ascii=False))
             except Exception as e:
                 self._send(500, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
@@ -348,10 +412,75 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._send(400, json.dumps({"ok": False,
                         "error": "目录不存在"}, ensure_ascii=False))
                     return
-                if not name.lower().endswith(".md"):
+                to_smd = _smd is not None and name.lower().endswith(".smd")
+                if not to_smd and not name.lower().endswith(".md"):
                     name += ".md"
                 path = os.path.join(d, name)
+                if to_smd:
+                    # 另存为 .smd：正文进 doc.md；资产三级来源——
+                    # ① base/assets（.smd 会话，引用已是包内 assets/ 契约，整目录跟随）
+                    # ② src 同目录 <stem>.assets（普通文档，磁盘契约），整目录跟随
+                    #    后把 "<stem>.assets/" 引用统一改写为 "assets/"
+                    # ③ materialize_into：手写 data URI / blob / 本机绝对路径中
+                    #    真实存在的图当场收进包内 assets/（不存在的原样保留，破图可见）
+                    # 响应回传改写后正文给前端同步编辑区（否则下次 Ctrl+S 把旧引用写回包）
+                    stage = _smd.base_dir_for(path) if os.path.isfile(path) else \
+                        os.path.join(_smd._tmp_root(),
+                                     hashlib.md5(os.path.abspath(path).lower().encode("utf-8")).hexdigest()[:16])
+                    os.makedirs(stage, exist_ok=True)
+                    src = (obj.get("src") or "").strip()
+                    base = (obj.get("base") or "").strip()
+                    src_assets = None
+                    cand = None
+                    if base and os.path.isdir(os.path.join(base, "assets")):
+                        src_assets = os.path.join(base, "assets")
+                    elif src and os.path.isfile(src):
+                        cand = os.path.join(os.path.dirname(src),
+                                            os.path.splitext(os.path.basename(src))[0] + ".assets")
+                        if os.path.isdir(cand):
+                            src_assets = cand
+                        else:
+                            cand = None
+                    if materialize_into:
+                        content, _mi = materialize_into(
+                            content, os.path.join(stage, "assets"), "assets")
+                    dst_assets = os.path.join(stage, "assets")
+                    if src_assets and os.path.normpath(src_assets) != os.path.normpath(dst_assets):
+                        os.makedirs(dst_assets, exist_ok=True)
+                        import shutil as _sh
+                        for fn in os.listdir(src_assets):
+                            fp = os.path.join(src_assets, fn)
+                            if os.path.isfile(fp):
+                                _sh.copy2(fp, os.path.join(dst_assets, fn))
+                    if cand:
+                        content, _nr = _rewrite_assets_ref(
+                            content, os.path.basename(cand), "assets")
+                    # newline=""：禁用换行翻译，磁盘=包内=响应字节一致
+                    with open(os.path.join(stage, _smd.DOC_NAME), "w", encoding="utf-8",
+                              newline="") as f:
+                        f.write(content)
+                    _smd.pack_from_dir(path, os.path.join(stage, _smd.DOC_NAME), dst_assets)
+                    _LAST_DOC_DIR[0] = stage
+                    self._send(200, json.dumps({"ok": True, "path": path, "smd": True,
+                                                "base": stage, "content": content,
+                                                "images": []},
+                                               ensure_ascii=False))
+                    return
                 added = []
+                base = (obj.get("base") or "").strip()
+                if _smd is not None and base and os.path.isdir(os.path.join(base, "assets")):
+                    # .smd 会话导出普通 .md：包内 "assets/" 契约反向换算为磁盘
+                    # "<stem>.assets/" 契约，图片一并落盘到目标目录
+                    newstem = os.path.splitext(name)[0]
+                    dst_assets = os.path.join(d, newstem + ".assets")
+                    os.makedirs(dst_assets, exist_ok=True)
+                    import shutil as _sh
+                    for fn in os.listdir(os.path.join(base, "assets")):
+                        fp = os.path.join(base, "assets", fn)
+                        if os.path.isfile(fp):
+                            _sh.copy2(fp, os.path.join(dst_assets, fn))
+                    content, _nr = _rewrite_assets_ref(content, "assets",
+                                                       newstem + ".assets")
                 if materialize_images:
                     content, added = materialize_images(path, content)
                 else:
@@ -360,7 +489,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     f.write(content)
                 _LAST_DOC_DIR[0] = d
                 self._send(200, json.dumps({"ok": True, "path": path,
-                                            "images": added},
+                                            "content": content, "images": added},
                                            ensure_ascii=False))
             except Exception as e:
                 self._send(500, json.dumps({"ok": False, "error": str(e)},
@@ -381,6 +510,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if "jpeg" in head: ext = ".jpg"
                 elif "webp" in head: ext = ".webp"
                 elif "gif" in head: ext = ".gif"
+                if _smd is not None and _smd.is_smd(doc_path):
+                    # .smd：图片落解包工作目录的 assets/，引用为 assets/<fname>
+                    base = _smd.base_dir_for(doc_path)
+                    assets = os.path.join(base, "assets")
+                    os.makedirs(assets, exist_ok=True)
+                    fname = "%s_%s%s" % (time.strftime("%Y%m%d_%H%M%S"),
+                                         str(int(time.time() * 1000))[-4:], ext)
+                    with open(os.path.join(assets, fname), "wb") as f:
+                        f.write(base64.b64decode(b64))
+                    self._send(200, json.dumps({"ok": True,
+                        "rel": "assets/%s" % fname}, ensure_ascii=False))
+                    return
                 stem = os.path.splitext(os.path.basename(doc_path))[0]
                 assets = os.path.join(os.path.dirname(doc_path), stem + ".assets")
                 os.makedirs(assets, exist_ok=True)
@@ -913,6 +1054,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 try:
     from md_assets import materialize_images
+    from md_assets import materialize_into
 except Exception:
     import traceback as _tb
     try:
@@ -922,6 +1064,7 @@ except Exception:
     except Exception:
         pass
     materialize_images = None
+    materialize_into = None
 
 
 _SHELL_FOLDERS_KEY = ("Software\\Microsoft\\Windows\\CurrentVersion\\"
@@ -1049,6 +1192,11 @@ def _idle_watchdog(grace=None, check=0.5):
                         % time.strftime("%H:%M:%S"))
         except Exception:
             pass
+        if _smd is not None:
+            try:
+                _smd.clear_tmp()   # 会话结束，清 .smd 解包缓存
+            except Exception:
+                pass
         os._exit(0)
 
 
@@ -1064,6 +1212,11 @@ def _auto_stop_enabled():
 
 
 def main():
+    if _smd is not None:
+        try:
+            _smd.clear_tmp()   # 启动清掉上次会话的 .smd 解包缓存（数据以 .smd 为准）
+        except Exception:
+            pass
     srv = Server()
     srv.start()
     atexit.register(srv.stop)
