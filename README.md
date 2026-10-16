@@ -17,9 +17,11 @@
 
 ## 演示
 
-[![MDEditor 演示视频](https://gitee.com/wUwproject/maby_tool/releases/download/v1.2.0/md_cover.png)](https://github.com/Ldxs001/maby_tool/releases/tag/v1.2.0)
+https://github.com/user-attachments/assets/148ee88c-5c17-4dc2-a6ea-a867624635cb
 
-*▲ 演示视频（51 秒）：GitHub 端点封面进 [Release 页在线播放](https://github.com/Ldxs001/maby_tool/releases/tag/v1.2.0)；Gitee 端 [直接下载](https://gitee.com/wUwproject/maby_tool/releases/download/v1.2.0/MDEditor-intro.mp4)*
+*▲ 演示视频（51 秒）：GitHub 端上方为内嵌播放器；若未加载，[点此到 Release 页播放](https://github.com/Ldxs001/maby_tool/releases/tag/v1.2.0)*
+
+▶ **备用观看**：[GitHub（Release 页在线播放）](https://github.com/Ldxs001/maby_tool/releases/tag/v1.2.0) ｜ [Gitee（直接下载）](https://gitee.com/wUwproject/maby_tool/releases/download/v1.2.0/MDEditor-intro.mp4)
 
 ---
 
@@ -30,7 +32,8 @@ maby_tool/
 └── MarkdownEditor/
     ├── markdown-editor.html    # 编辑器单页（HTML/CSS/JS 全内联）
     ├── md_server.py            # 本地 HTTP 后端
-    ├── md_launch.pyw / md_app.pyw / md_assets.py
+    ├── md_launch.pyw / md_app.pyw / md_assets.py / _smd.py
+    ├── CHANGELOG.md            # 更新日志
     ├── install.cmd / uninstall.cmd / desktop-shortcut.cmd
     ├── katex/                  # 公式渲染（KaTeX 发行版）
     ├── pagedjs/                # 分页排版（Paged.js）
