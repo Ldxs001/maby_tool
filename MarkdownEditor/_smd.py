@@ -16,6 +16,7 @@
 """
 import os
 import io
+import re
 import json
 import time
 import hashlib
@@ -27,6 +28,14 @@ FORMAT_VERSION = 1
 DOC_NAME = "doc.md"
 ASSETS_DIR = "assets"
 META_NAME = "meta.json"
+
+# 包内资产引用（格式契约：包内引用恒为 assets/<文件名>，打包/另存为时已改写）
+_ASSET_REF_RE = re.compile(r'assets/([^\s"\')\]]+)')
+
+
+def referenced_assets(doc_text):
+    """doc.md 中引用到的资产文件名集合（保存清理/打包过滤共用口径）。"""
+    return set(_ASSET_REF_RE.findall(doc_text))
 
 # 阈值整理触发条件：死空间占比与文件大小双门槛
 COMPACT_DEAD_RATIO = 0.3
@@ -105,13 +114,21 @@ def _write_sig(smd_path, sig_file):
 
 
 def pack_from_dir(smd_path, doc_src, assets_src=None):
-    """全量打包（新建/另存为/整理用）。临时文件 + os.replace 原子替换。"""
+    """全量打包（新建/另存为/整理用）。临时文件 + os.replace 原子替换。
+
+    打包过滤：assets_src 中未被 doc.md 引用的文件不入包（保存清理纪律——
+    包内资产与引用严格对齐；历史旧包的孤儿资产借此在全量重建时移除）。
+    """
     tmp = "%s.tmp%d" % (smd_path, int(time.time() * 1000))
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
         with io.open(doc_src, "r", encoding="utf-8") as f:
-            z.writestr(DOC_NAME, f.read())
+            doc_text = f.read()
+        z.writestr(DOC_NAME, doc_text)
         if assets_src and os.path.isdir(assets_src):
+            refs = referenced_assets(doc_text)
             for fn in sorted(os.listdir(assets_src)):
+                if fn not in refs:
+                    continue
                 fp = os.path.join(assets_src, fn)
                 if os.path.isfile(fp):
                     z.write(fp, ASSETS_DIR + "/" + fn)
@@ -199,16 +216,34 @@ def save_from_dir(smd_path, base_dir):
         live = _live_sizes(smd_path)
     except Exception:
         live = {}
+    with io.open(doc, "r", encoding="utf-8") as f:
+        doc_text = f.read()
     to_add = [(DOC_NAME, doc)]
     adir = os.path.join(base_dir, ASSETS_DIR)
+    orphans = 0
     if os.path.isdir(adir):
+        refs = referenced_assets(doc_text)
         for fn in sorted(os.listdir(adir)):
             fp = os.path.join(adir, fn)
             if not os.path.isfile(fp):
                 continue
+            if fn not in refs:
+                # 保存清理纪律：doc.md 未引用的资产从解包目录删除；
+                # 删除失败保守留存（不阻断保存）
+                try:
+                    os.remove(fp)
+                    orphans += 1
+                except OSError:
+                    pass
+                continue
             nm = ASSETS_DIR + "/" + fn
             if nm not in live or os.path.getsize(fp) != live[nm]:
                 to_add.append((nm, fp))
+    if orphans:
+        # 包内旧 entry 是追加式的，增量保存清不掉——孤儿已出目录，
+        # 全量重建才能把它们从包内移除
+        compact(smd_path, base_dir)
+        return len(to_add), True
     if needs_compact(smd_path, base_dir):
         compact(smd_path, base_dir)
         return len(to_add), True

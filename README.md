@@ -11,7 +11,7 @@
 
 | 工具名 | 版本 | 描述 |
 |--------|------|------|
-| `MarkdownEditor` | v1.2.0 | 本地 Markdown 编辑器：单页编辑 + 实时预览（KaTeX 公式、图片三写法、分块增量渲染）、排版面板（字体/字号/对齐/公式/表格样式）、分页导出（Paged.js，纸张/页边距/页码/自动目录）、自包含文档 `.smd`（正文+图片单文件 ZIP 容器，跨容器资产双向换算）、本地后端（文件读写、图片代理、字体枚举、版本自愈）。内嵌便携 Python 运行时，双击即用。 |
+| `MarkdownEditor` | v1.3.0 | 本地 Markdown 编辑器：单页编辑 + 实时预览（KaTeX 公式、图片三写法、分块增量渲染）、排版面板（字体/字号/对齐/公式/表格样式）、分页导出（Paged.js，纸张/页边距/页码/自动目录）、自包含文档 `.smd`（正文+图片单文件 ZIP 容器，跨容器资产双向换算）、本地后端（文件读写、图片代理、字体枚举、版本自愈）。内嵌便携 Python 运行时，双击即用。 |
 
 ---
 
@@ -19,9 +19,9 @@
 
 https://github.com/user-attachments/assets/148ee88c-5c17-4dc2-a6ea-a867624635cb
 
-*▲ 演示视频（51 秒）：GitHub 端上方为内嵌播放器；若未加载，[点此到 Release 页播放](https://github.com/Ldxs001/maby_tool/releases/tag/v1.2.0)*
+*▲ 演示视频（51 秒）：GitHub 端上方为内嵌播放器；若未加载，[点此到 Release 页播放](https://github.com/Ldxs001/maby_tool/releases/tag/v1.3.0)*
 
-▶ **备用观看**：[GitHub（Release 页在线播放）](https://github.com/Ldxs001/maby_tool/releases/tag/v1.2.0) ｜ [Gitee（直接下载）](https://gitee.com/wUwproject/maby_tool/releases/download/v1.2.0/MDEditor-intro.mp4)
+▶ **备用观看**：[GitHub（Release 页在线播放）](https://github.com/Ldxs001/maby_tool/releases/tag/v1.3.0) ｜ [Gitee（直接下载）](https://gitee.com/wUwproject/maby_tool/releases/download/v1.3.0/MDEditor-intro.mp4)
 
 ---
 

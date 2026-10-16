@@ -29,7 +29,7 @@ import html as html_module
 PORT = 18765
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 39  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 44  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 # .smd 自包含文档格式（v1.2.0）；导入失败落错误日志，相关路由返回明确错误而非静默
 try:
@@ -882,14 +882,157 @@ def build_tray(server):
 PAGED_PAGE_BOX = {"bc": "@bottom-center", "br": "@bottom-right", "bl": "@bottom-left",
                   "tc": "@top-center", "tr": "@top-right"}
 
+# 命名纸张的纵向高度（mm，portrait）——用于推导图片版面 max-height
+PAPER_H_MM = {"A0": 1189, "A1": 841, "A2": 594, "A3": 420, "A4": 297, "A5": 210,
+              "B0": 1414, "B1": 1000, "B2": 707, "B3": 500, "B4": 353, "B5": 250,
+              "Letter": 279.4, "Legal": 355.6, "Ledger": 431.8}
+PAPER_W_MM = {"A0": 841, "A1": 594, "A2": 420, "A3": 297, "A4": 210, "A5": 148,
+              "B0": 1000, "B1": 707, "B2": 500, "B3": 353, "B4": 250, "B5": 176,
+              "Letter": 215.9, "Legal": 215.9, "Ledger": 279.4}
+
+# 分页导出基础正文样式（镜像编辑器预览 .markdown-body；固定色值——
+# 导出文档里 CSS 变量未定义，不能直接搬预览样式；排版规范借鉴
+# Cogito_Scribit STYLE_GUIDE 一章（表格）与十一章（版面缩放纪律））：
+#   * border-box / pre pre-wrap+anywhere / code anywhere（十一章 print 硬约束）
+#   * 表格 width:100% + table-layout:auto + th/td 细边框 keep-all+anywhere（1.1）
+#   * thead 跨页自动重复表头 + tr/li break-inside:avoid（表格切分行不腰斩）
+#   * 引用编号索引表（表头=编号|引用|出处）ref-table 固定列宽 8%/47%/45%（1.2）
+PAGED_BASE_CSS = """
+*{box-sizing:border-box;}
+.markdown-body{color:#222;line-height:1.7;word-wrap:break-word;overflow-wrap:anywhere;}
+.markdown-body h1,.markdown-body h2,.markdown-body h3,.markdown-body h4,.markdown-body h5,.markdown-body h6{line-height:1.35;margin:1.4em 0 .6em;font-weight:650;}
+.markdown-body h1{font-size:1.9em;border-bottom:1px solid #ddd;padding-bottom:.3em;}
+.markdown-body h2{font-size:1.5em;border-bottom:1px solid #ddd;padding-bottom:.25em;}
+.markdown-body h3{font-size:1.25em;}
+.markdown-body h4{font-size:1.08em;}
+.markdown-body p{margin:.85em 0;}
+.markdown-body a{color:#4a6cf7;text-decoration:none;}
+.markdown-body strong{font-weight:700;}
+.markdown-body em{font-style:italic;}
+.markdown-body del{opacity:.6;}
+.markdown-body code{font-family:Consolas,monospace;font-size:.88em;background:#f4f4f4;padding:.15em .4em;border-radius:5px;overflow-wrap:anywhere;}
+.markdown-body pre{background:#f4f4f4;border:1px solid #ddd;border-radius:6px;padding:14px 16px;margin:.9em 0;white-space:pre-wrap !important;overflow-wrap:anywhere !important;}
+.markdown-body pre code{background:none;padding:0;font-size:.85em;line-height:1.6;}
+.markdown-body blockquote{margin:.9em 0;padding:.4em 1em;border-left:3px solid #4a6cf7;background:#f5f7ff;border-radius:0 6px 6px 0;}
+.markdown-body blockquote p{margin:.4em 0;}
+.markdown-body ul,.markdown-body ol{margin:.7em 0;padding-left:1.6em;}
+.markdown-body li{margin:.3em 0;break-inside:avoid;}
+.markdown-body li.task{list-style:none;margin-left:-1.4em;}
+.markdown-body li.task input{margin-right:.5em;vertical-align:middle;}
+.markdown-body hr{border:none;border-top:1px solid #ddd;margin:1.6em 0;}
+.markdown-body table{border-collapse:collapse;margin:1em 0;width:100%;table-layout:auto;font-size:.93em;break-inside:auto;}
+.markdown-body thead{display:table-header-group;}
+.markdown-body tr{break-inside:avoid;}
+.markdown-body th,.markdown-body td{border:1px solid #bbb;padding:7px 12px;text-align:left;word-break:keep-all;overflow-wrap:anywhere;}
+.markdown-body th{background:#f0f2f6;font-weight:650;}
+.markdown-body img{display:block;margin:0 auto;max-width:100%;max-height:__IMGMAXH__mm;break-inside:avoid;}
+.markdown-body p:has(>img){margin:0;}
+.markdown-body table.ref-table{table-layout:fixed;}
+.markdown-body table.ref-table th:nth-child(1),.markdown-body table.ref-table td:nth-child(1){width:8%;}
+.markdown-body table.ref-table th:nth-child(2),.markdown-body table.ref-table td:nth-child(2){width:47%;}
+.markdown-body table.ref-table th:nth-child(3),.markdown-body table.ref-table td:nth-child(3){width:45%;}
+"""
+
+# ---------- 超高长图切片（导出渲染期产物，源资产 SSOT 不动） ----------
+# 规则：渲染高 ≤ 版心的图整图原子一页；高 > 版心的长截图按小条带竖切
+# 续排（像表格跨页一样流入剩余空间），条带渲染高 = 版心高/3（3 条正好满页）。
+# 切点吸附静默行（截图里的空白行/段间距），不切断文字行、不重叠不遗漏。
+# 切片落 HERE/_slice/<sha1>/，同字节图幂等复用；PIL 缺失或读图失败原样保留（fail-closed）。
+_SLICE_SNAP_MM = 8.0  # 切点吸附搜索窗口（半宽）
+
+
+def _slice_tall_images(body_html, icb_w_mm, img_maxh_mm):
+    img_re = re.compile(r'<img[^>]*?src="(/img\?path=[^"]+)"[^>]*?>')
+
+    def _quiet_cuts(bright, h, nominal, win):
+        # 在 nominal±win 内找亮度最平稳处下刀（空白行/段间隙）；找不到用原切点
+        lo, hi = max(1, nominal - win), min(h - 1, nominal + win)
+        best, best_d = nominal, None
+        for i in range(lo, hi + 1):
+            d = abs(bright[i] - bright[i - 1])
+            if best_d is None or d < best_d:
+                best, best_d = i, d
+        return best
+
+    def _repl(m):
+        try:
+            from PIL import Image
+        except ImportError:
+            return m.group(0)
+        path = urllib.parse.unquote(m.group(1).split("path=", 1)[1])
+        if not os.path.isfile(path):
+            return m.group(0)
+        try:
+            im = Image.open(path)
+            im.load()
+        except Exception:
+            return m.group(0)
+        w, h = im.size
+        if w <= 1 or h <= 1:
+            return m.group(0)
+        # 满宽渲染高不超版心 → 整图原子，不切
+        if icb_w_mm * h / w <= img_maxh_mm:
+            return m.group(0)
+        import hashlib
+        with open(path, "rb") as f:
+            digest = hashlib.sha1(f.read()).hexdigest()[:12]
+        # 条带像素高：渲染高 = 版心高/6（细条带续排，页面剩余留白上限 = 一条高）。
+        # 1/3 版心实测留白过大（吸附后 3 条塞不进一页即剩 ~80mm 空白），故取 1/6
+        strip_px = max(1, int(round(max(20.0, img_maxh_mm / 6.0) / icb_w_mm * w)))
+        # 缓存键 = 内容 sha1 + 条带几何（strip_px）——几何参数变更时旧切片不复用
+        digest = "%s-%d" % (digest, strip_px)
+        n = (h + strip_px - 1) // strip_px
+        gap = max(1, strip_px // 4)
+        # 静默行亮度剖面：宽度压成 1px 即每行平均亮度（BILINEAR 均值）
+        bright = list(im.convert("L").resize((1, h), Image.BILINEAR).getdata())
+        win = max(1, int(round(_SLICE_SNAP_MM / icb_w_mm * w)))
+        cuts = [0]
+        for k in range(1, n):
+            c = _quiet_cuts(bright, h, k * strip_px, win)
+            if c <= cuts[-1] + gap:
+                c = cuts[-1] + gap
+            if c >= h - gap:
+                break  # 剩余不足小条，并入末条
+            cuts.append(c)
+        cuts.append(h)
+        out_dir = os.path.join(HERE, "_slice", digest)
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+        except OSError:
+            return m.group(0)
+        am = re.search(r'alt="([^"]*)"', m.group(0))
+        alt = am.group(1) if am else ""
+        tags = []
+        for i in range(len(cuts) - 1):
+            fp = os.path.join(out_dir, "strip-%02d.png" % (i + 1))
+            if not os.path.exists(fp):  # 幂等：已切过的直接复用
+                try:
+                    im.crop((0, cuts[i], w, cuts[i + 1])).save(fp, "PNG")
+                except Exception:
+                    return m.group(0)
+            tags.append('<img src="/static/_slice/%s/strip-%02d.png" alt="%s">'
+                        % (digest, i + 1, alt))
+        return "".join(tags)
+
+    return img_re.sub(_repl, body_html)
+
 PAGED_FILLER_TMPL = """
 (function(){
   var tpl = __TPL__;
   var sel = __SEL__;
   var size = __SIZE__;
-  var lastN = -1, stable = 0;
-  var mo = new MutationObserver(function(){ lastN = -1; });
+  var lastN = -1, stable = 0, done = false;
+  var mo = new MutationObserver(function(){ if(!done) lastN = -1; });
   mo.observe(document.body, {childList:true, subtree:true});
+  /* 纯目录页判定：页内有目录且无任何正文标题锚——目录不计入页码（6.4） */
+  function tocOnly(pg){
+    return !!(pg.querySelector('.md-toc-wrap') && !pg.querySelector('[id^="md-h-"]'));
+  }
+  function pageOf(el){
+    var n = el;
+    while(n && !(n.classList && n.classList.contains('pagedjs_page'))) n = n.parentNode;
+    return n;
+  }
   var iv = setInterval(function(){
     var pgs = document.querySelectorAll('.pagedjs_page');
     var n = pgs.length;
@@ -897,10 +1040,40 @@ PAGED_FILLER_TMPL = """
     if(n !== lastN){ lastN = n; stable = 0; return; }
     stable++;
     if(stable < 3) return;
-    clearInterval(iv); mo.disconnect();
-    for(var i=0;i<n;i++){
-      var el = pgs[i].querySelector(sel);
-      if(el){ el.textContent = tpl.replace('{p}', i+1).replace('{P}', n); el.style.fontSize = size + 'pt'; }
+    clearInterval(iv); mo.disconnect(); done = true;
+    /* 页码映射：纯目录页不编号；正文页码 = 物理序 - 已跳过的目录页数 */
+    var skip = [], shown = [], P = 0, c = 0, i;
+    for(i=0;i<n;i++){ skip[i] = tocOnly(pgs[i]); if(!skip[i]) P++; }
+    for(i=0;i<n;i++){ shown[i] = skip[i] ? 0 : ++c; }
+    for(i=0;i<n;i++){
+      if(skip[i]) continue;
+      /* 外侧奇右偶左（6.4）；固定位置模式 odd/even 同盒 */
+      var boxSel = (shown[i] % 2 === 1) ? sel.odd : sel.even;
+      var el = pgs[i].querySelector(boxSel);
+      if(el){
+        el.textContent = tpl.replace('{p}', shown[i]).replace('{P}', P);
+        el.style.fontSize = size + 'pt';
+        el.style.color = '#666';
+      }
+    }
+    /* 目录条目页码：按标题锚真实落页的显示页码回填（口径与页脚一致），
+       点线引导 + 页码右对齐列（6.4 目录规范） */
+    var links = document.querySelectorAll('.md-toc a[href^="#md-h-"]');
+    for(i=0;i<links.length;i++){
+      var href = links[i].getAttribute('href') || '';
+      var dst = document.getElementById(decodeURIComponent(href.slice(1)));
+      if(!dst) continue;
+      var dpg = pageOf(dst);
+      var idx = -1;
+      for(var k=0;k<n;k++){ if(pgs[k] === dpg){ idx = k; break; } }
+      if(idx < 0 || skip[idx]) continue;
+      var dots = document.createElement('span');
+      dots.className = 'toc-dots';
+      var sp = document.createElement('span');
+      sp.className = 'md-toc-pg';
+      sp.textContent = shown[idx];
+      links[i].appendChild(dots);
+      links[i].appendChild(sp);
     }
   }, 300);
 })();
@@ -954,22 +1127,62 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
     pw, ph = page_cfg.get("pw", ""), page_cfg.get("ph", "")
     if paper == "custom" and pw and ph:
         size_str = "%smm %smm" % (pw, ph)
+        try:
+            paper_h = float(ph)
+        except (TypeError, ValueError):
+            paper_h = PAPER_H_MM["A4"]
     else:
         size_str = paper
+        paper_h = PAPER_H_MM.get(paper, 297)
     mt = page_cfg.get("mt", 25)
     mr = page_cfg.get("mr", 18)
     mb = page_cfg.get("mb", 25)
     ml = page_cfg.get("ml", 18)
+    # 图片版面预算：max-height = 纸高 − 上下边距 − 2mm 安全余量。
+    # 1mm 余量曾引爆长截图事故：图 246mm + 打印版 p/img 自身边距 > 247mm 版心，
+    # 图在任一页都放不下 → Paged.js 反复推页产出连续空白页、图被溢出裁掉。
+    # 现打印版 img margin=0 且 p:has(>img) margin=0，2mm 余量兜底舍入误差。
+    # 浏览器对 img 的 max-width/max-height 约束天然保持宽高比——
+    # 宽超按宽缩、高超按高缩，图片不超出版面。
+    try:
+        img_maxh = max(20.0, float(paper_h) - float(mt) - float(mb) - 2.0)
+    except (TypeError, ValueError):
+        img_maxh = 245.0
+    # 版心宽（切片条带的渲染宽度基准）
+    try:
+        paper_w = (float(pw) if (paper == "custom" and pw)
+                   else float(PAPER_W_MM.get(paper, 210.0)))
+        icb_w = max(40.0, paper_w - float(mr) - float(ml))
+    except (TypeError, ValueError):
+        icb_w = 174.0
     pn = page_cfg.get("pn", {}) or {}
     toc_cfg = page_cfg.get("toc", {}) or {}
 
-    # @page：纸张 + 边距 + 页码 margin box（占位空白，正文文本由填充脚本写入）
+    # @page：纸张 + 边距 + 页码 margin box（占位空白，正文文本由填充脚本写入；
+    # 页码形态照抄书册规范 STRUCTURE_GUIDE 6.4：默认外侧奇右偶左、纯数字、9pt 灰）
     page_css = "@page{size:%s;margin:%smm %smm %smm %smm;" % (size_str, mt, mr, mb, ml)
     if pn.get("on") == "on":
-        box = PAGED_PAGE_BOX.get(pn.get("pos", "bc"), "@bottom-center")
-        page_css += '%s{content:" ";font-size:%spt;}' % (box, pn.get("size", 9))
+        sz = pn.get("size", 9)
+        if pn.get("pos", "outer") == "outer":
+            page_css += ('@bottom-right{content:" ";font-size:%spt;}'
+                         '@bottom-left{content:" ";font-size:%spt;}' % (sz, sz))
+        else:
+            box = PAGED_PAGE_BOX.get(pn.get("pos"), "@bottom-center")
+            page_css += '%s{content:" ";font-size:%spt;}' % (box, sz)
     page_css += "}"
-    page_css += ".md-toc-wrap{break-after:page;}h1,h2,h3{break-after:avoid;}pre,blockquote{break-inside:avoid;}"
+    # 分页规则（STRUCTURE_GUIDE 6.2 书籍标准，逐条对齐 PRINT_CSS）：
+    # h1 每篇独立起页；小节标题不落页末；段落防孤立行 2/2；
+    # 单行 bullet 1/1（widows 2 会永久推页留白）；hr 禁断但不加 break-before
+    #（与 h2 break-after 形成保护链会整块推页留半页空白，2026-08-28 判例）；
+    # 纵向结构（table/pre）允许内容单元间拆页，横向结构（blockquote）不拆
+    page_css += (
+        ".md-toc-wrap{break-after:page;}"
+        "h1{break-before:page;}"
+        "h2,h3,h4{break-after:avoid;}"
+        "p{orphans:2;widows:2;}li{orphans:1;widows:1;}"
+        "hr{break-inside:avoid;break-after:avoid;}"
+        "table{break-inside:auto;}blockquote{break-inside:avoid;}"
+    )
 
     # TOC + 锚点
     heads = []
@@ -994,6 +1207,19 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
         else:
             body = toc_html + body
 
+    # 引用编号索引表识别（STYLE_GUIDE 1.2）：表头 = 编号|引用|出处 → ref-table 固定列宽
+    body = re.sub(
+        r'<table>(\s*<thead>\s*<tr>\s*<th[^>]*>\s*编号\s*</th>\s*'
+        r'<th[^>]*>\s*引用\s*</th>\s*<th[^>]*>\s*出处\s*</th>)',
+        r'<table class="ref-table">\1', body)
+
+    # 超高长图切片：高 > 版心的图切小条带续排（切点吸附静默行）
+    body = _slice_tall_images(body, icb_w, img_maxh)
+
+    # 基础正文样式（表格边框/图片版面/断行纪律）——此前缺失是表格边框
+    # 在分页导出中消失的根因；置于 ts_css 之前，排版设置的 !important 仍可覆盖
+    base_css = PAGED_BASE_CSS.replace("__IMGMAXH__", ("%.2f" % img_maxh))
+
     # 资源内嵌（全部本地，离线可用）
     katex_css = ""
     kp = os.path.join(HERE, "katex", "katex.min.css")
@@ -1005,11 +1231,18 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
     if os.path.exists(pp):
         paged_js = io.open(pp, encoding="utf-8").read().replace("</script", "<\\/script")
 
-    # 页码填充脚本（Paged.js 分页完成、DOM 稳定后填入；模板/位置/字号由配置注入）
-    sel = ".pagedjs_margin-%s .pagedjs_margin-content" % PAGED_PAGE_BOX.get(
-        pn.get("pos", "bc"), "bottom-center").replace("@", "")
+    # 页码填充脚本（Paged.js 分页完成、DOM 稳定后填入；模板/位置/字号由配置注入。
+    # 外侧模式：奇页右下、偶页左下（书册规范 6.4），sel 传 odd/even 两个选择器）
+    pn_pos = pn.get("pos", "outer")
+    if pn_pos == "outer":
+        sel = {"odd": ".pagedjs_margin-bottom-right .pagedjs_margin-content",
+               "even": ".pagedjs_margin-bottom-left .pagedjs_margin-content"}
+    else:
+        _s = ".pagedjs_margin-%s .pagedjs_margin-content" % PAGED_PAGE_BOX.get(
+            pn_pos, "bottom-center").replace("@", "")
+        sel = {"odd": _s, "even": _s}
     filler_vals = {
-        "__TPL__": json.dumps(pn.get("tpl", "第 {p} 页 / 共 {P} 页"), ensure_ascii=False),
+        "__TPL__": json.dumps(pn.get("tpl", "{p}"), ensure_ascii=False),
         "__SEL__": json.dumps(sel),
         "__SIZE__": json.dumps(str(pn.get("size", 9))),
     }
@@ -1018,13 +1251,17 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
         filler = filler.replace(k, v)
     filler = filler.replace("</script", "<\\/script")
 
+    # 目录版式（STRUCTURE_GUIDE 6.4：点线引导 + 页码右对齐列；
+    # 11.4 几何纪律：页码列统一右缘、点线与页码留间距不重叠）
     toc_css = (
         ".md-toc-title{font-size:1.7em;font-weight:700;text-align:center;margin:0 0 1.4em;}"
-        ".md-toc a{text-decoration:none;color:inherit;}"
         ".md-toc .toc-l1{font-weight:600;margin:.9em 0 .25em;}"
         ".md-toc .toc-l2{padding-left:1.6em;}"
         ".md-toc .toc-l3{padding-left:3.2em;}"
-        ".md-toc a::after{content:'  ' target-counter(attr(href url),page);}"
+        ".md-toc a{display:flex;align-items:baseline;text-decoration:none;color:inherit;padding:.18em 0;}"
+        ".md-toc .toc-dots{flex:1;min-width:1.5em;border-bottom:1px dotted #999;"
+        "margin:0 6px;transform:translateY(-.25em);}"
+        ".md-toc .md-toc-pg{white-space:pre;font-variant-numeric:tabular-nums;}"
     )
 
     m1 = re.search(r"<h1[^>]*>([\s\S]*?)</h1>", body)
@@ -1033,13 +1270,14 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
 
     html = (
         '<!DOCTYPE html>\n<html lang="zh-CN"><head><meta charset="UTF-8"><title>%s</title>'
-        "<style>%s</style><style>%s%s%s</style>"
+        "<style>%s</style><style>%s</style><style>%s%s%s</style>"
         '</head><body class="markdown-body"><div id="paged-content" class="markdown-body">%s</div>'
         "<script>%s</script>"
         "<script>%s</script></body></html>"
     ) % (
         html_module.escape(title),
         page_css,
+        base_css,
         katex_css,
         toc_css,
         ts_css,

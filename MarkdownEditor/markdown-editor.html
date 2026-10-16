@@ -197,11 +197,10 @@
     <button id="btnOpen" class="tb-btn" title="打开 .md 文件">打开</button>
     <button id="btnExportMd" class="tb-btn" title="导出 Markdown">.md</button>
     
-    <button id="btnExportPaged" class="tb-btn" title="导出分页版 HTML（纸张/页码/目录；打开后 Ctrl+P 即得 PDF）">分页</button><button id="btnExportHtml" class="tb-btn" title="导出 HTML">.html</button>
+    <button id="btnExportPaged" class="tb-btn" title="打印：生成分页版 HTML（纸张/页码/目录）并在浏览器打开，Ctrl+P 即可打印或存为 PDF">打印</button><button id="btnExportHtml" class="tb-btn" title="导出 HTML">.html</button>
     <button id="btnTypeset" class="tb-btn" title="排版设置：字体/表格/缩进/自动落盘">排版</button>
     <button id="btnSave" class="tb-btn" title="保存（Ctrl+S）">保存</button>
     <button id="btnSaveAs" class="tb-btn" title="另存为…">另存为</button>
-    <button id="btnPrint" class="tb-btn" title="打印 / 导出 PDF">打印</button>
   </div>
 </header>
 <main id="main">
@@ -267,14 +266,14 @@
       <div class="ts-row"><label>三线表（去竖线，三条横线）</label><input id="tsThree" type="checkbox"></div>
       <div class="ts-row"><label>表头底色</label><input id="tsHeadOn" type="checkbox"><input id="tsHeadColor" type="color" value="#dbe5ff"></div>
       <div class="ts-row"><label>首列底色</label><input id="tsColOn" type="checkbox"><input id="tsColColor" type="color" value="#dbe5ff"></div>
-      <div class="ts-sep"><span>页面（作用于「分页」导出与打印 PDF）</span></div>
+      <div class="ts-sep"><span>页面（作用于「打印」导出）</span></div>
       <div class="ts-row"><label>纸张</label><select id="tsPaper"><option>A4</option><option>A3</option><option>A5</option><option>B5</option><option>B4</option><option>Letter</option><option>Legal</option><option>Ledger</option><option>A0</option><option>A1</option><option>A2</option><option>B0</option><option>B1</option><option>B2</option><option>B3</option><option value="custom">自定义</option></select></div>
       <div class="ts-row" id="tsCustomRow" hidden><label>自定义宽 × 高（mm）</label><input id="tsPw" type="number" min="50" max="3000" step="1" placeholder="宽"><input id="tsPh" type="number" min="50" max="3000" step="1" placeholder="高"></div>
       <div class="ts-row"><label>页边距 上/右/下/左（mm）</label><input id="tsMt" type="number" min="0" max="100" step="0.5" value="25"><input id="tsMr" type="number" min="0" max="100" step="0.5" value="18"><input id="tsMb" type="number" min="0" max="100" step="0.5" value="25"><input id="tsMl" type="number" min="0" max="100" step="0.5" value="18"></div>
-      <div class="ts-sep"><span>页码（分页导出 / 打印 PDF 时渲染）</span></div>
-      <div class="ts-row"><label>页码</label><select id="tsPnOn"><option value="off">无</option><option value="on">显示</option></select><select id="tsPnPos"><option value="bc">底部居中</option><option value="br">底部右侧</option><option value="bl">底部左侧</option><option value="tc">顶部居中</option><option value="tr">顶部右侧</option></select></div>
-      <div class="ts-row"><label>页码模板与字号（{p}=页码，{P}=总页数）</label><input id="tsPnTpl" type="text" value="第 {p} 页 / 共 {P} 页"><input id="tsPnSize" type="number" min="6" max="24" step="0.5" value="9"></div>
-      <div class="ts-sep"><span>目录（分页导出时自动生成，条目带页码）</span></div>
+      <div class="ts-sep"><span>页码（打印导出时渲染）</span></div>
+      <div class="ts-row"><label>页码</label><select id="tsPnOn"><option value="off">无</option><option value="on">显示</option></select><select id="tsPnPos"><option value="outer">外侧（奇右偶左）</option><option value="bc">底部居中</option><option value="br">底部右侧</option><option value="bl">底部左侧</option><option value="tc">顶部居中</option><option value="tr">顶部右侧</option></select></div>
+      <div class="ts-row"><label>页码模板与字号（{p}=页码，{P}=正文总页数）</label><input id="tsPnTpl" type="text" value="{p}"><input id="tsPnSize" type="number" min="6" max="24" step="0.5" value="9"></div>
+      <div class="ts-sep"><span>目录（打印导出时自动生成，条目带页码）</span></div>
       <div class="ts-row"><label>目录</label><select id="tsTocOn"><option value="off">不生成</option><option value="on">生成</option></select><select id="tsTocPos"><option value="top">置于文首</option><option value="afterh1">第一个 # 之下</option></select></div>
       <div class="ts-row"><label>目录独占一页（后续 ## 与正文强制新页，不得侵入）</label><input id="tsTocSolo" type="checkbox" checked></div>
     </div>
@@ -798,14 +797,17 @@ function parseMarkdown(src){
       }).catch(function(e){showToast('导出失败：'+e.message);});
   });
   var pagedBusy = false;
+  /* 打印（原「分页」按钮，二者已合并）：内嵌窗口下 window.print() 会阻塞，
+     故生成分页版 HTML 交给系统浏览器打开，用户在浏览器里 Ctrl+P
+     即可打印或存为 PDF。纸张/页码/目录在「排版」面板配置。 */
   document.getElementById('btnExportPaged').addEventListener('click',function(){
-    uiBeacon('分页:1 进入');
-    if (pagedBusy) { showToast('分页导出正在进行中，请稍候…'); return; }
+    uiBeacon('打印:1 进入');
+    if (pagedBusy) { showToast('正在生成打印版，请稍候…'); return; }
     pagedBusy = true;
     var pv = document.getElementById('preview');
-    uiBeacon('分页:2 preview存在=' + (!!pv));
+    uiBeacon('打印:2 preview存在=' + (!!pv));
     var bh = pv ? pv.innerHTML : '';
-    uiBeacon('分页:3 html长度=' + bh.length);
+    uiBeacon('打印:3 html长度=' + bh.length);
     var payload;
     try {
       payload = JSON.stringify({
@@ -816,45 +818,28 @@ function parseMarkdown(src){
       });
     } catch(e) {
       pagedBusy = false;
-      uiBeacon('分页:4 stringify失败 ' + e.message);
-      showToast('分页导出失败（数据序列化错误）：' + e.message);
+      uiBeacon('打印:4 stringify失败 ' + e.message);
+      showToast('打印导出失败（数据序列化错误）：' + e.message);
       return;
     }
-    uiBeacon('分页:4 json长度=' + payload.length);
+    uiBeacon('打印:4 json长度=' + payload.length);
     var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     var timer = setTimeout(function(){ if (ctl) ctl.abort(); }, 45000);
     fetch('/api/export-paged',{method:'POST',headers:{'Content-Type':'application/json'},
       body:payload, signal: ctl ? ctl.signal : undefined})
-      .then(function(r){ uiBeacon('分页:5 收到响应 status=' + r.status); return r.json(); })
+      .then(function(r){ uiBeacon('打印:5 收到响应 status=' + r.status); return r.json(); })
       .then(function(j){
         clearTimeout(timer);
-        uiBeacon('分页:6 解析完成 ok=' + (j && j.ok));
+        uiBeacon('打印:6 解析完成 ok=' + (j && j.ok));
         pagedBusy = false;
         if(j&&j.ok){openExternal(j.url+'?t='+Date.now());}
         else{showToast('导出失败：'+((j&&j.error)||'未知错误'));}
       }).catch(function(e){
         clearTimeout(timer);
         pagedBusy = false;
-        uiBeacon('分页:ERR ' + (e && e.message));
+        uiBeacon('打印:ERR ' + (e && e.message));
         showToast('导出失败：'+(e && e.message));
       });
-  });
-  document.getElementById('btnPrint').addEventListener('click',function(){
-    uiLog('click 打印');
-    /* 内嵌窗口下 window.print() 会阻塞；改为生成分页版 HTML 交给系统浏览器，
-       用户在浏览器里 Ctrl+P 即可存为 PDF（与按钮提示一致） */
-    fetch('/api/export-paged',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        path:currentFile,
-        bodyHtml:document.getElementById('preview').innerHTML,
-        tsCss:(document.getElementById('ts-style')||{textContent:''}).textContent,
-        cfg:(function(){try{return JSON.parse(localStorage.getItem('md-editor-typeset-v3')||'{}').page||{};}catch(e){return {};}})()
-      })})
-      .then(function(r){return r.json();})
-      .then(function(j){
-        if(j&&j.ok){openExternal(j.url+'?t='+Date.now());}
-        else{showToast('生成打印版失败：'+((j&&j.error)||'未知错误'));}
-      }).catch(function(e){showToast('生成打印版失败：'+e.message);});
   });
 
 
@@ -1112,13 +1097,16 @@ function parseMarkdown(src){
       o.indent[kk]={mode:m,chars:ch};
     }
     var pg=raw.page||{};
+    /* 旧默认一次性迁移：仅当页码模板仍是旧默认串（整组设置从未手动改过）才升级为
+       书册规范默认（外侧奇右偶左 + 纯数字页码）；显式自定义过的值不动 */
+    if(pg.pn&&pg.pn.tpl==='第 {p} 页 / 共 {P} 页'){pg.pn.tpl='{p}';if(pg.pn.pos==='bc')pg.pn.pos='outer';}
     o.page={paper:pg.paper||'A4',pw:pg.pw||'',ph:pg.ph||'',
       mt:(function(v){v=parseFloat(v);return isNaN(v)?25:v;})(pg.mt),
       mr:(function(v){v=parseFloat(v);return isNaN(v)?18:v;})(pg.mr),
       mb:(function(v){v=parseFloat(v);return isNaN(v)?25:v;})(pg.mb),
       ml:(function(v){v=parseFloat(v);return isNaN(v)?18:v;})(pg.ml),
-      pn:{on:(pg.pn&&pg.pn.on==='on')?'on':'off',pos:(pg.pn&&pg.pn.pos)||'bc',
-        tpl:(pg.pn&&pg.pn.tpl)||'第 {p} 页 / 共 {P} 页',
+      pn:{on:(pg.pn&&pg.pn.on==='on')?'on':'off',pos:(pg.pn&&pg.pn.pos)||'outer',
+        tpl:(pg.pn&&pg.pn.tpl)||'{p}',
         size:(function(v){v=parseFloat(v);return isNaN(v)?9:v;})(pg.pn&&pg.pn.size)},
       toc:{on:(pg.toc&&pg.toc.on==='on')?'on':'off',pos:(pg.toc&&pg.toc.pos)||'top',solo:pg.toc?(pg.toc.solo!==false):true}};
     return o;})();
@@ -1473,7 +1461,7 @@ function parseMarkdown(src){
     pg.mt=parseFloat(document.getElementById('tsMt').value)||0;pg.mr=parseFloat(document.getElementById('tsMr').value)||0;
     pg.mb=parseFloat(document.getElementById('tsMb').value)||0;pg.ml=parseFloat(document.getElementById('tsMl').value)||0;
     pg.pn.on=document.getElementById('tsPnOn').value;pg.pn.pos=document.getElementById('tsPnPos').value;
-    pg.pn.tpl=document.getElementById('tsPnTpl').value||'第 {p} 页';
+    pg.pn.tpl=document.getElementById('tsPnTpl').value||'{p}';
     pg.pn.size=parseFloat(document.getElementById('tsPnSize').value)||9;
     pg.toc.on=document.getElementById('tsTocOn').value;pg.toc.pos=document.getElementById('tsTocPos').value;
     pg.toc.solo=document.getElementById('tsTocSolo').checked;
