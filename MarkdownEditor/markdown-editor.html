@@ -365,7 +365,10 @@ function parseList(lines,start,indent){
   return [html,i];
 }
 function splitRow(r){
-  var arr=r.split('|').map(function(s){return s.trim();});
+  /* GFM：表格单元格内 \| 恒为字面竖线（行内代码内也不例外），先占位再切分后还原 */
+  var PH='\x01';
+  r=r.replace(/\\\|/g,PH);
+  var arr=r.split('|').map(function(s){return s.trim().replace(new RegExp(PH,'g'),'|');});
   if(arr.length>0 && arr[0]===''){arr.shift();}
   if(arr.length>0 && arr[arr.length-1]===''){arr.pop();}
   return arr;
@@ -384,6 +387,11 @@ function parseTable(lines,start){
   var body='';
   while(i<lines.length && lines[i].indexOf('|')>=0 && !/^[ ]*$/.test(lines[i])){
     var cells=splitRow(lines[i]);
+    /* 列数对齐表头：超出合并进本行前一列（用 | 接回，内容不丢），不足补空格 */
+    if(cells.length>head.length){
+      cells=cells.slice(0,head.length-1).concat([cells.slice(head.length-1).join('|')]);
+    }
+    while(cells.length<head.length){cells.push('');}
     body+='<tr>'+cells.map(function(c,ci){
       return '<td'+(aligns[ci]?' style="text-align:'+aligns[ci]+'"':'')+'>'+parseInline(c)+'</td>';
     }).join('')+'</tr>';
