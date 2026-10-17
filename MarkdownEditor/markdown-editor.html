@@ -68,6 +68,14 @@
     font-family:var(--mono); font-size:14px; line-height:1.8;
     padding:24px 28px; tab-size:2;
   }
+  /* 编辑器镜像测量层：与 #editor 同排版参数，逐行测顶像素——
+     分屏联动硬锚的数据源（软折行自动包含，零近似） */
+  #mirror{
+    position:absolute; left:-9999px; top:0; visibility:hidden; pointer-events:none;
+    font-family:var(--mono); font-size:14px; line-height:1.8;
+    tab-size:2; white-space:pre-wrap; word-wrap:break-word; box-sizing:border-box;
+  }
+  #mirror .ml{min-height:1.8em;}
   #preview{padding:24px 32px; max-width:820px; margin:0 auto;}
   body.view-edit #previewPane{display:none;}
   body.view-edit #editorPane{border-right:none;}
@@ -575,13 +583,19 @@ function parseMarkdown(src){
   }
   var renderQueue=null;
   function render(){
+    buildMirrorMap();   /* 镜像测量表只依赖编辑器内容与排版，任何内容变化必经此处 */
     var src=extractMath(editor.value);
     var blocks=splitBlocks(src);
+    /* 源行打标：blocks 是 src 按行的精确分区，逐块累加得起始行号（供分屏滚动联动） */
+    var startLines=[],acc=0;
+    for(var si=0;si<blocks.length;si++){ startLines.push(acc); acc+=blocks[si].split('\n').length; }
     var existing=preview.querySelectorAll('.pblk');
     if(existing.length===0 && preview.innerHTML.trim()!==''){ preview.innerHTML=''; }
     var changed=[];
     for(var i=0;i<blocks.length;i++){
       var node=existing[i];
+      /* 行号即使内容未变也要刷新（前块增删行会推移本块起始行） */
+      if(node) node.setAttribute('data-src-line', String(startLines[i]||0));
       if(node && node.getAttribute('data-h')===blkHash(blocks[i])) continue;
       changed.push(i);
     }
@@ -590,17 +604,18 @@ function parseMarkdown(src){
       dead.parentNode.removeChild(dead);
     }
     if(renderQueue){ clearTimeout(renderQueue.t); renderQueue=null; }
-    var q={changed:changed, blocks:blocks, existing:existing, idx:0};
+    var q={changed:changed, blocks:blocks, existing:existing, idx:0, startLines:startLines};
     renderQueue=q;
     q.t=setTimeout(function step(){
       if(!renderQueue || renderQueue!==q) return;
       var bi=q.changed[q.idx];
-      if(bi===undefined){ renderQueue=null; buildOutline(); return; }
+      if(bi===undefined){ renderQueue=null; tagAnchorLines(q.blocks,q.startLines); buildOutline(); return; }
       q.idx++;
       var div=q.existing[bi];
       var fresh=false;
       if(!div){ div=document.createElement('div'); div.className='pblk'; fresh=true; }
       div.setAttribute('data-h', blkHash(q.blocks[bi]));
+      div.setAttribute('data-src-line', String(q.startLines[bi]||0));
       div.innerHTML=parseMarkdown(q.blocks[bi]);
       restoreMath(div); fixLocalImages(div);
       if(fresh){
@@ -610,10 +625,29 @@ function parseMarkdown(src){
       renderQueue.t=setTimeout(step,0);
     },0);
   }
+  /* 标题锚点打标：块内 h1-h4 元素盖源行标（fence 内 # 不算），供分屏联动做像素插值锚。
+     源标题行与 DOM heading 顺序一一对应（ATX 行首 # 才算，与 splitBlocks 口径一致） */
+  function tagAnchorLines(blocks,startLines){
+    var els=preview.querySelectorAll('.pblk');
+    for(var i=0;i<els.length&&i<blocks.length;i++){
+      var heads=els[i].querySelectorAll('h1,h2,h3,h4');
+      if(!heads.length) continue;
+      var lines=blocks[i].split('\n'), fence=false, hits=[], base=(startLines[i]||0);
+      for(var l=0;l<lines.length;l++){
+        if(/^\s*(```|~~~)/.test(lines[l])) fence=!fence;
+        if(!fence&&/^#{1,4} /.test(lines[l])) hits.push(base+l);
+      }
+      for(var h=0;h<heads.length&&h<hits.length;h++){
+        heads[h].setAttribute('data-anchor-line',String(hits[h]));
+      }
+    }
+  }
   function buildOutline(){
     var lines=editor.value.split('\n');
-    var items=[];
+    var items=[], fence=false;
     for(var i=0;i<lines.length;i++){
+      if(/^\s*(```|~~~)/.test(lines[i])) fence=!fence;
+      if(fence) continue;   /* fence 内 # 不是标题（与分块/锚点打标口径一致） */
       var m=lines[i].match(/^(#{1,6})[ ]+(.*)$/);
       if(m){items.push({lvl:m[1].length,text:m[2].trim(),line:i});}
     }
@@ -668,6 +702,110 @@ function parseMarkdown(src){
     renderTimer=setTimeout(function(){render();updateStats();},delay);
   }
   editor.addEventListener('input',function(){scheduleRender();scheduleSave();});
+
+  /* 分屏联动（单向）：编辑区滚动 → 预览跟随；预览滚动不回牵编辑区。
+     硬锚 + 锚间百分比：镜像测量层逐行量出每行在编辑器里的真实像素位置（软折行
+     自动包含，整表按编辑器实际内容高校准），预览侧标题元素（h1-h4）盖
+     data-anchor-line 源行标与镜像行号对应。
+     同步规则——① 锚不可见：两锚之间按编辑器像素进度 f 做百分比插值，连续扫过
+     区间全部内容不丢段；② 锚 H 可见：权重 w=1−(H编辑器偏移÷视口高)（H 在视口底
+     w=0、到视口顶 w=1），want 从百分比平滑渐变到硬锚锁定
+     want=H预览位置−H编辑器视口内偏移——锚到顶时两侧位置分毫不差；锚出顶瞬间
+     硬锚值恰为下一区间百分比的 f=0 起点，全程连续无跳变。首尾不足处用虚拟顶/底锚。
+     编辑区到底（容差 48px）预览钉到底。块级 data-src-line 保留作渲染诊断标号 */
+  var mirrorEl=null, mirrorTops=[], mirrorPad=24, mirrorReady=false;
+  function buildMirrorMap(){
+    if(!mirrorEl){
+      mirrorEl=document.createElement('div');
+      mirrorEl.id='mirror';
+      document.body.appendChild(mirrorEl);
+    }
+    var cs=getComputedStyle(editor);
+    mirrorPad=parseFloat(cs.paddingTop)||24;
+    var padX=(parseFloat(cs.paddingLeft)||0)+(parseFloat(cs.paddingRight)||0);
+    var w=editor.clientWidth-padX;
+    if(w<50){ mirrorReady=false; return; }
+    mirrorEl.style.width=w+'px';
+    var lines=editor.value.split('\n');
+    var parts=new Array(lines.length);
+    /* 行文本转义后塞入（折行由内容决定；空行靠 .ml min-height 撑高） */
+    for(var j=0;j<lines.length;j++){
+      var t=lines[j];
+      if(t.indexOf('&')>=0) t=t.replace(/&/g,'&amp;');
+      if(t.indexOf('<')>=0) t=t.replace(/</g,'&lt;');
+      if(t.indexOf('>')>=0) t=t.replace(/>/g,'&gt;');
+      parts[j]='<div class="ml">'+t+'</div>';
+    }
+    mirrorEl.innerHTML=parts.join('');
+    var divs=mirrorEl.children;
+    var tops=new Array(divs.length);
+    for(var k=0;k<divs.length;k++){ tops[k]=divs[k].offsetTop; }
+    /* 校准：镜像总高对齐编辑器实际内容高（吸收字体度量/折行细节的累计误差） */
+    var mh=divs.length?(divs[divs.length-1].offsetTop+divs[divs.length-1].offsetHeight):0;
+    var eh=editor.scrollHeight-(parseFloat(cs.paddingTop)||24)-(parseFloat(cs.paddingBottom)||24);
+    if(mh>0&&eh>0){
+      var scale=eh/mh;
+      if(scale>0.5&&scale<2){ for(var m=0;m<tops.length;m++){ tops[m]=tops[m]*scale; } }
+    }
+    mirrorTops=tops;
+    mirrorReady=true;
+  }
+  var syncRaf=null;
+  function syncPreviewToEditor(){
+    if(document.body.classList.contains('view-edit')||
+       document.body.classList.contains('view-preview')) return;
+    if(syncRaf) return;
+    syncRaf=requestAnimationFrame(function(){
+      syncRaf=null;
+      var pane=document.getElementById('previewPane');
+      if(!pane||!mirrorReady) return;
+      var anchors=preview.querySelectorAll('[data-anchor-line]');
+      if(!anchors.length) return;
+      /* 编辑区已滚到底：预览钉到底。容差 48px 吸收 textarea padding 与小数行高 */
+      if(editor.scrollTop+editor.clientHeight>=editor.scrollHeight-48){
+        pane.scrollTop=pane.scrollHeight;
+        return;
+      }
+      var S=editor.scrollTop;
+      var vh=pane.getBoundingClientRect().height;
+      var pr=pane.getBoundingClientRect();
+      function apos(el){ return pane.scrollTop+(el.getBoundingClientRect().top-pr.top); }
+      function edTop(k){
+        var ln=parseInt(anchors[k].getAttribute('data-anchor-line'),10);
+        return (mirrorTops[ln]!==undefined?mirrorTops[ln]:0)+mirrorPad;
+      }
+      var padB=parseFloat(getComputedStyle(editor).paddingBottom)||24;
+      var n=anchors.length;
+      /* H = 视口内最顶部可见锚；无可见锚则取下一个将进入的锚；全出顶则取最后锚 */
+      var hIdx=-1, nextIdx=-1;
+      for(var k=0;k<n;k++){
+        var t=edTop(k);
+        if(hIdx<0&&t>=S&&t<S+vh) hIdx=k;
+        if(nextIdx<0&&t>=S) nextIdx=k;
+      }
+      var H=(hIdx>=0)?hIdx:((nextIdx>=0)?nextIdx:(n-1));
+      /* 锚可见权重：H 在视口底 w=0（纯百分比），到视口顶 w=1（纯硬锚） */
+      var w=0;
+      if(hIdx>=0) w=Math.min(1,Math.max(0,1-(edTop(H)-S)/vh));
+      /* 百分比端点：A=H 前一锚（无则虚拟顶锚），B=H（无则虚拟底锚），全像素 */
+      var aEd,aPv,bEd,bPv;
+      if(H-1>=0){ aEd=edTop(H-1); aPv=apos(anchors[H-1]); }
+      else{ aEd=0; aPv=0; }
+      if(H<n){ bEd=edTop(H); bPv=apos(anchors[H]); }
+      else{ bEd=editor.scrollHeight-padB; bPv=pane.scrollHeight; }
+      var f=(bEd>aEd)?Math.min(1,Math.max(0,(S-aEd)/(bEd-aEd))):1;
+      var wantP=aPv+f*(bPv-aPv);
+      var want;
+      if(w>0){
+        var wantH=apos(anchors[H])-(edTop(H)-S);
+        want=w*wantH+(1-w)*wantP;
+      }else{
+        want=wantP;
+      }
+      pane.scrollTop=Math.max(0,want);
+    });
+  }
+  editor.addEventListener('scroll',syncPreviewToEditor);
 
   var fmtDefs=[
     {label:'H1',title:'一级标题',wrap:false,pre:'# ',post:'',ph:'标题'},
@@ -1007,6 +1145,15 @@ function parseMarkdown(src){
   applyTheme(st||'dark');
   applyView();
   render();updateStats();
+  /* 字体就绪后折行可能变化：重建镜像测量表；窗口缩放同理（防抖） */
+  if(document.fonts&&document.fonts.ready){
+    document.fonts.ready.then(function(){ buildMirrorMap(); syncPreviewToEditor(); });
+  }
+  var rszTimer=null;
+  window.addEventListener('resize',function(){
+    if(rszTimer)clearTimeout(rszTimer);
+    rszTimer=setTimeout(function(){ buildMirrorMap(); syncPreviewToEditor(); },150);
+  });
 
   /* URL 注入适配层：通过后端 ?file= 打开时载入原文件并支持回写（解析内核不变） */
   var currentFile=null;
