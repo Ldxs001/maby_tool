@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+document.html
+document.paged.html
+.playwright-cli/
+
+# 运行缓存（WebView2 运行时/日志，首次运行自动生成，不入版本库）
+runtime/
+
+# 开发临时产物
+_tmp_*
