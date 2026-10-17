@@ -252,16 +252,12 @@ def save_from_dir(smd_path, base_dir):
         compact(smd_path, base_dir)
         return len(to_add), True
     tmp = "%s.tmp%d" % (smd_path, int(time.time() * 1000))
-    try:
-        shutil.copyfile(smd_path, tmp)
-        _append_entries(tmp, to_add)
-        os.replace(tmp, smd_path)
-    finally:
-        if os.path.isfile(tmp):
-            try:
-                os.remove(tmp)   # replace 成功后 tmp 已不存在；失败时清理残片
-            except OSError:
-                pass
+    # 失败时保留 tmp：会话结束工作目录会被 clear_tmp 清掉，它是本次内容
+    # 跨会话的唯一幸存副本（恢复入口 = 打开文档时检测同名 .tmp<时间戳>）。
+    # 成功替换后 tmp 已被 os.replace 消费，天然无残留，无需任何清理。
+    shutil.copyfile(smd_path, tmp)
+    _append_entries(tmp, to_add)
+    os.replace(tmp, smd_path)
     sig_file = os.path.join(base_dir, ".source.json")
     _write_sig(smd_path, sig_file)          # 保存后刷新指纹，本会话继续复用该目录
     return len(to_add), False

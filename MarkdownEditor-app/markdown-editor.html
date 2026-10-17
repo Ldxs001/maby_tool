@@ -1267,6 +1267,44 @@ function parseMarkdown(src){
       ss.textContent=okLabel||'已载入原文件'; ss.className='saved';
     }
     annotationsLoad(path);
+    checkSaveBackups(path);
+  }
+  /* ---- 保存失败备份恢复 ----
+     保存失败时服务端保留 <文档>.tmp<时间戳>（本次内容跨会话的唯一幸存副本，
+     会话结束解包工作目录会被清掉）。打开文档时查询：有有效备份 → toast 询问
+     是否恢复；用户点"恢复"才覆盖 .smd（服务端还校验备份与文档同名匹配）。 */
+  function checkSaveBackups(path){
+    if(!path || !/\.smd$/i.test(path)) return;
+    fetch('/api/save-backups?path='+encodeURIComponent(path), {cache:'no-store'})
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if(!j || !j.ok || !j.backups || !j.backups.length) return;
+        var bak = j.backups.filter(function(b){ return b.valid; }).pop();
+        if(!bak) return;                    /* 只有损坏备份：不打扰，原样保留 */
+        var t = new Date(bak.mtime*1000);
+        function pad(n){ return (n<10?'0':'')+n; }
+        var ts = pad(t.getMonth()+1)+'-'+pad(t.getDate())+' '+pad(t.getHours())+':'+pad(t.getMinutes());
+        showToast('发现未完成的保存备份（'+ts+'），是否用它恢复本文档？', false, {
+          label: '恢复',
+          fn: function(){
+            fetch('/api/restore-backup', {method:'POST',
+                  headers:{'Content-Type':'application/json'},
+                  body: JSON.stringify({path: path, backup: bak.path})})
+              .then(function(r){ return r.json(); })
+              .then(function(k){
+                if(!(k && k.ok)){ showToast('恢复失败：'+((k&&k.error)||'未知错误')); return; }
+                setDraft(path, undefined);   /* 旧草稿作废：以恢复后的包为准 */
+                return fetchDocInto(path).then(function(d){
+                  applyDocWithDraft(path, d.txt, '已从保存备份恢复');
+                  currentBase = d.base;
+                  showToast('已从保存备份恢复');
+                });
+              })
+              .catch(function(e){ showToast('恢复失败：'+e.message); });
+          }
+        });
+      })
+      .catch(function(){});
   }
   /* 心跳：让后端知道页面还开着。
      注意：闲置（切标签页/最小化/长时间不写）不算关闭，绝不据此停服务。 */

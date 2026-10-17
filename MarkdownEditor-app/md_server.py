@@ -23,6 +23,7 @@ import sys
 import json
 import re
 import atexit
+import zipfile
 import urllib.parse
 import webbrowser
 import html as html_module
@@ -44,7 +45,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 46  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 47  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 SETTINGS_PATH = os.path.join(HERE, "runtime", "settings.json")
 
 # .smd 自包含文档格式（v1.2.0）；导入失败落错误日志，相关路由返回明确错误而非静默
@@ -110,6 +111,48 @@ def _annotations_path(doc_path):
         return os.path.join(_smd.base_dir_for(doc_path), _smd.ASSETS_DIR, ANNOT_NAME)
     stem = os.path.splitext(os.path.basename(doc_path))[0]
     return os.path.join(os.path.dirname(doc_path), stem + ".assets", ANNOT_NAME)
+
+
+def _smd_tmp_backups(smd_path):
+    """列出某文档未完成的保存备份（<文档名>.tmp<毫秒时间戳>），按时间升序。
+
+    保存失败时 tmp 故意保留：会话结束解包工作目录会被 clear_tmp 清掉，
+    它是本次内容跨会话的唯一幸存副本（打开文档时提供恢复入口）。
+    """
+    d = os.path.dirname(smd_path)
+    base = os.path.basename(smd_path)
+    if not d or not os.path.isdir(d):
+        return []
+    out = []
+    for fn in os.listdir(d):
+        m = re.match(re.escape(base) + r"\.tmp(\d+)$", fn)
+        if m and os.path.isfile(os.path.join(d, fn)):
+            out.append((int(m.group(1)), os.path.join(d, fn)))
+    out.sort()
+    return [fp for _, fp in out]
+
+
+def _friendly_save_error(e, path):
+    """保存失败 → 说人话。只读目标是高频根因（OneDrive/手工设置 R 属性）。"""
+    if not isinstance(e, OSError):
+        return str(e)
+    ro = False
+    try:
+        if os.path.exists(path):
+            ro = not (os.stat(path).st_mode & 0o222)
+    except OSError:
+        pass
+    if ro:
+        kept = ""
+        try:
+            tmps = _smd_tmp_backups(path)
+            if tmps:
+                kept = "\n本次内容已保留在 %s（重新打开本文档时可恢复）" % tmps[-1]
+        except OSError:
+            pass
+        return ("目标文件为只读（可能被 OneDrive 或手工设置了只读属性），"
+                "请解除只读后重新保存。%s" % kept)
+    return str(e)
 
 
 def _norm_llm_config(cfg):
@@ -443,6 +486,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self._send(500, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
             return
+        if u.path == "/api/save-backups":
+            # 打开文档时查询：是否有保存失败保留的备份（<文档>.tmp<时间戳>）
+            q = urllib.parse.parse_qs(u.query)
+            p = q.get("path", [""])[0]
+            if not p:
+                self._send(400, json.dumps({"ok": False, "error": "missing path"}, ensure_ascii=False))
+                return
+            out = []
+            try:
+                for fp in _smd_tmp_backups(os.path.abspath(p)):
+                    try:
+                        st = os.stat(fp)
+                    except OSError:
+                        continue
+                    valid = False
+                    try:
+                        with zipfile.ZipFile(fp) as _z:
+                            _z.namelist()
+                        valid = True
+                    except Exception:
+                        pass
+                    out.append({"path": fp, "name": os.path.basename(fp),
+                                "mtime": int(st.st_mtime), "size": st.st_size,
+                                "valid": valid})
+                self._send(200, json.dumps({"ok": True, "backups": out},
+                                           ensure_ascii=False),
+                           "application/json; charset=utf-8")
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
+            return
         if u.path == "/api/llm-config":
             self._send(200, json.dumps({"ok": True, "config": _llm_saved_config()},
                                        ensure_ascii=False),
@@ -522,7 +595,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(200, json.dumps({"ok": True, "content": content,
                                             "images": added}, ensure_ascii=False))
             except Exception as e:
-                self._send(500, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
+                self._send(500, json.dumps({"ok": False, "error": _friendly_save_error(e, p)},
+                                           ensure_ascii=False))
             return
         if u.path == "/api/save-as":
             try:
@@ -615,8 +689,42 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                             "content": content, "images": added},
                                            ensure_ascii=False))
             except Exception as e:
-                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                self._send(500, json.dumps({"ok": False, "error": _friendly_save_error(e, path)},
                                            ensure_ascii=False))
+            return
+        if u.path == "/api/restore-backup":
+            # 用失败备份覆盖 .smd —— 仅在前端用户点过"恢复"确认后到达这里
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                obj = json.loads(self.rfile.read(length).decode("utf-8"))
+                p = os.path.abspath(obj.get("path") or "")
+                bak = os.path.abspath(obj.get("backup") or "")
+                if not p or not bak:
+                    self._send(400, json.dumps({"ok": False, "error": "bad payload"}, ensure_ascii=False))
+                    return
+                # 安全校验：备份必须确实是该文档的 tmp（同目录同名 .tmp<时间戳>
+                # 模式 + zip 有效性；防误传任意路径覆盖好包）
+                ok_pat = bool(re.match(re.escape(os.path.basename(p)) + r"\.tmp\d+$",
+                                       os.path.basename(bak)))
+                same_dir = os.path.dirname(bak) == os.path.dirname(p)
+                valid = False
+                if ok_pat and same_dir and os.path.isfile(bak):
+                    try:
+                        with zipfile.ZipFile(bak) as _z:
+                            _z.namelist()
+                        valid = True
+                    except Exception:
+                        pass
+                if valid:
+                    os.replace(bak, p)   # 目标在不在都允许落位；base_dir_for 指纹检测会自动重解包
+                    self._send(200, json.dumps({"ok": True}, ensure_ascii=False))
+                else:
+                    self._send(400, json.dumps({"ok": False, "error": "备份与文档不匹配或已损坏"}, ensure_ascii=False))
+            except OSError as e:
+                self._send(500, json.dumps({"ok": False,
+                    "error": _friendly_save_error(e, obj.get("path") or "")}, ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
             return
         if u.path == "/api/paste-image":
             try:
@@ -1624,34 +1732,32 @@ def _pickdir_log(msg):
 def _idle_watchdog(grace=None, check=0.5):
     """只在【用户确实关闭了页面】时退出服务。
 
-    判定：收到页面卸载通知(/api/bye，由 pagehide 触发)，且宽限期内
+    主判定：收到页面卸载通知(/api/bye，由 pagehide 触发)，且宽限期内
     没有恢复心跳 → 认定用户真的关掉了编辑器，服务退出。
 
+    兜底判定：WebView2 被直接拽掉时 pagehide 跑不到，/api/bye 发不出来，
+    光等 bye 会永久悬挂（僵尸服务占端口）。心跳断流超过 orphan 宽限
+    （默认 5 分钟，MD_EXIT_ORPHAN_GRACE 可调）同样认定页面已死——
+    后台标签页心跳节流最长约 1 分钟，5 分钟足够保守，不会误杀
+    最小化/切走的窗口。
+
     明确不做的事：**不做"空闲超时"判定**。
-    切换标签页、最小化、长时间不操作都不等于关闭 —— 编辑器必须由
-    用户明确关闭才停。刷新页面会重新发心跳，从而撤销待退出。
+    切换标签页、最小化、长时间不操作都不等于关闭 —— 只要心跳还在，
+    服务就活着。刷新页面会重新发心跳，从而撤销待退出。
     可用环境变量 MD_EXIT_GRACE 覆盖宽限期（便于测试）。"""
     if grace is None:
         grace = float(os.environ.get("MD_EXIT_GRACE", "8"))
+    orphan = float(os.environ.get("MD_EXIT_ORPHAN_GRACE", "300"))
     _START_TIME[0] = time.time()
     if not _auto_stop_enabled():
         return
-    while True:
-        time.sleep(check)
-        now = time.time()
-        bye = _BYE_AT[0]
-        if not bye:
-            continue
-        if now - bye < grace:
-            continue
-        # 宽限期内又收到过心跳 => 是刷新/重开，撤销退出
-        if now - _LAST_PING[0] < grace:
-            continue
+
+    def _do_stop(reason):
         try:
             with io.open(os.path.join(HERE, "runtime", "lifecycle.log"),
                          "a", encoding="utf-8") as f:
-                f.write("%s page closed -> stop service\n"
-                        % time.strftime("%H:%M:%S"))
+                f.write("%s %s -> stop service\n"
+                        % (time.strftime("%H:%M:%S"), reason))
         except Exception:
             pass
         if _smd is not None:
@@ -1660,6 +1766,24 @@ def _idle_watchdog(grace=None, check=0.5):
             except Exception:
                 pass
         os._exit(0)
+
+    while True:
+        time.sleep(check)
+        now = time.time()
+        bye = _BYE_AT[0]
+        if not bye:
+            # 兜底：从没收到 bye 且心跳已断流超过 orphan 宽限。
+            # 基准取「最后心跳 / 服务启动」的较大者——页面从未打开过的
+            # 孤儿服务（起服务后 5 分钟无页面接入）同样回收。
+            if now - max(_LAST_PING[0], _START_TIME[0]) >= orphan:
+                _do_stop("heartbeat lost (page killed without bye)")
+            continue
+        if now - bye < grace:
+            continue
+        # 宽限期内又收到过心跳 => 是刷新/重开，撤销退出
+        if now - _LAST_PING[0] < grace:
+            continue
+        _do_stop("page closed")
 
 
 def _auto_stop_enabled():
