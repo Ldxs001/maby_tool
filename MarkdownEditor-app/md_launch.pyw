@@ -163,7 +163,7 @@ _splash_proc = None
 
 def load_settings():
     """读取 runtime/settings.json（缺失/损坏时用默认值）"""
-    defaults = {"embed_window": False, "disable_gpu": False}
+    defaults = {"embed_window": True, "disable_gpu": False}
     try:
         p = os.path.join(HERE, "runtime", "settings.json")
         d = json.loads(open(p, encoding="utf-8").read())
