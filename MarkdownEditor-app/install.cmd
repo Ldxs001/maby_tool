@@ -36,7 +36,7 @@ reg add "HKCU\Software\Classes\.md\shell\MDViewer" /ve /t REG_SZ /d "Open with M
 reg add "HKCU\Software\Classes\.md\shell\MDViewer\command" /ve /t REG_SZ /d "%HERE%\MarkdownEditor.exe \"%%1\"" /f
 
 echo [2/4] Set .md default association (double-click opens this editor)...
-powershell -NoProfile -Command "$k='HKCU:\Software\Classes\.md'; $v=Get-ItemProperty -Path $k -Name '(default)' -ErrorAction SilentlyContinue; if($v){($v.'(default)')}else{''}" > "%HERE%\.mdinstall.bak"
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command "$k='HKCU:\Software\Classes\.md'; $v=Get-ItemProperty -Path $k -Name '(default)' -ErrorAction SilentlyContinue; if($v){($v.'(default)')}else{''}" > "%HERE%\.mdinstall.bak"
 reg add "HKCU\Software\Classes\.md" /ve /t REG_SZ /d "MDViewer.md" /f
 reg add "HKCU\Software\Classes\MDViewer.md" /ve /t REG_SZ /d "Markdown Document (MD Editor)" /f
 REM Win11 OpenWith picker shows the command exe's FileDescription ("Python") unless
@@ -50,7 +50,7 @@ reg add "HKCU\Software\Classes\Applications\MarkdownEditor.exe\DefaultIcon" /ve 
 REM Clear stale UserChoice. Plain "reg delete" FAILS here: Windows puts an explicit
 REM Deny-SetValue ACE on UserChoice (anti-hijack), so reg.exe cannot even open it writable.
 REM Use .NET DeleteSubKey (different code path) and report the result loudly.
-powershell -NoProfile -Command "if(Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.md\UserChoice'){try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKey('Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.md\UserChoice'); 'UserChoice cleared' } catch { 'UserChoice delete failed: ' + $_.Exception.Message }} else { 'UserChoice not present (skip)' }"
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command "if(Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.md\UserChoice'){try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKey('Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.md\UserChoice'); 'UserChoice cleared' } catch { 'UserChoice delete failed: ' + $_.Exception.Message }} else { 'UserChoice not present (skip)' }"
 REM Safety net: the stale UserChoice points to ProgID "Markdown Document" which does NOT
 REM exist anywhere. Recreate it here so the association resolves to OUR editor regardless.
 reg add "HKCU\Software\Classes\Markdown Document" /ve /t REG_SZ /d "Markdown Editor" /f >nul 2>&1
@@ -75,7 +75,7 @@ reg add "HKCU\Software\Classes\MDViewer.smd\shell\open\command" /ve /t REG_SZ /d
 reg add "HKCU\Software\Classes\.smd\OpenWithProgids" /v MDViewer.smd /t REG_SZ /d "" /f >nul 2>&1
 
 echo [3/4] Create Desktop / Start Menu shortcuts...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%HERE%\_mklnk.ps1" -Here "%HERE%"
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%HERE%\_mklnk.ps1" -Here "%HERE%"
 
 echo [4/4] Windows 11 context menu visibility...
 if /i "%~1"=="nolegacy" (

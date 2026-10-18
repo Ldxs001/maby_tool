@@ -70,10 +70,14 @@ def start_server():
 
 def _list_pythonw_cmdlines():
     """列出 (pid, commandline)；wmic 不可用时退回 PowerShell CIM。"""
+    # 用绝对路径，避免目标机 PATH 缺 WindowsPowerShell 子目录时 powershell 解析不到
+    pwsh = os.path.join(
+        os.environ.get("SystemRoot", os.environ.get("WINDIR", "C:\\Windows")),
+        "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
     cmds = [
         ["wmic", "process", "where", "name='pythonw.exe'", "get",
          "ProcessId,CommandLine", "/format:csv"],
-        ["powershell", "-NoProfile", "-Command",
+        [pwsh, "-NoProfile", "-Command",
          "Get-CimInstance Win32_Process -Filter \"name='pythonw.exe'\" | "
          "ForEach-Object { $_.ProcessId.ToString() + '|' + $_.CommandLine }"],
     ]

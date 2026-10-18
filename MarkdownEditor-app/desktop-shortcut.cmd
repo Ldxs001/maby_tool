@@ -9,7 +9,7 @@ if not exist "%HERE%\MarkdownEditor.exe" (
   exit /b 1
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws=New-Object -ComObject WScript.Shell;$desktop=[Environment]::GetFolderPath('Desktop');$lnk=$ws.CreateShortcut((Join-Path $desktop 'Markdown Editor.lnk'));$lnk.TargetPath='%HERE%\MarkdownEditor.exe';$lnk.WorkingDirectory='%HERE%';$lnk.IconLocation='%HERE%\md-editor.ico';$lnk.Description='Markdown Editor (AI-assisted)';$lnk.Save();Write-Host 'Desktop shortcut created.'"
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "$ws=New-Object -ComObject WScript.Shell;$desktop=[Environment]::GetFolderPath('Desktop');$lnk=$ws.CreateShortcut((Join-Path $desktop 'Markdown Editor.lnk'));$lnk.TargetPath='%HERE%\MarkdownEditor.exe';$lnk.WorkingDirectory='%HERE%';$lnk.IconLocation='%HERE%\md-editor.ico';$lnk.Description='Markdown Editor (AI-assisted)';$lnk.Save();Write-Host 'Desktop shortcut created.'"
 
 echo Done. Look for "Markdown Editor" on your desktop.
 pause
