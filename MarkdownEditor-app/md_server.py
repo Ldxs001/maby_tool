@@ -17,6 +17,8 @@ import time
 import subprocess
 import tempfile
 import socketserver
+import socket
+import shutil
 import threading
 import os
 import sys
@@ -25,6 +27,7 @@ import re
 import atexit
 import zipfile
 import urllib.parse
+import urllib.request
 import webbrowser
 import html as html_module
 
@@ -42,10 +45,26 @@ except Exception as _e:
     except Exception:
         pass
 
+try:
+    if os.path.dirname(os.path.abspath(__file__)) not in sys.path:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import rag_client as _ragc
+    import web_search as _ws_mod
+except Exception as _e:
+    _ragc = None
+    _ws_mod = None
+    try:
+        os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "runtime"), exist_ok=True)
+        with io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "runtime", "_ragc.err"), "w", encoding="utf-8") as _f:
+            _f.write(repr(_e))
+    except Exception:
+        pass
+
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 47  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 52  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 SETTINGS_PATH = os.path.join(HERE, "runtime", "settings.json")
 
 # .smd 自包含文档格式（v1.2.0）；导入失败落错误日志，相关路由返回明确错误而非静默
@@ -84,8 +103,13 @@ def _rewrite_assets_ref(text, old, new):
 #   .smd → 解包目录 assets/annotations.json（随包分发，_smd.PROTECTED 豁免清理）
 # ---------------------------------------------------------------------------
 ANNOT_NAME = "annotations.json"
-LLM_DEFAULTS = {"backend": "lmstudio", "base_url": "", "model": "",
-                "timeout": 180, "max_tokens": 2048, "temperature": 0.7}
+LLM_DEFAULTS = {"backend": "lmstudio", "base_url": "", "model": "", "api_key": "",
+                "timeout": 180, "max_tokens": 2048, "temperature": 0.7,
+                "web_search": None}   # web_search 由 _norm_web_search_config 填充
+WS_DEFAULTS = {"enabled": False, "backend": "duckduckgo", "api_key": "",
+               "google_key": "", "google_cx": "", "bing_key": "",
+               "custom_url": "", "max_results": 3}
+_WS_BACKENDS = ("duckduckgo", "tavily", "google", "bing", "custom")
 
 
 def _load_json(path, default):
@@ -160,9 +184,9 @@ def _norm_llm_config(cfg):
     cfg = cfg if isinstance(cfg, dict) else {}
     out = dict(LLM_DEFAULTS)
     backend = str(cfg.get("backend") or "").lower()
-    if backend in ("lmstudio", "ollama"):
+    if backend in ("lmstudio", "ollama", "openai"):
         out["backend"] = backend
-    for k in ("base_url", "model"):
+    for k in ("base_url", "model", "api_key"):
         v = cfg.get(k)
         out[k] = v.strip() if isinstance(v, str) else ""
     for k, lo, hi in (("timeout", 5, 600), ("max_tokens", 64, 32768)):
@@ -174,6 +198,25 @@ def _norm_llm_config(cfg):
         out["temperature"] = max(0.0, min(2.0, float(cfg.get("temperature", out["temperature"]))))
     except Exception:
         pass
+    out["web_search"] = _norm_web_search_config(cfg.get("web_search"))
+    return out
+
+
+def _norm_web_search_config(cfg):
+    """联网查询子配置归一：backend 白名单、布尔/数值限幅（模式同 rag-assistant）。"""
+    cfg = cfg if isinstance(cfg, dict) else {}
+    out = dict(WS_DEFAULTS)
+    out["enabled"] = bool(cfg.get("enabled"))
+    backend = str(cfg.get("backend") or "").lower()
+    if backend in _WS_BACKENDS:
+        out["backend"] = backend
+    for k in ("api_key", "google_key", "google_cx", "bing_key", "custom_url"):
+        v = cfg.get(k)
+        out[k] = v.strip() if isinstance(v, str) else ""
+    try:
+        out["max_results"] = max(1, min(10, int(cfg.get("max_results", out["max_results"]))))
+    except Exception:
+        pass
     return out
 
 
@@ -183,16 +226,232 @@ def _llm_saved_config():
     return _norm_llm_config(cfg if isinstance(cfg, dict) else {})
 
 
+def _llm_config_from_request(obj):
+    """按请求携带的 config（未保存的表单值）归一配置；未携带则用已存配置。"""
+    cfg = obj.get("config") if isinstance(obj, dict) else None
+    return _norm_llm_config(cfg) if isinstance(cfg, dict) else _llm_saved_config()
+
+
 def _llm_from_request(obj):
     """按请求携带的 config（未保存的表单值）构造 LLMClient；未携带则用已存配置。"""
     if _llm is None:
         raise _LLM_ERR("llm_client.py 加载失败，详见 runtime/_llm.err")
-    cfg = obj.get("config") if isinstance(obj, dict) else None
-    merged = _norm_llm_config(cfg) if isinstance(cfg, dict) else _llm_saved_config()
-    return _llm.LLMClient(merged)
+    return _llm.LLMClient(_llm_config_from_request(obj))
 
 
 _LLM_ERR = _llm.LLMError if _llm is not None else RuntimeError
+
+
+# ---------------------------------------------------------------------------
+# RAG（rag-assistant 检索增强）：只检索不生成 —— /api/kb/query 拿上下文，
+# 拼进 LLM prompt 后仍走 llm_client 生成；原润色/解释路径零改动。
+# 服务端为 rag-assistant 外部 API（:8767），与它的 Web UI（:8765/18765）隔离。
+# ---------------------------------------------------------------------------
+RAG_PORT = 8767
+RAG_DEFAULTS = {"path": "", "kb": ""}   # 路径默认空：分发给谁都是无效值，由用户自填
+
+_rag_lock = threading.Lock()
+_rag_process = None        # 本服务拉起的 rag-assistant 子进程（手动启停）
+_rag_starting = False      # 冷启动中（后台线程轮询就绪）
+_rag_process_stderr = ""   # 子进程崩掉时的 Traceback 摘录（诊断用）
+
+_RAG_SYS_POLISH = (
+    "你是一个中文写作润色助手。用户给你一段文本，并附上从其知识库检索到的参考资料。"
+    "请结合参考资料润色优化：保持原意、结构、篇幅和 Markdown 标记（#、*、`、链接等）完全不变，"
+    "仅优化表达的通顺、准确与书面化，术语与事实尽量与参考资料一致。"
+    "只输出润色后的文本，不要解释。\n\n【参考资料】\n%s")
+
+_RAG_SYS_EXPLAIN = (
+    "你是一个 Markdown 文档注释助手。用户给出一段文本，并附上从其知识库检索到的参考资料。"
+    "请结合参考资料为它写一条简洁的备注/批注：解释它的含义或补充要点，2-4 句，第一人称可省略。"
+    "直接输出备注内容，不要引号、不要'备注：'前缀。\n\n【参考资料】\n%s")
+
+_WS_SYS_POLISH = (
+    "你是一个中文写作润色助手。用户给你一段文本，并附上联网搜索到的网络资料。"
+    "请结合网络资料润色优化：保持原意、结构、篇幅和 Markdown 标记（#、*、`、链接等）完全不变，"
+    "仅优化表达的通顺、准确与书面化，事实性内容尽量与网络资料一致。"
+    "只输出润色后的文本，不要解释。\n\n【网络资料】\n%s")
+
+_WS_SYS_EXPLAIN = (
+    "你是一个 Markdown 文档注释助手。用户给出一段文本，并附上联网搜索到的网络资料。"
+    "请结合网络资料为它写一条简洁的备注/批注：解释它的含义或补充要点，2-4 句，第一人称可省略。"
+    "直接输出备注内容，不要引号、不要'备注：'前缀。\n\n【网络资料】\n%s")
+
+
+def _norm_rag_config(cfg):
+    """RAG 配置归一：路径与知识库名；key 缺失/脏数据保留默认，防手写 settings.json 打崩。"""
+    cfg = cfg if isinstance(cfg, dict) else {}
+    out = dict(RAG_DEFAULTS)
+    for k in ("path", "kb"):
+        v = cfg.get(k)
+        out[k] = v.strip() if isinstance(v, str) else out[k]
+    return out
+
+
+def _rag_saved_config():
+    settings = _load_json(SETTINGS_PATH, {})
+    cfg = settings.get("rag") if isinstance(settings, dict) else None
+    return _norm_rag_config(cfg if isinstance(cfg, dict) else {})
+
+
+def _rag_from_request(obj):
+    """按请求携带的 rag 段构造配置；未携带则用已存配置。"""
+    cfg = obj.get("rag") if isinstance(obj, dict) else None
+    return _norm_rag_config(cfg) if isinstance(cfg, dict) else _rag_saved_config()
+
+
+def _probe_rag():
+    """探测 :8767 是否在线。先 socket 短超时探端口（毫秒级~0.5s，且 IPv4
+    直连绕开 localhost→IPv6 解析），端口活着才走 HTTP 拿 health/KB 列表。
+    本机对未监听端口可能是 drop 而非 RST，直接 HTTP 探测会等满超时。"""
+    s = socket.socket()
+    s.settimeout(0.5)
+    try:
+        if s.connect_ex(("127.0.0.1", RAG_PORT)) != 0:
+            return {"online": False, "health": None, "kbs": []}
+    finally:
+        s.close()
+    try:
+        req = urllib.request.Request("http://127.0.0.1:%d/api/health" % RAG_PORT)
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            health = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return {"online": False, "health": None, "kbs": []}
+    kbs = []
+    try:
+        req2 = urllib.request.Request("http://127.0.0.1:%d/api/kb/list" % RAG_PORT)
+        with urllib.request.urlopen(req2, timeout=3) as resp2:
+            kb_data = json.loads(resp2.read().decode("utf-8"))
+        kbs_raw = kb_data.get("kbs", kb_data.get("data", []))
+        if isinstance(kbs_raw, dict):
+            kbs = list(kbs_raw.keys())
+        elif isinstance(kbs_raw, list):
+            kbs = [k if isinstance(k, str) else k.get("name", "") for k in kbs_raw]
+    except Exception:
+        pass
+    return {"online": True, "health": health, "kbs": kbs}
+
+
+def _rag_python_cmd(rag_path):
+    """挑能跑 rag-assistant 重依赖（torch/chromadb…）的解释器：
+    venv → PATH 里的 python → py -3 → 当前解释器兜底。
+    本服务可能由内嵌纯净 Python 运行，直接用 sys.executable 大概率缺依赖。"""
+    venv_py = os.path.join(rag_path, ".venv", "Scripts", "python.exe")
+    if os.path.isfile(venv_py):
+        return [venv_py]
+    for name in ("python", "python3"):
+        w = shutil.which(name)
+        if w and os.path.normcase(w) != os.path.normcase(sys.executable):
+            return [w]
+    w = shutil.which("py")
+    if w:
+        return [w, "-3"]
+    return [sys.executable]
+
+
+def _rag_start_async(rag_path):
+    """异步冷启动 rag-assistant 外部 API。返回 (ok, msg)。"""
+    global _rag_starting, _rag_process, _rag_process_stderr
+    main_py = os.path.join(rag_path, "main.py")
+    if not os.path.isfile(main_py):
+        return False, "路径下未找到 main.py：%s" % main_py
+    if _probe_rag()["online"]:
+        return False, "RAG 服务已在运行（端口 %d），无需启动" % RAG_PORT
+    with _rag_lock:
+        if _rag_starting:
+            return False, "正在启动中，请稍候"
+        _rag_starting = True
+    try:
+        # stderr 落临时文件而非 pipe：子进程输出多时 pipe 缓冲区满会卡死双方
+        stderr_tmp = tempfile.NamedTemporaryFile(
+            delete=False, suffix=".log", prefix="rag_", mode="w", encoding="utf-8")
+        stderr_path = stderr_tmp.name
+        # 子进程强制 UTF-8 输出，防中文/emoji 在 GBK 控制台报编码错
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        cmd = _rag_python_cmd(rag_path) + [main_py, "--port", "18765",
+                                           "--api-port", str(RAG_PORT)]
+        proc = subprocess.Popen(cmd, cwd=rag_path, env=env,
+                                stdout=subprocess.DEVNULL, stderr=stderr_tmp)
+        stderr_tmp.close()
+        with _rag_lock:
+            _rag_process = proc
+            _rag_process_stderr = ""
+    except Exception as e:
+        with _rag_lock:
+            _rag_starting = False
+        return False, "启动失败：%s" % e
+
+    def _poll():
+        global _rag_starting, _rag_process_stderr
+        try:
+            for _ in range(45):          # 最多等 90 秒（embedding 冷加载）
+                time.sleep(2)
+                if _probe_rag()["online"]:
+                    return
+                if proc.poll() is not None:
+                    # 子进程挂了：读临时文件找 Traceback
+                    err = ""
+                    try:
+                        with open(stderr_path, "r", encoding="utf-8", errors="replace") as ef:
+                            full = ef.read()
+                        idx = full.rfind("Traceback (most recent call last)")
+                        err = full[idx:][:2000] if idx >= 0 else full[-2000:]
+                    except Exception:
+                        err = "(无法读取启动输出)"
+                    with _rag_lock:
+                        _rag_process_stderr = err
+                    return
+        finally:
+            with _rag_lock:
+                _rag_starting = False
+            try:
+                os.unlink(stderr_path)
+            except Exception:
+                pass
+
+    threading.Thread(target=_poll, daemon=True).start()
+    return True, "RAG 启动中（冷加载 embedding 可能需数十秒），请稍候…"
+
+
+def _rag_stop():
+    """停 RAG：terminate 本服务拉起的子进程 → 清 :8767 全部 PID → 等端口释放。
+    rag-assistant 带看护自动重启，kill 后端口可能复活，只能尽力而为；
+    返回 True=端口仍活着（复活），False=已真停。"""
+    global _rag_process, _rag_process_stderr
+    with _rag_lock:
+        if _rag_process is not None:
+            try:
+                _rag_process.terminate()
+                _rag_process.wait(timeout=3)
+            except Exception:
+                try:
+                    _rag_process.kill()
+                except Exception:
+                    pass
+            _rag_process = None
+            _rag_process_stderr = ""
+    try:
+        r = subprocess.run("netstat -ano", capture_output=True, text=True,
+                           shell=True, timeout=5)
+        for line in r.stdout.splitlines():
+            if str(RAG_PORT) in line and ("LISTENING" in line or "ESTABLISHED" in line):
+                parts = line.strip().split()
+                if parts and parts[-1].isdigit():
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", parts[-1]],
+                                   capture_output=True, timeout=5)
+    except Exception:
+        pass
+    for _ in range(10):
+        try:
+            s = socket.socket()
+            s.settimeout(0.5)
+            s.connect(("127.0.0.1", RAG_PORT))
+            s.close()
+            time.sleep(0.5)
+        except Exception:
+            return False        # 连不上 = 端口已释放
+    return _probe_rag()["online"]
 
 
 class ReuseTCPServer(socketserver.ThreadingTCPServer):
@@ -229,20 +488,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
                        {"Cache-Control": "no-store"})
             return
         if u.path == "/api/version":
-            self._send(200, json.dumps({"ok": True, "version": MD_SERVER_VERSION},
-                                       ensure_ascii=False))
+            # sessions：当前活跃页面会话数（页面加载完成即发首个 ping 登记）。
+            # 启动画面据此判断"窗口真正加载出来了"再淡出（v1.11.1）。
+            self._send(200, json.dumps(
+                {"ok": True, "version": MD_SERVER_VERSION,
+                 "sessions": len(_LIVE_SESSIONS)},
+                ensure_ascii=False))
             return
         if u.path == "/api/ping":
-            # 页面心跳：仅用于"页面卸载后确认是否真关闭"的宽限判断。
+            # 页面心跳：登记本会话存活（token 区分多窗口/多标签），并撤销待退出。
             # 注意：闲置（切标签页/最小化）绝不触发退出。
-            _LAST_PING[0] = time.time()
-            _BYE_AT[0] = 0.0        # 收到新心跳 => 撤销待退出（刷新/重开场景）
+            _keepalive_ping(_live_tok(u.query))
             self._send(200, '{"ok":true}', "application/json; charset=utf-8")
             return
         if u.path == "/api/bye":
             # 页面卸载通知（pagehide -> sendBeacon）。刷新也会走到这里，
             # 因此只"登记"，由看门狗在宽限期后再决定是否退出。
-            _BYE_AT[0] = time.time()
+            # 多窗口共享本服务：仅当【最后一个】会话 bye 后才进入待退出。
+            _keepalive_bye(_live_tok(u.query))
             self._send(200, '{"ok":true}', "application/json; charset=utf-8")
             return
         if u.path == "/api/browse-dir":
@@ -278,8 +541,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                            ensure_ascii=False))
             return
         if u.path == "/api/version":
-            self._send(200, json.dumps({"ok": True, "version": MD_SERVER_VERSION},
-                                       ensure_ascii=False))
+            # sessions：当前活跃页面会话数（页面加载完成即发首个 ping 登记）。
+            # 启动画面据此判断"窗口真正加载出来了"再淡出（v1.11.1）。
+            self._send(200, json.dumps(
+                {"ok": True, "version": MD_SERVER_VERSION,
+                 "sessions": len(_LIVE_SESSIONS)},
+                ensure_ascii=False))
             return
         if u.path == "/favicon.ico":
             ico = os.path.join(HERE, "md-editor.ico")
@@ -517,7 +784,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(500, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
             return
         if u.path == "/api/llm-config":
-            self._send(200, json.dumps({"ok": True, "config": _llm_saved_config()},
+            self._send(200, json.dumps({"ok": True, "config": _llm_saved_config(),
+                                        "rag": _rag_saved_config()},
+                                       ensure_ascii=False),
+                       "application/json; charset=utf-8")
+            return
+        if u.path == "/api/rag-status":
+            result = _probe_rag()
+            with _rag_lock:
+                proc_alive = _rag_process is not None and _rag_process.poll() is None
+                starting = _rag_starting
+                stderr = _rag_process_stderr[:500] if _rag_process_stderr else ""
+            cfg = _rag_saved_config()
+            self._send(200, json.dumps({"ok": True, "online": result["online"],
+                                        "kbs": result["kbs"], "local_process": proc_alive,
+                                        "starting": starting, "stderr": stderr,
+                                        "path": cfg["path"], "kb": cfg["kb"]},
                                        ensure_ascii=False),
                        "application/json; charset=utf-8")
             return
@@ -532,7 +814,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # 先回响应、再异步开浏览器：避免启动器等待超时后重复打开
             self._send(200, "ok")
             _url = "http://127.0.0.1:%d%s" % (PORT, target)
-            threading.Timer(0.25, lambda: webbrowser.open(_url)).start()
+            threading.Timer(0.05, lambda: webbrowser.open(_url)).start()
             return
         # 根级静态兜底：工具目录内的图片/常见静态文件（防穿越，白名单扩展名）
         root = os.path.normpath(HERE)
@@ -555,6 +837,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
+        if u.path in ("/api/ping", "/api/bye"):
+            # sendBeacon 走 POST（pagehide 心跳/卸载通知），路由与 GET 同一实现
+            self.do_GET()
+            return
         if u.path == "/api/file":
             try:
                 length = int(self.headers.get("Content-Length", 0))
@@ -867,8 +1153,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not isinstance(settings, dict):
                     settings = {}
                 settings["llm"] = merged
+                rag_cfg = obj.get("rag")          # 同一保存动作可捎带 RAG 段
+                if isinstance(rag_cfg, dict):
+                    settings["rag"] = _norm_rag_config(rag_cfg)
                 _save_json(SETTINGS_PATH, settings)
-                self._send(200, json.dumps({"ok": True, "config": merged}, ensure_ascii=False),
+                self._send(200, json.dumps({"ok": True, "config": merged,
+                                            "rag": settings.get("rag", _rag_saved_config())},
+                                           ensure_ascii=False),
                            "application/json; charset=utf-8")
             except Exception as e:
                 self._send(500, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
@@ -899,18 +1190,115 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._send(200, json.dumps({"ok": False, "error": "选区内容为空"}, ensure_ascii=False),
                                "application/json; charset=utf-8")
                     return
-                if client.backend == "ollama" and not client.model:
+                if client.backend in ("ollama", "openai") and not client.model:
                     self._send(200, json.dumps({"ok": False,
-                                                "error": "Ollama 后端需先在 LLM 设置中选择模型"},
+                                                "error": "该后端需先在 LLM 设置中选择模型"},
                                                ensure_ascii=False), "application/json; charset=utf-8")
                     return
-                if u.path == "/api/annotate":
-                    self._send(200, json.dumps({"ok": True, "note": client.explain(text)},
+                # 联网查询开启时：先搜索 → 资料拼 prompt → LLM；失败静默降级纯模型
+                ws_cfg = _llm_config_from_request(obj).get("web_search") or {}
+                ws_flag = "off"
+                ws_ctx = ""
+                if ws_cfg.get("enabled"):
+                    if _ws_mod is None:
+                        ws_flag = "degraded"
+                    else:
+                        sr = _ws_mod.WebSearch(ws_cfg).search(text[:200])
+                        if sr.get("success") and sr.get("results"):
+                            ws_flag = "ok"
+                            ws_ctx = _ws_mod.format_results(sr["results"])
+                        else:
+                            ws_flag = "degraded"
+                is_ann = (u.path == "/api/annotate")
+                if ws_flag == "ok":
+                    sysp = (_WS_SYS_EXPLAIN if is_ann else _WS_SYS_POLISH) % ws_ctx
+                    result = client.chat([{"role": "system", "content": sysp},
+                                          {"role": "user", "content": text}])
+                else:
+                    result = client.explain(text) if is_ann else client.polish(text)
+                payload = {"ok": True, "web_search": ws_flag}
+                payload["note" if is_ann else "text"] = result
+                self._send(200, json.dumps(payload, ensure_ascii=False),
+                           "application/json; charset=utf-8")
+            except _LLM_ERR as e:
+                self._send(200, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False),
+                           "application/json; charset=utf-8")
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
+            return
+        # ---- RAG 启停：手动管理（编辑器退出不联动停，仅按钮触发） ----
+        if u.path in ("/api/rag/start", "/api/rag/stop"):
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                obj = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            except Exception:
+                obj = {}
+            try:
+                if u.path == "/api/rag/start":
+                    path = str(obj.get("path", "")).strip()
+                    if not path or not os.path.isdir(path):
+                        self._send(200, json.dumps(
+                            {"ok": False, "error": "rag-assistant 路径无效或不存在，请检查 AI 设置中的路径"},
+                            ensure_ascii=False), "application/json; charset=utf-8")
+                        return
+                    ok, msg = _rag_start_async(path)
+                    self._send(200, json.dumps(
+                        {"ok": ok, "message": msg if ok else "", "error": "" if ok else msg},
+                        ensure_ascii=False), "application/json; charset=utf-8")
+                else:
+                    alive = _rag_stop()
+                    if alive:
+                        self._send(200, json.dumps(
+                            {"ok": False, "error": "RAG 带看护自动重启（停止后端口仍存活），请在其运行窗口手动退出"},
+                            ensure_ascii=False), "application/json; charset=utf-8")
+                    else:
+                        self._send(200, json.dumps(
+                            {"ok": True, "message": "RAG 服务已停止", "kbs": []},
+                            ensure_ascii=False), "application/json; charset=utf-8")
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
+            return
+        # ---- RAG 检索增强润色/解释：query 拿上下文 → 拼 prompt → 走 LLM ----
+        if u.path in ("/api/rag/annotate", "/api/rag/rewrite"):
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                obj = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            except Exception as e:
+                self._send(200, json.dumps({"ok": False, "error": "请求体解析失败: %s" % e},
+                                           ensure_ascii=False), "application/json; charset=utf-8")
+                return
+            try:
+                if _ragc is None:
+                    raise _LLM_ERR("rag_client.py 加载失败，详见 runtime/_ragc.err")
+                client = _llm_from_request(obj)
+                text = str(obj.get("text", ""))[:30000]
+                if not text.strip():
+                    self._send(200, json.dumps({"ok": False, "error": "选区内容为空"},
                                                ensure_ascii=False),
                                "application/json; charset=utf-8")
+                    return
+                if client.backend in ("ollama", "openai") and not client.model:
+                    self._send(200, json.dumps(
+                        {"ok": False, "error": "该后端需先在 LLM 设置中选择模型"},
+                        ensure_ascii=False), "application/json; charset=utf-8")
+                    return
+                rag_cfg = _rag_from_request(obj)
+                try:
+                    # 检索 query 用选中文本截断（embedding 输入不宜过长）
+                    hit = _ragc.RAGClient().query(rag_cfg["kb"], text[:2000], top_k=5)
+                except _ragc.RAGClientError as e:
+                    raise _LLM_ERR("RAG 检索失败（服务可能未启动，可在 AI 设置中启动）：%s" % e)
+                if not hit.get("has_context"):
+                    raise _LLM_ERR("知识库未检索到相关内容（可稍后重试，或在 AI 设置中更换知识库）")
+                sysp = (_RAG_SYS_POLISH if u.path == "/api/rag/rewrite"
+                        else _RAG_SYS_EXPLAIN) % (hit.get("context") or "")
+                result = client.chat([{"role": "system", "content": sysp},
+                                      {"role": "user", "content": text}])
+                if u.path == "/api/rag/annotate":
+                    self._send(200, json.dumps({"ok": True, "note": result}, ensure_ascii=False),
+                               "application/json; charset=utf-8")
                 else:
-                    self._send(200, json.dumps({"ok": True, "text": client.polish(text)},
-                                               ensure_ascii=False),
+                    self._send(200, json.dumps({"ok": True, "text": result}, ensure_ascii=False),
                                "application/json; charset=utf-8")
             except _LLM_ERR as e:
                 self._send(200, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False),
@@ -1674,7 +2062,43 @@ def _common_dirs():
 _LAST_DOC_DIR = [""]
 _LAST_PING = [time.time()]          # 最近一次页面心跳时间
 _START_TIME = [time.time()]         # 服务启动时间（用于宽限期）
-_BYE_AT = [0.0]                     # 收到"页面卸载"通知的时间（0=无待退出）   # 最近打开/保存的文档所在目录（供相对路径解析）
+_BYE_AT = [0.0]                     # 所有会话均已卸载的时间（0=无待退出）
+_LIVE_SESSIONS = {}                 # 活跃页面会话: token -> 最后心跳时间
+                                    # （token 由前端每标签生成，见 markdown-editor.html
+                                    #  sessionToken；多窗口/多标签共享本服务）
+
+
+def _live_tok(qs):
+    """从 query string 取会话 token；缺失/损坏时归一为固定占位（兼容旧页面）"""
+    try:
+        return (urllib.parse.parse_qs(qs or "").get("tok", [""])[0] or "").strip() or "_legacy"
+    except Exception:
+        return "_legacy"
+
+
+def _keepalive_ping(tok):
+    """会话心跳：登记存活并撤销"全体待退出"。闲置（切标签/最小化）绝不触发退出。"""
+    now = time.time()
+    _LIVE_SESSIONS[tok] = now
+    _LAST_PING[0] = now
+    _BYE_AT[0] = 0.0                 # 任一会话恢复心跳 => 撤销待退出（刷新/重开场景）
+
+
+def _keepalive_bye(tok):
+    """会话卸载：只下线本会话；仅当【最后一个】会话下线才进入待退出倒计时。"""
+    _LIVE_SESSIONS.pop(tok, None)
+    try:
+        with io.open(os.path.join(HERE, "runtime", "lifecycle.log"),
+                     "a", encoding="utf-8") as _f:
+            _f.write("%s bye tok=%s live=%d bye_at=%s\n"
+                     % (time.strftime("%H:%M:%S"), tok, len(_LIVE_SESSIONS),
+                        time.strftime("%H:%M:%S", time.localtime(_BYE_AT[0]))))
+    except Exception:
+        pass
+    if _LIVE_SESSIONS:
+        _BYE_AT[0] = 0.0             # 还有其他窗口/标签活着，服务继续保活
+    elif _BYE_AT[0] == 0.0:
+        _BYE_AT[0] = time.time()
 
 
 def _run_picker(script, tmpname):
@@ -1730,21 +2154,24 @@ def _pickdir_log(msg):
 
 
 def _idle_watchdog(grace=None, check=0.5):
-    """只在【用户确实关闭了页面】时退出服务。
+    """只在【所有窗口/标签都确实关闭】时退出服务。
 
-    主判定：收到页面卸载通知(/api/bye，由 pagehide 触发)，且宽限期内
-    没有恢复心跳 → 认定用户真的关掉了编辑器，服务退出。
-
-    兜底判定：WebView2 被直接拽掉时 pagehide 跑不到，/api/bye 发不出来，
-    光等 bye 会永久悬挂（僵尸服务占端口）。心跳断流超过 orphan 宽限
-    （默认 5 分钟，MD_EXIT_ORPHAN_GRACE 可调）同样认定页面已死——
-    后台标签页心跳节流最长约 1 分钟，5 分钟足够保守，不会误杀
-    最小化/切走的窗口。
+    多窗口/多标签共享本后端，会话以 token 区分（前端每标签生成，见
+    markdown-editor.html sessionToken；/api/ping、/api/bye 带 ?tok=）：
+    - 主判定：全部会话都收到卸载通知(/api/bye，pagehide→sendBeacon)后
+      进入宽限倒计时；宽限期内出现任何新会话心跳（刷新/重开）即撤销。
+    - 保活：只要还有任一会话存活（_LIVE_SESSIONS 非空），服务绝不退出
+      ——关闭某个窗口不影响其它窗口（这正是多开的核心语义）。
+    - 兜底：WebView2 被直接拽掉时 pagehide 跑不到、bye 发不出，该会话
+      按最后心跳停滞超 orphan 宽限（默认 5 分钟）做幽灵清理；全部会话
+      清光后按 max(最后心跳, 服务启动) 超 orphan 同样回收，防僵尸端口。
+      后台标签页心跳节流最长约 1 分钟，5 分钟足够保守，不误杀
+      最小化/切走的窗口。
 
     明确不做的事：**不做"空闲超时"判定**。
-    切换标签页、最小化、长时间不操作都不等于关闭 —— 只要心跳还在，
-    服务就活着。刷新页面会重新发心跳，从而撤销待退出。
-    可用环境变量 MD_EXIT_GRACE 覆盖宽限期（便于测试）。"""
+    切换标签页、最小化、长时间不操作都不等于关闭 —— 只要会话还在，
+    服务就活着。可用环境变量 MD_EXIT_GRACE/MD_EXIT_ORPHAN_GRACE
+    覆盖宽限期（便于测试）。"""
     if grace is None:
         grace = float(os.environ.get("MD_EXIT_GRACE", "8"))
     orphan = float(os.environ.get("MD_EXIT_ORPHAN_GRACE", "300"))
@@ -1770,9 +2197,14 @@ def _idle_watchdog(grace=None, check=0.5):
     while True:
         time.sleep(check)
         now = time.time()
+        # 幽灵清理：无 bye 的会话心跳停滞超过 orphan（页面/窗口被强杀）
+        for t in [t for t, ts in _LIVE_SESSIONS.items() if now - ts >= orphan]:
+            del _LIVE_SESSIONS[t]
+        if _LIVE_SESSIONS:
+            continue          # 仍有存活窗口/标签，服务保活
         bye = _BYE_AT[0]
         if not bye:
-            # 兜底：从没收到 bye 且心跳已断流超过 orphan 宽限。
+            # 兜底：从未 bye 且已无存活会话，心跳断流超 orphan 宽限。
             # 基准取「最后心跳 / 服务启动」的较大者——页面从未打开过的
             # 孤儿服务（起服务后 5 分钟无页面接入）同样回收。
             if now - max(_LAST_PING[0], _START_TIME[0]) >= orphan:

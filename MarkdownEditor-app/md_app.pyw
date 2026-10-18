@@ -64,7 +64,7 @@ def ensure_default_settings():
 def service_alive(min_ver=0):
     try:
         d = json.loads(urllib.request.urlopen(
-            "http://127.0.0.1:%d/api/version" % PORT, timeout=2).read().decode())
+            "http://127.0.0.1:%d/api/version" % PORT, timeout=0.3).read().decode())
         return int(d.get("version", 0)) >= min_ver if min_ver else True
     except Exception:
         return False
@@ -77,15 +77,16 @@ def ensure_service():
         exe = os.path.join(HERE, "python", "pythonw.exe")
         if not os.path.exists(exe):
             exe = sys.executable
-        subprocess.Popen([exe, os.path.join(HERE, "md_server.py")],
+        subprocess.Popen([exe, os.path.join(HERE, "_md_run.py")],
                          cwd=HERE, creationflags=0x08000000)
     except Exception as e:
         log("start service failed: %s" % e)
         return False
-    for _ in range(60):
+    end = time.time() + 15
+    while time.time() < end:
         if service_alive():
             return True
-        time.sleep(0.25)
+        time.sleep(0.05)
     return False
 
 

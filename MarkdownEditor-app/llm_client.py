@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
-"""LLM 统一客户端 — LM Studio / Ollama（OpenAI 兼容 HTTP API），纯标准库零依赖。
+"""LLM 统一客户端 — LM Studio / Ollama / OpenAI 兼容（纯标准库 urllib 零依赖）。
 
-移植自 structured-writer（Qwen 写作智能体）samedi 架构的成熟实现：
   - LM Studio:  http://<host>:1234/v1/chat/completions
   - Ollama:     http://<host>:11434/api/chat
+  - OpenAI 兼容: https://api.openai.com/v1/chat/completions 等（DeepSeek、硅基流动、
+    OpenRouter 等同构端点均通吃；base_url 填到根或 /v1 均可，自动补全）
 模型列表、配置校验、调用超时与错误归一互相独立，供 md_server.py 注解/润色/测试共用。
 """
 import json
@@ -20,8 +21,9 @@ class LLMError(Exception):
 
 class LLMClient:
     """LLM 统一客户端。config 形如:
-    {"backend": "lmstudio"|"ollama", "base_url": "...", "model": "",
-     "timeout": 180, "max_tokens": 2048, "temperature": 0.7}
+    {"backend": "lmstudio"|"ollama"|"openai", "base_url": "...", "model": "",
+     "api_key": "", "timeout": 180, "max_tokens": 2048, "temperature": 0.7,
+     "web_search": {...联网查询配置，本类不消费，见 web_search.py...}}
     """
 
     def __init__(self, config=None):
@@ -29,6 +31,7 @@ class LLMClient:
         self.backend = (cfg.get("backend") or "lmstudio").lower()
         self.base_url = (cfg.get("base_url") or "").rstrip("/")
         self.model = cfg.get("model") or ""
+        self.api_key = cfg.get("api_key") or ""
         try:
             self.timeout = int(cfg.get("timeout", 180))
         except Exception:
@@ -42,23 +45,43 @@ class LLMClient:
         except Exception:
             self.temperature = 0.7
         if not self.base_url:
-            self.base_url = ("http://localhost:1234" if self.backend == "lmstudio"
-                             else "http://localhost:11434")
+            if self.backend == "ollama":
+                self.base_url = "http://localhost:11434"
+            elif self.backend == "openai":
+                self.base_url = "https://api.openai.com/v1"
+            else:
+                self.base_url = "http://localhost:1234"
+        # OpenAI 兼容惯例 base_url 含 /v1；填根地址时自动补，两种填法都通
+        if self.backend == "openai" and not self.base_url.endswith("/v1"):
+            self.base_url = self.base_url + "/v1"
 
     # ---- 端点与载荷 ----
     def _chat_url(self):
         if self.backend == "ollama":
             return self.base_url + "/api/chat"
+        if self.backend == "openai":
+            return self.base_url + "/chat/completions"
         return self.base_url + "/v1/chat/completions"
 
     def _models_url(self):
         if self.backend == "ollama":
             return self.base_url + "/api/tags"
+        if self.backend == "openai":
+            return self.base_url + "/models"
         return self.base_url + "/v1/models"
 
+    def _headers(self):
+        h = {"Content-Type": "application/json"}
+        if self.backend == "openai":
+            if not self.api_key:
+                raise LLMError("OpenAI 兼容后端需先在 LLM 设置中填写 API Key")
+            h["Authorization"] = "Bearer " + self.api_key
+        return h
+
     def list_models(self):
-        """取当前后端可用模型名列表。LM Studio: data[].id；Ollama: models[].name。"""
-        req = urllib.request.Request(self._models_url(), method="GET")
+        """取当前后端可用模型名列表。LM Studio/OpenAI: data[].id；Ollama: models[].name。"""
+        req = urllib.request.Request(self._models_url(), method="GET",
+                                     headers=self._headers())
         try:
             with urllib.request.urlopen(req, timeout=min(self.timeout, 15)) as resp:
                 data = json.loads(resp.read().decode("utf-8", errors="replace"))
@@ -84,23 +107,30 @@ class LLMClient:
     def chat(self, messages, max_tokens=None, temperature=None):
         """一次对话，返回回复文本。messages 为 [{"role","content"}, ...]。"""
         mt = max_tokens or self.max_tokens
+        tp = temperature if temperature is not None else self.temperature
         if self.backend == "ollama":
             payload = json.dumps({
                 "model": self.model,
                 "messages": messages,
                 "stream": False,
-                "options": {"num_predict": mt,
-                            "temperature": temperature if temperature is not None else self.temperature},
+                "options": {"num_predict": mt, "temperature": tp},
+            }).encode("utf-8")
+        elif self.backend == "openai":
+            if not self.model:
+                raise LLMError("OpenAI 兼容后端需先在 LLM 设置中选择模型")
+            payload = json.dumps({
+                "model": self.model,
+                "messages": messages,
+                "max_tokens": mt,
+                "temperature": tp,
             }).encode("utf-8")
         else:
-            p = {"messages": messages, "max_tokens": mt,
-                 "temperature": temperature if temperature is not None else self.temperature}
+            p = {"messages": messages, "max_tokens": mt, "temperature": tp}
             if self.model:
                 p["model"] = self.model
             payload = json.dumps(p).encode("utf-8")
         req = urllib.request.Request(self._chat_url(), data=payload,
-                                     headers={"Content-Type": "application/json"},
-                                     method="POST")
+                                     headers=self._headers(), method="POST")
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 body = resp.read()

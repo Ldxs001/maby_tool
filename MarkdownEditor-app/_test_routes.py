@@ -84,7 +84,7 @@ try:
     s, b = call("/api/rewrite", "POST", {"text": ""})
     check("rewrite 空文本", json.loads(b)["ok"] is False)
     s, b = call("/api/annotate", "POST", {"config": {"backend": "ollama", "model": ""}, "text": "你好"})
-    check("annotate ollama无模型", json.loads(b).get("error") == "Ollama 后端需先在 LLM 设置中选择模型", b[:200])
+    check("annotate ollama无模型", json.loads(b).get("error") == "该后端需先在 LLM 设置中选择模型", b[:200])
 
     # 线程化验证：挂一个慢 LLM 调用（不可达长超时），期间心跳/保存必须照常响应
     import threading as _th

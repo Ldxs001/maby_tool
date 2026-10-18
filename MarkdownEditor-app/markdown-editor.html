@@ -230,6 +230,9 @@
       font-size:13px; font-family:var(--sans); padding:5px 12px; border-radius:6px;
     }
     #selTools button:hover{background:#3d4657;color:#fff;}
+    #selTools button:disabled,.sv-mini:disabled{opacity:.4;cursor:not-allowed;}
+    #selTools button:disabled:hover{background:transparent;color:#d7dce6;}
+    .sv-mini:disabled:hover{background:#262c38;color:#aab2c4;}
   </style>
   <meta name="generator" content="MDEditor - AI-assisted (generated with an AI coding agent)">
 </head>
@@ -344,9 +347,12 @@
         <select id="llmBackend" style="width:210px;background:#1a1d24;color:#e8eaed;border:1px solid rgba(128,128,128,.35);border-radius:6px;padding:4px 6px;">
           <option value="lmstudio">LM Studio（本地 :1234）</option>
           <option value="ollama">Ollama（本地 :11434）</option>
+          <option value="openai">OpenAI 兼容（外部 API）</option>
         </select></div>
       <div class="ts-row"><label>服务地址（留空按后端默认端口）</label>
         <input id="llmBase" type="text" placeholder="http://localhost:1234" style="width:210px;"></div>
+      <div class="ts-row" id="llmKeyRow" style="display:none;"><label>API Key（OpenAI 兼容后端必填）</label>
+        <input id="llmKey" type="text" placeholder="sk-…" style="width:210px;"></div>
       <div class="ts-row"><label>模型（下拉为后端实加载的模型）</label>
         <div style="display:flex;gap:6px;align-items:center;">
           <select id="llmModel" style="width:150px;background:#1a1d24;color:#e8eaed;border:1px solid rgba(128,128,128,.35);border-radius:6px;padding:4px 6px;"></select>
@@ -355,8 +361,47 @@
       <div class="ts-row"><label>超时（秒）</label><input id="llmTimeout" type="number" min="5" max="600" step="5"></div>
       <div class="ts-row"><label>最大输出 tokens</label><input id="llmMaxTok" type="number" min="64" max="32768" step="64"></div>
       <div class="ts-row"><label>温度 temperature（0~2）</label><input id="llmTemp" type="number" min="0" max="2" step="0.1"></div>
+      <div class="ts-sep" style="margin-top:14px;">联网查询（润色 / AI 解释时检索网络资料）</div>
+      <div class="ts-row"><label>启用联网查询（关闭则 AI 仅凭自身润色/解释）</label>
+        <input id="wsEnabled" type="checkbox" style="width:18px;height:18px;cursor:pointer;"></div>
+      <div class="ts-row"><label>搜索源</label>
+        <select id="wsBackend" style="width:210px;background:#1a1d24;color:#e8eaed;border:1px solid rgba(128,128,128,.35);border-radius:6px;padding:4px 6px;">
+          <option value="duckduckgo">DuckDuckGo（免费，无需 Key）</option>
+          <option value="tavily">Tavily（需 API Key）</option>
+          <option value="google">Google Custom Search（需 Key + CX）</option>
+          <option value="bing">Bing Search（需 API Key）</option>
+          <option value="custom">自定义 API</option>
+        </select></div>
+      <div class="ts-row" id="wsKeyRow" style="display:none;"><label>API Key（Tavily / 自定义 API 用）</label>
+        <input id="wsKey" type="text" placeholder="tvly-…" style="width:210px;"></div>
+      <div class="ts-row" id="wsBingRow" style="display:none;"><label>Bing API Key</label>
+        <input id="wsBingKey" type="text" placeholder="" style="width:210px;"></div>
+      <div class="ts-row" id="wsGoogleRow" style="display:none;"><label>Google API Key / CX</label>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input id="wsGoogleKey" type="text" placeholder="AIza…" style="width:100px;">
+          <input id="wsGoogleCx" type="text" placeholder="CX" style="width:100px;">
+        </div></div>
+      <div class="ts-row" id="wsCustomRow" style="display:none;"><label>自定义 API URL（{q} 与 {key} 占位）</label>
+        <input id="wsCustomUrl" type="text" placeholder="https://…?q={q}&amp;key={key}" style="width:210px;"></div>
+      <div class="ts-row"><label>结果条数（1~10）</label><input id="wsMax" type="number" min="1" max="10" step="1"></div>
+      <div class="ts-sep" style="margin-top:14px;">RAG 知识库（检索增强润色 / 解释）</div>
+      <div class="ts-row"><label>rag-assistant 路径（含 main.py 的目录）</label>
+        <input id="ragPath" type="text" placeholder="C:\Users\sm001\WorkBuddy\rag-assistant" style="width:210px;"></div>
+      <div class="ts-row"><label>知识库（空 = 自动路由）</label>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <select id="ragKb" style="width:150px;background:#1a1d24;color:#e8eaed;border:1px solid rgba(128,128,128,.35);border-radius:6px;padding:4px 6px;"></select>
+          <div id="ragRefresh" class="sv-mini" title="重新探测 RAG 服务与知识库列表">刷新</div>
+        </div></div>
+      <div class="ts-row"><label>RAG 服务（端口 8767）</label>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <span id="ragState" style="font-size:12px;color:var(--muted);max-width:170px;white-space:pre-wrap;word-break:break-all;">探测中…</span>
+          <button id="ragStart" class="sv-mini" style="padding:5px 14px;">启动</button>
+          <button id="ragStop" class="sv-mini" style="padding:5px 14px;">停止</button>
+        </div></div>
       <div style="font-size:12px;color:var(--muted);margin-top:10px;line-height:1.6;">
-        本地推理需先启动 LM Studio / Ollama 并加载模型；润色与「AI 解释」都走此配置。
+        本地推理需先启动 LM Studio / Ollama 并加载模型；OpenAI 兼容后端填外部 API 地址与 Key（DeepSeek、硅基流动等均可用）；润色与「AI 解释」都走此配置。<br>
+        联网查询开启后，润色 / AI 解释先检索网络资料注入提示词，搜索失败自动降级为纯模型结果；与 RAG 相互独立。<br>
+        「RAG润色 / RAG解释」在上述基础上检索 rag-assistant 知识库作为参考资料，需先在下方填写路径并启动 RAG 服务；启动/停止仅手动触发，退出编辑器不影响其运行。
       </div>
     </div>
     <div class="ts-foot" style="display:flex;gap:10px;justify-content:flex-end;align-items:center;">
@@ -376,6 +421,7 @@
     </div>
     <div class="ts-foot" style="display:flex;gap:10px;justify-content:flex-end;align-items:center;">
       <button id="annAi" class="sv-mini" style="padding:7px 14px;">AI 解释</button>
+      <button id="annRagAi" class="sv-mini" style="padding:7px 14px;" disabled title="需 RAG 服务在线（AI 设置中启动）">RAG 解释</button>
       <button id="annDel" class="sv-mini" style="padding:7px 14px;">删除标注</button>
       <button id="annOk" style="background:#4a6cf7;color:#fff;border:none;border-radius:6px;padding:7px 22px;cursor:pointer;">完成</button>
     </div>
@@ -400,9 +446,10 @@
 <div id="selTools" hidden>
   <button id="selNote" title="给选中片段加批注">备注</button>
   <button id="selPolish" title="AI 润色选中片段">润色</button>
+  <button id="selRagPolish" title="基于 RAG 知识库检索增强润色（需 RAG 服务在线）" disabled>RAG润色</button>
 </div>
 <input type="file" id="fileInput" hidden accept=".md,.markdown,.txt">
-<script src="/static/katex/katex.min.js"></script>
+<script defer src="/static/katex/katex.min.js"></script>
 <script>
 /*PARSER_START*/
 function escapeHtml(s){
@@ -966,6 +1013,14 @@ function parseMarkdown(src){
         return;
       }
       var S=editor.scrollTop;
+      /* 单锚退化：全文不足两个锚、无法构成锚对插值区间时，退化为整文档比例直映射
+         （编辑区滚动比例→预览滚动比例；编辑区到底的钉底已在上方兜住） */
+      if(anchors.length<=1){
+        var eRange=Math.max(1,editor.scrollHeight-editor.clientHeight);
+        var pRange=Math.max(1,pane.scrollHeight-pane.clientHeight);
+        pane.scrollTop=Math.max(0,S/eRange*pRange);
+        return;
+      }
       var vh=pane.getBoundingClientRect().height;
       var pr=pane.getBoundingClientRect();
       function apos(el){ return pane.scrollTop+(el.getBoundingClientRect().top-pr.top); }
@@ -1306,19 +1361,36 @@ function parseMarkdown(src){
       })
       .catch(function(){});
   }
-  /* 心跳：让后端知道页面还开着。
-     注意：闲置（切标签页/最小化/长时间不写）不算关闭，绝不据此停服务。 */
+  /* 心跳：让后端知道本窗口/标签还开着。
+     注意：闲置（切标签页/最小化/长时间不写）不算关闭，绝不据此停服务。
+     会话 token 由本标签生成（sessionStorage，刷新/bfcache 恢复保持一致），
+     后端按 token 统计存活窗口数 → 多开时关单个窗口不影响服务，全关才退。 */
   (function(){
+    function sessionToken(){
+      var k='mda_session';
+      try{
+        var v=sessionStorage.getItem(k);
+        if(v) return v;
+      }catch(e){}
+      var u;
+      try{
+        u='m'+Date.now().toString(36)+'-'+(crypto&&crypto.getRandomValues
+           ?crypto.getRandomValues(new Uint32Array(1))[0]
+           :String(Math.floor(Math.random()*1e15)));
+      }catch(e){ u='m'+Date.now().toString(36); }
+      try{ sessionStorage.setItem(k,u); }catch(e){}
+      return u;
+    }
     function beat(){
-      try { fetch('/api/ping', {cache:'no-store'}).catch(function(){}); } catch(e) {}
+      try { fetch('/api/ping?tok='+encodeURIComponent(sessionToken()), {cache:'no-store'}).catch(function(){}); } catch(e) {}
     }
     beat();
     setInterval(beat, 5000);
   })();
-  /* 用户【真的关闭】页面时通知后端停止服务（sendBeacon 在 pagehide 中可靠）。
-     刷新页面也会触发它，但后端有宽限期：只要新页面很快恢复心跳就撤销退出。 */
+  /* 用户【真的关闭】本页面时通知后端下线本会话（sendBeacon 在 pagehide 中可靠）。
+     刷新页面也会触发它，但后端有宽限期：只要还有其它窗口/新页面恢复心跳就撤销退出。 */
   window.addEventListener('pagehide', function(){
-    try { navigator.sendBeacon('/api/bye'); } catch(e) {}
+    try { navigator.sendBeacon('/api/bye?tok='+encodeURIComponent(sessionToken())); } catch(e) {}
   });
   function uiBeacon(msg){
     /* 分步探针：sendBeacon 走独立通道，不受连接池/主线程繁忙影响 */
@@ -2215,10 +2287,28 @@ function parseMarkdown(src){
       .then(function(r){return r.json();})
       .then(function(j){
         btn.disabled=false; btn.textContent='AI 解释';
-        if(j&&j.ok){ document.getElementById('annNote').value=j.note; }
+        if(j&&j.ok){
+          document.getElementById('annNote').value=j.note;
+          if(j.web_search==='ok'){ showToast('已结合联网资料解释'); }
+          else if(j.web_search==='degraded'){ showToast('联网搜索失败，已用纯模型结果'); }
+        }
         else{ showToast('AI 解释失败：'+((j&&j.error)||'未知错误')+'\n可在工具栏「AI」里检查后端配置。'); }
       })
       .catch(function(e){ btn.disabled=false; btn.textContent='AI 解释'; showToast('AI 解释失败：'+e.message); });
+  });
+  document.getElementById('annRagAi').addEventListener('click',function(){
+    if(!annModalId||this.disabled) return;
+    var a=annById(annModalId); if(!a) return;
+    var btn=this; btn.disabled=true; btn.textContent='解释中…';
+    fetch('/api/rag/annotate',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text:a.text})})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        btn.disabled=!ragOnline; btn.textContent='RAG 解释';
+        if(j&&j.ok){ document.getElementById('annNote').value=j.note; }
+        else{ showToast('RAG 解释失败：'+((j&&j.error)||'未知错误')+'\n可在工具栏「AI」里检查 RAG 服务状态。'); }
+      })
+      .catch(function(e){ btn.disabled=!ragOnline; btn.textContent='RAG 解释'; showToast('RAG 解释失败：'+e.message); });
   });
   /* 点批注段打开 Modal（拖选时不误触） */
   editor.addEventListener('click',function(e){
@@ -2290,10 +2380,37 @@ function parseMarkdown(src){
       .then(function(j){
         if(!rwCtx) return;
         ta.disabled=false;
-        if(j&&j.ok){ ta.value=j.text; ta.focus(); }
+        if(j&&j.ok){
+          ta.value=j.text; ta.focus();
+          if(j.web_search==='ok'){ showToast('已结合联网资料润色'); }
+          else if(j.web_search==='degraded'){ showToast('联网搜索失败，已用纯模型结果'); }
+        }
         else{ showToast('润色失败：'+((j&&j.error)||'未知错误')+'\n可在工具栏「AI」里检查后端配置。'); closeRw(); }
       })
       .catch(function(e){ if(rwCtx){ ta.disabled=false; showToast('润色失败：'+e.message); closeRw(); } });
+  });
+  document.getElementById('selRagPolish').addEventListener('click',function(){
+    if(this.disabled) return;
+    var r=getSel();
+    if(r.e<=r.s){ selTools.hidden=true; return; }
+    var txt=getText().substring(r.s,r.e);
+    if(!txt.trim()){ showToast('选中内容为空'); return; }
+    selTools.hidden=true;
+    rwCtx={s:r.s,e:r.e,text:txt};
+    document.getElementById('rwOrig').textContent=txt;
+    var ta=document.getElementById('rwNew');
+    ta.disabled=true; ta.value='检索知识库并润色中…（RAG 冷启动或本地模型可能需要一些时间）';
+    document.getElementById('rwOverlay').hidden=false;
+    fetch('/api/rag/rewrite',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text:txt})})
+      .then(function(res){return res.json();})
+      .then(function(j){
+        if(!rwCtx) return;
+        ta.disabled=false;
+        if(j&&j.ok){ ta.value=j.text; ta.focus(); }
+        else{ showToast('RAG 润色失败：'+((j&&j.error)||'未知错误')+'\n可在工具栏「AI」里检查 RAG 服务状态。'); closeRw(); }
+      })
+      .catch(function(e){ if(rwCtx){ ta.disabled=false; showToast('RAG 润色失败：'+e.message); closeRw(); } });
   });
   function closeRw(){ rwCtx=null; document.getElementById('rwOverlay').hidden=true; }
   document.getElementById('rwClose').addEventListener('click',closeRw);
@@ -2339,15 +2456,44 @@ function parseMarkdown(src){
       sel.value=selected;
     }
   }
+  function wsCfgFromForm(){
+    return {
+      enabled:document.getElementById('wsEnabled').checked,
+      backend:document.getElementById('wsBackend').value,
+      api_key:document.getElementById('wsKey').value.trim(),
+      google_key:document.getElementById('wsGoogleKey').value.trim(),
+      google_cx:document.getElementById('wsGoogleCx').value.trim(),
+      bing_key:document.getElementById('wsBingKey').value.trim(),
+      custom_url:document.getElementById('wsCustomUrl').value.trim(),
+      max_results:parseInt(document.getElementById('wsMax').value,10)||3
+    };
+  }
+  function wsSyncRows(){
+    var b=document.getElementById('wsBackend').value;
+    document.getElementById('wsKeyRow').style.display=(b==='tavily'||b==='custom')?'':'none';
+    document.getElementById('wsBingRow').style.display=b==='bing'?'':'none';
+    document.getElementById('wsGoogleRow').style.display=b==='google'?'':'none';
+    document.getElementById('wsCustomRow').style.display=b==='custom'?'':'none';
+  }
+  function llmSyncBackendRows(){
+    var b=document.getElementById('llmBackend').value;
+    document.getElementById('llmKeyRow').style.display=b==='openai'?'':'none';
+    var ph=document.getElementById('llmBase');
+    if(b==='openai'){ ph.placeholder='https://api.openai.com/v1'; }
+    else if(b==='ollama'){ ph.placeholder='http://localhost:11434'; }
+    else{ ph.placeholder='http://localhost:1234'; }
+  }
   function llmCfgFromForm(){
     var temp=parseFloat(document.getElementById('llmTemp').value);
     return {
       backend:document.getElementById('llmBackend').value,
       base_url:document.getElementById('llmBase').value.trim(),
       model:document.getElementById('llmModel').value,
+      api_key:document.getElementById('llmKey').value.trim(),
       timeout:parseInt(document.getElementById('llmTimeout').value,10)||180,
       max_tokens:parseInt(document.getElementById('llmMaxTok').value,10)||2048,
-      temperature:isNaN(temp)?0.7:temp
+      temperature:isNaN(temp)?0.7:temp,
+      web_search:wsCfgFromForm()
     };
   }
   function llmRefreshModels(silent){
@@ -2368,10 +2514,28 @@ function parseMarkdown(src){
       var c=j.config;
       document.getElementById('llmBackend').value=c.backend;
       document.getElementById('llmBase').value=c.base_url;
+      document.getElementById('llmKey').value=c.api_key||'';
       document.getElementById('llmTimeout').value=c.timeout;
       document.getElementById('llmMaxTok').value=c.max_tokens;
       document.getElementById('llmTemp').value=c.temperature;
+      llmSyncBackendRows();
+      var ws=c.web_search||{};
+      document.getElementById('wsEnabled').checked=!!ws.enabled;
+      document.getElementById('wsBackend').value=ws.backend||'duckduckgo';
+      document.getElementById('wsKey').value=ws.api_key||'';
+      document.getElementById('wsGoogleKey').value=ws.google_key||'';
+      document.getElementById('wsGoogleCx').value=ws.google_cx||'';
+      document.getElementById('wsBingKey').value=ws.bing_key||'';
+      document.getElementById('wsCustomUrl').value=ws.custom_url||'';
+      document.getElementById('wsMax').value=ws.max_results||3;
+      wsSyncRows();
       llmFillModels(c.model?[c.model]:[],c.model);
+      if(j.rag){
+        document.getElementById('ragPath').value=j.rag.path||'';
+        ragFillKb([],j.rag.kb||'');
+      }
+      ragRenderStatus(null);
+      ragProbe();                        /* 打开即探测一次 */
       document.getElementById('llmTestMsg').textContent='';
       document.getElementById('llmOverlay').hidden=false;
       llmRefreshModels(true);   /* 静默预取一次 */
@@ -2386,13 +2550,15 @@ function parseMarkdown(src){
   document.getElementById('llmBackend').addEventListener('change',function(){
     /* 切后端时，空地址或旧后端默认地址跟随切换 */
     var b=this.value;
-    var defaults={lmstudio:'http://localhost:1234',ollama:'http://localhost:11434'};
-    var other=b==='lmstudio'?'ollama':'lmstudio';
+    var defaults={lmstudio:'http://localhost:1234',ollama:'http://localhost:11434',
+                  openai:'https://api.openai.com/v1'};
     var cur=document.getElementById('llmBase').value.trim();
-    if(!cur||cur===defaults[other]){ document.getElementById('llmBase').value=defaults[b]; }
-    document.getElementById('llmBase').placeholder=defaults[b];
+    var isDefault=Object.keys(defaults).some(function(k){return cur===defaults[k];});
+    if(!cur||isDefault){ document.getElementById('llmBase').value=defaults[b]; }
+    llmSyncBackendRows();
     llmRefreshModels(false);
   });
+  document.getElementById('wsBackend').addEventListener('change',wsSyncRows);
   document.getElementById('llmRefresh').addEventListener('click',function(){ llmRefreshModels(false); });
   document.getElementById('llmTest').addEventListener('click',function(){
     var btn=this; btn.disabled=true; btn.textContent='测试中…';
@@ -2411,13 +2577,102 @@ function parseMarkdown(src){
   document.getElementById('llmSave').addEventListener('click',function(){
     var cfg=llmCfgFromForm();
     fetch('/api/llm-config',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({config:cfg})})
+      body:JSON.stringify({config:cfg,rag:ragCfgFromForm()})})
       .then(function(r){return r.json();})
       .then(function(j){
         if(j&&j.ok){ showToast('AI 配置已保存'); document.getElementById('llmOverlay').hidden=true; }
         else{ showToast('保存失败：'+((j&&j.error)||'未知错误')); }
       })
       .catch(function(e){ showToast('保存失败：'+e.message); });
+  });
+
+  /* ── RAG 状态联动与管理（按钮可用性随 8767 探测结果变化） ── */
+  var ragOnline=false;
+  function updateRagButtons(){
+    document.getElementById('selRagPolish').disabled=!ragOnline;
+    document.getElementById('annRagAi').disabled=!ragOnline;
+  }
+  function ragCfgFromForm(){
+    return {path:document.getElementById('ragPath').value.trim(),
+            kb:document.getElementById('ragKb').value||''};
+  }
+  function ragFillKb(kbs,selected){
+    var sel=document.getElementById('ragKb');
+    sel.innerHTML='';
+    var o=document.createElement('option');
+    o.value=''; o.textContent='（自动路由）';
+    sel.appendChild(o);
+    for(var i=0;i<(kbs||[]).length;i++){
+      var op=document.createElement('option');
+      op.value=kbs[i]; op.textContent=kbs[i];
+      sel.appendChild(op);
+    }
+    if(selected){
+      if((kbs||[]).indexOf(selected)>=0){ sel.value=selected; }
+      else{
+        var op2=document.createElement('option');
+        op2.value=selected; op2.textContent=selected+'（列表外）';
+        sel.insertBefore(op2,sel.firstChild);
+        sel.value=selected;
+      }
+    }else{ sel.value=''; }
+  }
+  function ragRenderStatus(j){
+    var el=document.getElementById('ragState');
+    var btnS=document.getElementById('ragStart');
+    var btnT=document.getElementById('ragStop');
+    if(!j){ el.textContent='探测中…'; return; }
+    var cur=document.getElementById('ragKb').value||j.kb||'';
+    if(j.online){
+      el.textContent='在线（'+((j.kbs&&j.kbs.length)||0)+' 个知识库）';
+      el.title='';
+      ragFillKb(j.kbs,cur);
+      btnS.disabled=true; btnT.disabled=false;
+    }else if(j.starting){
+      el.textContent='启动中…（冷加载需数十秒）';
+      el.title=j.stderr||'';
+      btnS.disabled=true; btnT.disabled=false;
+    }else{
+      el.textContent='离线';
+      el.title=j.stderr||'';
+      ragFillKb([],cur);
+      btnS.disabled=false; btnT.disabled=true;
+    }
+  }
+  function ragProbe(){
+    fetch('/api/rag-status',{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){
+      if(!(j&&j.ok)) return;
+      ragOnline=!!j.online;
+      updateRagButtons();
+      /* AI 设置面板开着才刷新其显示（避免覆盖用户正在编辑的下拉选择） */
+      if(!document.getElementById('llmOverlay').hidden){ ragRenderStatus(j); }
+    }).catch(function(){});
+  }
+  ragProbe();
+  setInterval(ragProbe,15000);
+  document.getElementById('ragRefresh').addEventListener('click',ragProbe);
+  document.getElementById('ragStart').addEventListener('click',function(){
+    var btn=this; btn.disabled=true;
+    var path=document.getElementById('ragPath').value.trim();
+    fetch('/api/rag/start',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:path})})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        showToast((j&&j.ok)?((j&&j.message)||'启动中…'):('RAG 启动失败：'+((j&&j.error)||'未知错误')));
+        setTimeout(ragProbe,600);
+      })
+      .catch(function(e){ showToast('RAG 启动失败：'+e.message); setTimeout(ragProbe,600); });
+  });
+  document.getElementById('ragStop').addEventListener('click',function(){
+    var btn=this; btn.disabled=true;
+    fetch('/api/rag/stop',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({})})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        showToast((j&&j.ok)?'RAG 服务已停止':('RAG 停止失败：'+((j&&j.error)||'未知错误')));
+        setTimeout(ragProbe,600);
+      })
+      .catch(function(e){ showToast('RAG 停止失败：'+e.message); setTimeout(ragProbe,600); });
   });
   updateAnnCount();
   document.addEventListener('keydown',function(e){

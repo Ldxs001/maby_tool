@@ -11,6 +11,51 @@
 
 ---
 
+## v1.11.1（2026-10-18）
+
+**修复**
+
+- **启动画面不可见（窗口全透明、永不退场）+ 淡出时机重锚定**：现象——启动画面窗口已创建但完全不可见，且从不自行消失（只能靠启动器杀进程收场）。根因（分层定位）——① `_splash.py` 的 `WM_PAINT` 处理用 `GetDC/ReleaseDC` 绘制但从不 Validate 更新区域，产生 WM_PAINT 风暴；Win32 消息优先级 `WM_PAINT > WM_TIMER`，风暴把 timer 消息永久饿死——fade-in（alpha 0→246）从不执行，窗口保持初始 alpha=0 即全透明，超时退场同样失效。实测证据：消息循环 3 秒内收到数百个 WM_PAINT、零个 WM_TIMER。② 原淡出锚点是"服务版本就绪 + 盲等 0.45s"，与窗口真实加载无关：机器慢时 WebView2/浏览器冷启动空档无覆盖，机器快时提前退场。修法——① `_proc` 的 WM_PAINT 分支画完显式 `ValidateRect(hwnd, None)`（附 argtypes 声明），风暴消失、timer 恢复；② 淡出锚点改为**页面会话上线**：前端页面加载完成后发首个心跳（v1.8.0 会话机制）即代表"窗口真正加载出来"，`/api/version` 响应新增 `sessions` 字段（活跃会话数，`MD_SERVER_VERSION` 51→52），`_splash.py` 的 `_poll_ready` 轮询改为等 `sessions>=1` 再淡出（快机器一闪而过、慢机器撑到窗口出现，全自动）；③ `md_launch.pyw` 成功路径不再主动 `close_splash`（交给 splash 自理），失败路径（服务未就绪）保留硬关，`life` 超时兜底保留。验证：`_test_splash_session.py` 7/7 PASS——version 带 sessions 字段、无窗口时撑住 2s+（旧逻辑会提前退场）、会话上线后 0.25s 淡出销毁、life 兜底 2.34s 退场；fade-in 实测 alpha 0→246 正常；回归 startup_perf 12/12、keepalive 11/11、routes、RAG 19/19 全 PASS。
+
+---
+
+## v1.11.0（2026-10-18）
+
+**变更**
+
+- **启动提速（服务就绪 1.5~2.5s → 0.4~0.8s，四项优化 + 一项根因修复）**：现象——双击 `.md` 到页面可编辑体感 3~5s。根因（实测定位）——① 便携 Python 为 embeddable 发行版（`._pth` 不注入脚本目录），服务以主脚本模式 `python md_server.py` 启动，主脚本永不命中 `__pycache__` 的 .pyc，每次冷启动现场编译 85KB 源码耗时 ~1.05s；② 本机对未监听端口为 drop 非 RST，`md_launch.server_version` 探测超时 1.5s / `md_app.service_alive` 超时 2s，服务就绪前发出的探测请求被挂满超时才失败，就绪感知被额外拖慢 1~2s；③ `close_splash` 主线程同步等待启动画面淡出（0.9s）；④ `wait_version` 轮询粒度 0.25s、`/open` 开浏览器固定延迟 0.25s；⑤ `katex.min.js`（270KB）同步加载阻塞 HTML 解析。修法——① 新增 `_md_run.py` 启动 shim（手工注入脚本目录后 `import md_server` 走 .pyc 缓存再 `main()`，`python md_server.py` 直跑路径保留不变），`md_launch.start_server` 与 `md_app.ensure_service` 均改走 shim；② 探测超时统一收紧到 0.3s；③ `close_splash` 的兜底终止移入后台线程，淡出动画不再阻塞开浏览器；④ `wait_version` 改 `time.time()` 计时 + 0.05s 粒度（顺带消除原 `t += 0.25` 计数与 sleep 不同步的隐患），`/open` Timer 0.25→0.05s；⑤ `katex.min.js` 加 `defer`（前端本有「katex 未到则轮询补渲染」兜底，语义不变）。配套：`kill_stale_services`（md_launch）与 `md_stop.cmd` 的进程匹配规则同步兼容 `md_server.py` 与 `_md_run.py` 两种命令行，自愈换代与手动停止不受启动方式影响；`MD_SERVER_VERSION` 50→51。验证：`_test_startup_perf.py` 12/12 PASS——shim 冷启动（无 pyc）1.1s 可就绪并生成 .pyc、warm 启动中位 0.77s、launcher 真实链路（`start_server`→`wait_version`）三轮 0.38/0.72/0.36s、直跑 `md_server.py` 路径不破坏、进程命令行同时命中 launcher 换代杀进程规则与 md_stop.cmd 过滤规则、页面携带 defer 属性的 katex 引用；回归 keepalive 11/11、routes、RAG 19/19、RAG UI 13/13、LLM UI 17/17 全 PASS。
+
+---
+
+## v1.10.0（2026-10-18）
+
+**变更**
+
+- **RAG 默认路径改为空**：现象——`rag-assistant` 路径默认值写死为开发机绝对路径，分发给任何其他用户都是无效配置。根因——默认值应表达"未配置"而非"某台机器的布局"。修法——`RAG_DEFAULTS.path` 默认空字符串，前端输入框保留示例路径 placeholder，空路径时启动按钮报「路径无效或不存在」指引填写。验证：`_test_rag.py` 回归 PASS（默认值断言、空路径拒绝）。
+
+**新增**
+
+- **LLM OpenAI 兼容后端（外部 API）**：现象——润色/智能备注只能走 LM Studio / Ollama 本地推理，无法调用 OpenAI、DeepSeek、硅基流动等云端 OpenAI 兼容 API。修法——`llm_client.py` 加 `openai` 后端：默认 `https://api.openai.com/v1`，base_url 填根地址自动补 `/v1`（两种填法都通）；`api_key` 字段（Bearer 头），无 key / 未选模型在调用前明确报错而非发出必败请求；模型列表走 `GET /v1/models`。`md_server.py` 配置归一白名单加 `openai`、api_key 字符串归一；润色/解释路由的"需先选模型"检查扩展到 openai 后端。前端 backend 下拉加「OpenAI 兼容（外部 API）」、API Key 输入行（openai 时显示）、地址 placeholder 与默认值随 backend 切换。验证：`_test_llm_websearch.py` 34/34 PASS（URL 拼接含 /v1 自动补与防重复、auth 头、无 key/无模型前置校验、lmstudio/ollama 回归、归一白名单、配置往返、路由校验）；`_test_llm_ui.py` 17/17 PASS（key 行显隐、placeholder 联动、无 key 时模型拉取被拦且提示明确、保存落盘与重开回读）。
+- **联网查询（润色 / AI 解释可选网络资料注入）**：现象——润色/解释仅凭模型自身知识，无法参考时效性网络信息。修法——新增 `web_search.py`（配置驱动，模式取自 rag-assistant 的 search.py，按本项目零依赖约束全部用标准库 urllib 重写）：5 个搜索源 DuckDuckGo（免费无 key）/ Tavily / Google Custom Search / Bing / 自定义 API（URL 用 `{q}` `{key}` 占位），返回统一 `{results:[{title,url,snippet}],success,error}`，key 用户自填；`md_server.py` 在 llm 配置内加 `web_search` 子段（enabled/backend/各 key/custom_url/max_results 1~10，脏数据归一回默认），润色与 AI 解释路由在开关开启时先检索选中文本（截断 200 字）、结果拼【网络资料】段进 system prompt 再交 LLM；搜索失败或无结果**静默降级**为纯模型路径并在响应带 `web_search: "degraded"` 标志，前端 toast 提示「联网搜索失败，已用纯模型结果」，成功注入 toast「已结合联网资料润色/解释」；RAG 按钮路径不受任何影响，两上下文源完全独立。前端 AI 设置面板加联网区块：开关、搜索源下拉、按搜索源动态显隐的 key/URL 输入行、结果条数。验证：`_test_llm_websearch.py`（各搜索源缺配置时的明确报错、归一限幅、降级标志 off/degraded、openai 后端回归）；真实链路验证——本机网络访问 DuckDuckGo 超时的环境下，开启联网的润色请求 29.5s 返回 `ok=true web_search=degraded` + 正常润色文本，降级路径不阻断写作流；`py_compile` 与 inline JS `node --check` 全过；keepalive 11/11、RAG 19/19、RAG UI 13/13 回归 PASS。
+
+---
+
+## v1.9.0（2026-10-18）
+
+**新增**
+
+- **RAG 检索增强润色/解释（rag-assistant 集成）**：现象——润色/解释仅凭本地 LLM 通用知识，无法参考用户自有知识库。修法——接入 rag-assistant 外部 API（`:8767`，与编辑器职责边界：编辑器只负责拉起服务、按协议传参检索、把返回上下文拼进既有 LLM prompt，原润色/解释路径零改动）：① `rag_client.py`（移植 structured-writer 成熟实现，3 次重试应对冷启动 embedding 首请求慢）；② `md_server.py` 新增路由——`GET /api/rag-status`（health + KB 列表 + 本地子进程状态探测）、`POST /api/rag/start`（异步冷启动：stderr 落临时文件防 pipe 满卡死、`PYTHONIOENCODING=utf-8`、45×2s 轮询就绪、子进程挂掉回读 Traceback 供诊断；解释器按 venv→PATH→py→sys.executable 顺序选——编辑器内嵌 Python 为纯净标准库，跑不动 rag-assistant 的 torch/chromadb 重依赖）、`POST /api/rag/stop`（terminate→wait 3s→kill→清 :8767 全部 PID→等端口释放；带看护自动重启场景返回明确提示）、`POST /api/rag/rewrite|annotate`（`/api/kb/query` 拿 `context` → 注入 system prompt 参考资料段 → 走既有 `llm_client` 生成；RAG 离线/空结果返回 `ok:false` 带指引文案）；配置存 `runtime/settings.json` rag 段（path 默认 `C:\Users\sm001\WorkBuddy\rag-assistant`、kb 空=自动路由，脏数据归一回默认）；③ 前端——选区浮动条加「RAG润色」、批注 Modal 加「RAG解释」（均复用既有润色预览/批注回填流程），AI 设置 Modal 加 RAG 管理区（状态行 + KB 下拉 + 启动/停止按钮 + 路径手动输入，随 `/api/rag/save` 一并持久化）；按钮可用性联动：页面加载与每 15s 探测 `/api/rag-status`，在线才点亮 RAG 按钮，离线置灰带提示。编辑器退出不联动停 RAG，仅按钮手动停。验证：`_test_rag.py` 19/19 PASS（路由/配置往返/归一/离线错误路径/启动参数校验/解释器选择）；`_test_rag_ui.py` 13/13 PASS（按钮初始置灰、面板状态/控件、保存落盘 rag 段）；`_test_rag_e2e.py` 7/7 PASS（真实冷启动→在线→query 协议契约返回 `context/has_context/sources/kb`→停止→端口释放）；`py_compile` 与 inline JS `node --check` 全过；keepalive 11/11 回归 PASS。
+
+---
+
+## v1.8.0（2026-10-18）
+
+**变更**
+
+- **支持多开：每个文件独立窗口，共享本地服务**：现象——每次从资源管理器打开 `.md` 都会先强杀全部旧编辑器窗口（`md_launch.pyw` 的 `kill_stale_apps` 按进程路径 taskkill），只能单开；而服务层本就共享（浏览器模式多标签复用同一 18766 后端），窗口层却全局互斥。根因——「关闭后回收」与「多开并存」被错误耦合：用全局强杀代替各窗口自管生命周期。修法——三处改动：① `md_launch.pyw` 删除 `kill_stale_apps()`，每个 `.md` 独立打开内嵌窗口/浏览器标签，端口复用与版本自愈换代逻辑保留（仅服务版本不匹配时换代，不影响正常多开）；② `md_server.py` 心跳由全局单值改为**按会话计数**：前端每标签经 `sessionStorage` 生成会话 token（同标签刷新/bfcache 恢复保持一致），`/api/ping?tok=`、`/api/bye?tok=` 按 token 登记/下线对应会话；`do_POST` 把 ping/bye 转发给 `do_GET`——此前 `sendBeacon` 的 `/api/bye` 走 POST 无路由被 404，页面正常关闭时退出信号实际从未生效；③ 看门狗判定改为「**任一会话存活即保活**，全部会话 bye 后进入宽限倒计时，宽限期内出现新会话心跳即撤销退出」——关闭单个窗口不再影响其它窗口，最后一个窗口关闭后服务自动退出；无 bye 的强杀场景沿用幽灵清理（会话按最后心跳停滞超 orphan 宽限清除，全清后按 `max(最后心跳, 服务启动)` 超时回收）。同一文件被多窗口打开时，草稿缓存按路径共享、最后写者胜（既有语义，未改）。验证：行为级时序 PASS（ping A/B 两会话 → bye A 后服务仍活、B 保活，再见 B → 2s 宽限内无心跳即退出；lifecycle.log 记录 `bye tok=… live=N` 与退出原因）；`_test_keepalive.py` 11/11 PASS；`py_compile` 与 inline JS `node --check` 全过；浏览器端 `sendBeacon` 带 tok 链路实测到达后端。
+
+---
+
 ## v1.7.0（2026-10-18）
 
 **新增**

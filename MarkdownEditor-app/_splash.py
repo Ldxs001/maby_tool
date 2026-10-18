@@ -68,6 +68,8 @@ user32.CreateWindowExW.argtypes = [wintypes.DWORD, wintypes.LPCWSTR, wintypes.LP
                                    ctypes.c_int, ctypes.c_int, wintypes.HWND,
                                    wintypes.HMENU, wintypes.HINSTANCE, ctypes.c_void_p]
 user32.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HANDLE, wintypes.BOOL]
+user32.ValidateRect.argtypes = [wintypes.HWND, ctypes.c_void_p]
+user32.ValidateRect.restype = wintypes.BOOL
 user32.FindWindowW.restype = wintypes.HWND
 user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
 user32.PostMessageW.argtypes = [wintypes.HWND, ctypes.c_uint, wintypes.WPARAM, wintypes.LPARAM]
@@ -105,7 +107,13 @@ class WNDCLASSW(ctypes.Structure):
 
 
 def _poll_ready():
-    """轮询后端：版本就绪后稍候（让浏览器窗口先出现）→ 触发淡出。"""
+    """轮询后端：等任一页面会话上线（= 窗口真正加载完成）→ 触发淡出。
+
+    会话由前端页面加载完成后的首个心跳（/api/ping）登记：
+    机器快窗口出得快，画面一闪而过；机器慢窗口出得慢，画面一直撑着。
+    服务就绪本身不是信号——服务就绪到窗口可见之间还有 WebView2/浏览器
+    冷启动的空档，这段时间正是启动画面该覆盖的。
+    兜底：窗口始终没起来（极端故障）时由 life 超时退场。"""
     port = _state["port"]
     if not port:
         return
@@ -113,10 +121,9 @@ def _poll_ready():
     while time.time() - t0 < 40:
         try:
             with urllib.request.urlopen(
-                    "http://127.0.0.1:%d/api/version" % port, timeout=1) as r:
+                    "http://127.0.0.1:%d/api/version" % port, timeout=0.3) as r:
                 d = json.loads(r.read().decode("utf-8"))
-            if int(d.get("version", 0)) >= int(_state["ver"]):
-                time.sleep(0.45)
+            if int(d.get("sessions", 0)) >= 1:
                 if _state["phase"] != "out":
                     _state["phase"] = "out"
                     _state["out_start"] = time.time()
@@ -175,6 +182,10 @@ def _draw(hwnd):
 def _proc(hwnd, msg, wparam, lparam):
     if msg == WM_PAINT:
         _draw(hwnd)
+        # 关键：GetDC/ReleaseDC 不 validate 更新区域，不显式 ValidateRect
+        # 会导致 WM_PAINT 风暴——WM_PAINT 优先级高于 WM_TIMER，风暴会把
+        # timer 永久饿死（fade-in/out、超时退场全部失效，窗口卡死）
+        user32.ValidateRect(hwnd, None)
         return 0
     if msg == WM_ERASEBKGND:
         return 1

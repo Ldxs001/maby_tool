@@ -8,12 +8,18 @@ Explorer 右键 / 双击传入 .md 路径时：
 2. 端口占用 → 校验服务版本：匹配则复用；不匹配（旧版本服务）则
    清掉旧服务进程后自行拉起最新版（自愈换代，用户无感）
 3. 通知后端打开浏览器到对应 ?file= 页面
+
+多开：**不做窗口互斥**。每个打开的 .md 得到自己的内嵌窗口/浏览器标签，
+共享同一个本地服务，各自独立关闭（后端只在所有窗口都关闭后自动退出，
+由 md_server 的按会话看门狗判定）。版本换代仅当服务版本不匹配时执行，
+不影响正常多开。
 """
 import sys
 import os
 import json
 import socket
 import subprocess
+import threading
 import time
 import urllib.parse
 import urllib.error
@@ -41,10 +47,12 @@ def port_open():
 
 
 def server_version():
-    """端口上服务的版本号；无 /api/version（旧版）或连接失败返回 None"""
+    """端口上服务的版本号；无 /api/version（旧版）或连接失败返回 None。
+    timeout 收紧到 0.3s：本机未监听端口是 drop 非 RST，长超时会让
+    wait_version 的首轮探测白挂（服务就绪被感知延迟 1.5s+）"""
     try:
         r = urllib.request.urlopen(
-            "http://127.0.0.1:%d/api/version" % PORT, timeout=1.5)
+            "http://127.0.0.1:%d/api/version" % PORT, timeout=0.3)
         return json.loads(r.read().decode("utf-8")).get("version", 0)
     except Exception:
         return None
@@ -54,7 +62,7 @@ def start_server():
     si = subprocess.STARTUPINFO()
     si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     subprocess.Popen(
-        [sys.executable, os.path.join(HERE, "md_server.py")],
+        [sys.executable, os.path.join(HERE, "_md_run.py")],
         startupinfo=si,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
@@ -81,42 +89,17 @@ def _list_pythonw_cmdlines():
     return ""
 
 
-def kill_stale_apps():
-    """关闭本目录的旧 md_app 窗口。
-    页面本身 no-store（不存在页面缓存），因此'关掉旧窗口 + 开新窗口'
-    即可保证用户看到的永远是当前代码。按完整路径匹配，只关本实例，
-    不误伤原版 MarkdownEditor（端口不同、进程互不影响）。"""
-    me = os.getpid()
-    exe = os.path.basename(sys.executable).lower()
-    out = _list_pythonw_cmdlines()
-    mark = os.path.join(HERE, "md_app.pyw").replace("\\", "/").lower()
-    killed = []
-    for ln in out.splitlines():
-        if mark not in ln.replace("\\", "/").lower():
-            continue
-        parts = [p for p in ln.replace("|", ",").split(",") if p.strip()]
-        if not parts:
-            continue
-        pid = parts[-1].strip()
-        if pid.isdigit() and int(pid) != me:
-            try:
-                subprocess.run(["taskkill", "/F", "/PID", pid],
-                               creationflags=NO_WINDOW,
-                               stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL)
-                killed.append(pid)
-            except Exception:
-                pass
-    return killed
-
 
 def kill_stale_services():
-    """清掉本目录的旧 md_server（按完整路径精确匹配，不误伤其它 pythonw 脚本）"""
+    """清掉本目录的旧 md_server（按完整路径精确匹配，不误伤其它 pythonw 脚本）
+    兼容两种启动方式：直跑 md_server.py（旧）与 _md_run.py shim（新）"""
     me = os.getpid()
-    mark = os.path.join(HERE, "md_server.py").replace("\\", "/").lower()
+    marks = [os.path.join(HERE, n).replace("\\", "/").lower()
+             for n in ("md_server.py", "_md_run.py")]
     killed = []
     for ln in _list_pythonw_cmdlines().splitlines():
-        if mark not in ln.replace("\\", "/").lower():
+        low = ln.replace("\\", "/").lower()
+        if not any(m in low for m in marks):
             continue
         parts = [p for p in ln.replace("|", ",").split(",") if p.strip()]
         if not parts:
@@ -154,12 +137,11 @@ def kill_port_holder():
 
 
 def wait_version(timeout=15):
-    t = 0.0
-    while t < timeout:
+    end = time.time() + timeout
+    while time.time() < end:
         if server_version() == VERSION:
             return True
-        time.sleep(0.25)
-        t += 0.25
+        time.sleep(0.05)
     return False
 
 
@@ -246,7 +228,8 @@ def start_splash(hold_seconds=25):
 
 
 def close_splash():
-    """给启动画面窗口发 WM_CLOSE，让它淡出退出。"""
+    """给启动画面窗口发 WM_CLOSE，让它淡出退出。
+    兜底终止放后台线程：淡出动画不阻塞主流程（开浏览器不等它）。"""
     try:
         import ctypes
         u = ctypes.windll.user32
@@ -259,24 +242,28 @@ def close_splash():
             u.PostMessageW(ctypes.c_void_p(h), 0x0010, 0, 0)
     except Exception:
         pass
-    # 兜底：淡出未完成（0.9s）则直接终止进程
+    # 后台兜底：淡出未完成则直接终止进程（不占主线程）
     global _splash_proc
-    if _splash_proc is not None:
-        try:
-            _splash_proc.wait(timeout=0.9)
-        except Exception:
+    sp, _splash_proc = _splash_proc, None
+    if sp is not None:
+        def _reap():
             try:
-                _splash_proc.terminate()
+                sp.wait(timeout=2.0)
             except Exception:
-                pass
-        _splash_proc = None
+                try:
+                    sp.terminate()
+                except Exception:
+                    pass
+        try:
+            threading.Thread(target=_reap, daemon=True).start()
+        except Exception:
+            pass
 
 
 def main():
     path = sys.argv[1] if len(sys.argv) > 1 else None
-    # 先关掉所有旧编辑器窗口：页面 no-store，新窗口必然加载当前代码，
-    # 避免"改了没生效/同时挂多个旧窗口"的问题
-    kill_stale_apps()
+    # 不互斥窗口：多开的每个窗口独立打开对应文件；页面 no-store，
+    # 新窗口必然加载当前代码。服务仅版本不匹配时换代。
     if port_open():
         if server_version() == VERSION:
             pass  # 版本匹配，直接复用
@@ -296,9 +283,11 @@ def main():
         start_server()
         if not wait_version():
             close_splash()
-            open_in_browser(path)
+            open_in_browser(path)  # 兜底：至少把页面打开
             return
-    close_splash()
+    # 成功路径不关 splash：由它自己轮询"页面会话上线"（窗口真正加载
+    # 完成）后淡出；服务就绪 ≠ 窗口可见，中间的 WebView2/浏览器冷启动
+    # 空档正是启动画面该覆盖的。失败路径已在分支内 close_splash 硬关。
     st = load_settings()
     if st.get("embed_window") and launch_embedded(path):
         return
