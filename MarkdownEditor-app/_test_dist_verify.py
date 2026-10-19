@@ -45,6 +45,14 @@ check("no runtime/ pycache/ in dist",
       not os.path.exists(os.path.join(DIST, "runtime"))
       and not os.path.exists(os.path.join(DIST, "__pycache__")))
 
+# --- 1b) pythonnet 原生桥接 DLL 断言（v1.11.1 缺失事故回归锚点） ---
+# pywebview 挂载系统 WebView2 的 .NET 互操作必需件；缺失 = 内嵌窗口静默崩。
+_dll = os.path.join(DIST, "python", "Lib", "site-packages", "pythonnet",
+                    "runtime", "Python.Runtime.dll")
+_dll_size = os.path.getsize(_dll) if os.path.isfile(_dll) else 0
+check("pythonnet bridge DLL in dist (>=400KB)",
+      _dll_size > 400 * 1024, str(_dll_size) if _dll_size else "missing")
+
 
 def get(path, timeout=3):
     return urllib.request.urlopen(

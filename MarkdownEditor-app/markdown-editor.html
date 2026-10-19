@@ -271,7 +271,7 @@
   <span id="statWords">0 词</span>
   <span id="statLines">0 行</span>
   <span id="statSave" class="saved">已存入缓存</span>
-  <span class="ai-mark" title="本工具由 AI 辅助生成">由 AI 生成</span>
+  <span class="ai-mark" title="本工具由 AI 辅助生成">本工具由 AI 生成</span>
 </footer>
       <div id="svOverlay" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:60;display:flex;align-items:center;justify-content:center;">
     <div style="width:520px;background:#23272f;border-radius:14px;padding:26px 30px;box-shadow:0 24px 70px rgba(0,0,0,.55);">
@@ -487,10 +487,15 @@ function parseInline(text){
   text=text.replace(/\x00T(\d+)\x00/g,function(m,i){return toks[+i];});
   return text;
 }
-function parseList(lines,start,indent){
+ function parseList(lines,start,indent,seq){
+  /* seq：本编号区域内已出现的有序项数（跨列表接力，由外层块循环维护）。
+     显示编号完全由渲染器决定——区域内第 N 个有序项显示 N，输入的
+     数字仅是语法标记不参与显示；无序项不占编号；空行/其他块打断
+     区域后由外层清零重计。嵌套子列表是独立编号区域（seq 从 0 起）。 */
   var items=[];
   var i=start;
   var cur=null;
+  var listOrdered=null;
   while(i<lines.length){
     var line=lines[i];
     var m=line.match(/^([ ]*)([-*+]|[0-9]+\.)([ ]+)(.*)$/);
@@ -499,20 +504,34 @@ function parseList(lines,start,indent){
     if(li<indent){break;}
     if(li>indent){
       if(cur!==null){
-        var r=parseList(lines,i,li);
+        var r=parseList(lines,i,li,0);
         cur.children+=r[0];
         i=r[1];
         continue;
       } else {break;}
     }
     var ordered=/[0-9]+\./.test(m[2]);
+    /* 标记类型切换（有序↔无序）＝新列表起点，本列表到此收口。
+       防 1./- 软换行混排被吸进同一 <ol>/<ul>。 */
+    if(listOrdered===null){
+      listOrdered=ordered;
+    } else if(ordered!==listOrdered){
+      break;
+    }
     cur={raw:m[4],ordered:ordered,children:''};
     items.push(cur);
     i++;
   }
-  if(items.length===0){return ['',i];}
-  var ordered0=items[0].ordered;
-  var html=ordered0?'<ol>':'<ul>';
+  if(items.length===0){return ['',i,seq];}
+  var html='';
+  if(listOrdered){
+    seq+=items.length;
+    /* 接力编号：本列表首项 = 区域内第 seq-items.length+1 个有序项 */
+    var first=seq-items.length+1;
+    html='<ol'+(first>1?(' start="'+first+'"'):'')+'>';
+  } else {
+    html='<ul>';
+  }
   for(var k=0;k<items.length;k++){
     var it=items[k];
     var tm=it.raw.match(/^\[([ xX])\][ ]+(.*)$/);
@@ -523,8 +542,8 @@ function parseList(lines,start,indent){
       html+='<li>'+parseInline(it.raw)+it.children+'</li>';
     }
   }
-  html+=ordered0?'</ol>':'</ul>';
-  return [html,i];
+  html+=listOrdered?'</ol>':'</ul>';
+  return [html,i,seq];
 }
 function splitRow(r){
   /* GFM：表格单元格内 \| 恒为字面竖线（行内代码内也不例外），先占位再切分后还原 */
@@ -568,6 +587,7 @@ function parseMarkdown(src){
   var lines=src.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
   var html='';
   var i=0;
+  var olSeq=0;   /* 编号区域接力计数：空行/其他块打断即重置（见 parseList 注释） */
   while(i<lines.length){
     var line=lines[i];
     if(/^```/.test(line)){
@@ -577,42 +597,45 @@ function parseMarkdown(src){
       while(i<lines.length && !/^```/.test(lines[i])){code+=lines[i]+'\n';i++;}
       i++;
       html+='<pre><code'+(lang?' class="lang-'+lang+'"':'')+'>'+escapeHtml(code.replace(/\n$/,'')).replace(/</g,'&lt;')+'</code></pre>';
+      olSeq=0;
       continue;
     }
-    if(/^[ ]*$/.test(line)){i++;continue;}
+    if(/^[ ]*$/.test(line)){i++;olSeq=0;continue;}
     var hm=line.match(/^(#{1,6})[ ]+(.*)$/);
     if(hm){
       var lvl=hm[1].length;
       html+='<h'+lvl+'>'+parseInline(hm[2].trim())+'</h'+lvl+'>';
-      i++;continue;
+      i++;olSeq=0;continue;
     }
     var stripped=line.replace(/[ ]/g,'');
     if(stripped.length>=3){
       var ch0=stripped.charAt(0);
       var allSame=true;
       for(var z=0;z<stripped.length;z++){if(stripped.charAt(z)!==ch0){allSame=false;break;}}
-      if(allSame){html+='<hr>';i++;continue;}
+      if(allSame){html+='<hr>';i++;olSeq=0;continue;}
     }
     if(/^[ ]*>/.test(line)){
       var quote=[];
       while(i<lines.length && /^[ ]*>/.test(lines[i])){quote.push(lines[i].replace(/^[ ]*>[ ]?/,''));i++;}
       html+='<blockquote>'+parseMarkdown(quote.join('\n'))+'</blockquote>';
+      olSeq=0;
       continue;
     }
     if(line.indexOf('|')>=0 && i+1<lines.length && /^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1]) && lines[i+1].indexOf('-')>=0){
       var t=parseTable(lines,i);
-      html+=t[0];i=t[1];continue;
+      html+=t[0];i=t[1];olSeq=0;continue;
     }
     if(/^[ ]*([-*+]|[0-9]+\.)[ ]+/.test(line)){
       var ind=/^([ ]*)([-*+]|[0-9]+\.)/.exec(line)[1].length;
-      var lst=parseList(lines,i,ind);
-      html+=lst[0];i=lst[1];continue;
+      var lst=parseList(lines,i,ind,olSeq);
+      html+=lst[0];i=lst[1];olSeq=lst[2];continue;
     }
     var para=[];
     while(i<lines.length && !/^[ ]*$/.test(lines[i]) && !/^```/.test(lines[i]) && !/^(#{1,6})[ ]+/.test(lines[i]) && !/^[ ]*>/.test(lines[i]) && !/^[ ]*([-*+]|[0-9]+\.)[ ]+/.test(lines[i]) && !(lines[i].indexOf('|')>=0 && i+1<lines.length && /^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1]) && lines[i+1].indexOf('-')>=0)){
       para.push(lines[i]);i++;
     }
     html+='<p>'+parseInline(para.join('\n')).replace(/\n/g,'<br>')+'</p>';
+    olSeq=0;
   }
   return html;
 }
@@ -915,7 +938,12 @@ function parseMarkdown(src){
         for(var p=0;p<ln;p++){pos+=ls[p].length+1;}
         setSel(pos,pos);
         var lineH=parseFloat(getComputedStyle(editor).lineHeight)||20;
-        editor.scrollTop=Math.max(0,(ln-2)*lineH);
+        /* 滚动定位直接量光标真实位置（Range.getBoundingClientRect 零累计
+           误差，软折行天然包含）：绝对位置 = scrollTop + 视口内偏移；
+           focus 原生滚动发生在赋值前，公式自洽不受影响 */
+        var rect=window.getSelection().getRangeAt(0).getBoundingClientRect();
+        var rel=rect.top-editor.getBoundingClientRect().top;
+        editor.scrollTop=Math.max(0,editor.scrollTop+rel-2*lineH);
       });
     }
   }
