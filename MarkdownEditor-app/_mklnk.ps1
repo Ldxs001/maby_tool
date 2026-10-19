@@ -19,4 +19,15 @@ $s2.IconLocation = $ico
 $s2.Description = 'Markdown Editor (AI-assisted)'
 $s2.Save()
 
+$uexe = Join-Path $Here 'UninstallMDEditor.exe'
+$uico = Join-Path $Here 'uninstall-md.ico'
+if (Test-Path $uexe) {
+  $s3 = $WScript.CreateShortcut((Join-Path $start 'Uninstall MDEditor.lnk'))
+  $s3.TargetPath = $uexe
+  $s3.WorkingDirectory = $Here
+  $s3.IconLocation = $uico
+  $s3.Description = 'Uninstall MDEditor'
+  $s3.Save()
+}
+
 Write-Host 'shortcuts created'

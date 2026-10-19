@@ -27,15 +27,26 @@ if exist "%CSC%" (
   echo [WARN] csc.exe not found, cannot build MarkdownEditor.exe
 )
 
+REM Build the uninstaller GUI (icon = pixel MD with red X badge).
+if exist "%CSC%" (
+  if exist "%HERE%\uninstall-md.ico" (
+    "%CSC%" /nologo /target:winexe /win32icon:"%HERE%\uninstall-md.ico" /out:"%HERE%\UninstallMDEditor.exe" "%HERE%\UninstallMDEditor.cs"
+  ) else (
+    "%CSC%" /nologo /target:winexe /out:"%HERE%\UninstallMDEditor.exe" "%HERE%\UninstallMDEditor.cs"
+  )
+) else (
+  echo [WARN] csc.exe not found, cannot build UninstallMDEditor.exe
+)
+
 echo Install path: %HERE%
 echo Python:       %PYW%
 echo.
 
-echo [1/4] Register .md context menu (HKCU, no admin needed)...
+echo [1/5] Register .md context menu (HKCU, no admin needed)...
 reg add "HKCU\Software\Classes\.md\shell\MDViewer" /ve /t REG_SZ /d "Open with Markdown Editor" /f
 reg add "HKCU\Software\Classes\.md\shell\MDViewer\command" /ve /t REG_SZ /d "%HERE%\MarkdownEditor.exe \"%%1\"" /f
 
-echo [2/4] Set .md default association (double-click opens this editor)...
+echo [2/5] Set .md default association (double-click opens this editor)...
 "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command "$k='HKCU:\Software\Classes\.md'; $v=Get-ItemProperty -Path $k -Name '(default)' -ErrorAction SilentlyContinue; if($v){($v.'(default)')}else{''}" > "%HERE%\.mdinstall.bak"
 reg add "HKCU\Software\Classes\.md" /ve /t REG_SZ /d "MDViewer.md" /f
 reg add "HKCU\Software\Classes\MDViewer.md" /ve /t REG_SZ /d "Markdown Document (MD Editor)" /f
@@ -74,10 +85,10 @@ reg add "HKCU\Software\Classes\MDViewer.smd\DefaultIcon" /ve /t REG_SZ /d "%HERE
 reg add "HKCU\Software\Classes\MDViewer.smd\shell\open\command" /ve /t REG_SZ /d "%HERE%\MarkdownEditor.exe \"%%1\"" /f
 reg add "HKCU\Software\Classes\.smd\OpenWithProgids" /v MDViewer.smd /t REG_SZ /d "" /f >nul 2>&1
 
-echo [3/4] Create Desktop / Start Menu shortcuts...
+echo [3/5] Create Desktop / Start Menu shortcuts...
 "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%HERE%\_mklnk.ps1" -Here "%HERE%"
 
-echo [4/4] Windows 11 context menu visibility...
+echo [4/5] Windows 11 context menu visibility...
 if /i "%~1"=="nolegacy" (
   echo   Legacy menu NOT enabled. The item will appear under "Show more options".
 ) else (
@@ -87,8 +98,18 @@ if /i "%~1"=="nolegacy" (
   echo   Run uninstall.cmd to revert.
 )
 
+echo [5/5] Register "Apps & features" uninstall entry (HKCU)...
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\MDEditor" /v DisplayName /t REG_SZ /d "MDEditor (Markdown Editor)" /f
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\MDEditor" /v DisplayIcon /t REG_SZ /d "%HERE%\md-editor.ico" /f
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\MDEditor" /v UninstallString /t REG_SZ /d "\"%HERE%\UninstallMDEditor.exe\"" /f
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\MDEditor" /v NoModify /t REG_DWORD /d 1 /f
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\MDEditor" /v NoRepair /t REG_DWORD /d 1 /f
+
 echo.
 echo Done. Right-click any .md file, or just double-click it.
 echo Tray icon lives in the notification area: new blank doc / exit.
-pause
+echo Uninstall: Settings - Apps - "MDEditor (Markdown Editor)".
+REM pause hangs forever when install.cmd is invoked silently by the setup
+REM exe (no interactive console). The setup passes "nopause" to skip it.
+if /i not "%~1"=="nopause" pause
 endlocal
