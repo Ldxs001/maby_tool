@@ -64,7 +64,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 52  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 54  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 SETTINGS_PATH = os.path.join(HERE, "runtime", "settings.json")
 
 # .smd 自包含文档格式（v1.2.0）；导入失败落错误日志，相关路由返回明确错误而非静默
@@ -1675,37 +1675,50 @@ def _slice_tall_images(body_html, icb_w_mm, img_maxh_mm):
         return best
 
     def _repl(m):
+        tag = m.group(0)
         try:
             from PIL import Image
         except ImportError:
-            return m.group(0)
+            return tag
         path = urllib.parse.unquote(m.group(1).split("path=", 1)[1])
         if not os.path.isfile(path):
-            return m.group(0)
+            return tag
         try:
             im = Image.open(path)
             im.load()
         except Exception:
-            return m.group(0)
+            return tag
         w, h = im.size
         if w <= 1 or h <= 1:
-            return m.group(0)
-        # 满宽渲染高不超版心 → 整图原子，不切
-        if icb_w_mm * h / w <= img_maxh_mm:
-            return m.group(0)
+            return tag
+        # 宽度参数：style="width:N%"（前端 {N} 后缀产出）→ 版面宽度的 N%。无参数满宽。
+        # 切片决策一切基于调整后的真实落地尺寸：eff_w_mm 为实际渲染宽，切片几何全按它换算
+        pm = re.search(r'width:\s*([\d.]+)\s*%', tag)
+        pct = 1.0
+        if pm:
+            try:
+                pct = min(max(float(pm.group(1)), 0.0), 100.0) / 100.0
+            except ValueError:
+                pct = 1.0
+            if pct <= 0.001:
+                pct = 1.0  # 宽度为 0 的样式不当真，回满宽
+        eff_w_mm = icb_w_mm * pct
+        # 调整后渲染高不超版心 → 整图原子，不切
+        if eff_w_mm * h / w <= img_maxh_mm:
+            return tag
         import hashlib
         with open(path, "rb") as f:
             digest = hashlib.sha1(f.read()).hexdigest()[:12]
         # 条带像素高：渲染高 = 版心高/6（细条带续排，页面剩余留白上限 = 一条高）。
         # 1/3 版心实测留白过大（吸附后 3 条塞不进一页即剩 ~80mm 空白），故取 1/6
-        strip_px = max(1, int(round(max(20.0, img_maxh_mm / 6.0) / icb_w_mm * w)))
+        strip_px = max(1, int(round(max(20.0, img_maxh_mm / 6.0) / eff_w_mm * w)))
         # 缓存键 = 内容 sha1 + 条带几何（strip_px）——几何参数变更时旧切片不复用
         digest = "%s-%d" % (digest, strip_px)
         n = (h + strip_px - 1) // strip_px
         gap = max(1, strip_px // 4)
         # 静默行亮度剖面：宽度压成 1px 即每行平均亮度（BILINEAR 均值）
         bright = list(im.convert("L").resize((1, h), Image.BILINEAR).getdata())
-        win = max(1, int(round(_SLICE_SNAP_MM / icb_w_mm * w)))
+        win = max(1, int(round(_SLICE_SNAP_MM / eff_w_mm * w)))
         cuts = [0]
         for k in range(1, n):
             c = _quiet_cuts(bright, h, k * strip_px, win)
@@ -1719,9 +1732,11 @@ def _slice_tall_images(body_html, icb_w_mm, img_maxh_mm):
         try:
             os.makedirs(out_dir, exist_ok=True)
         except OSError:
-            return m.group(0)
-        am = re.search(r'alt="([^"]*)"', m.group(0))
+            return tag
+        am = re.search(r'alt="([^"]*)"', tag)
         alt = am.group(1) if am else ""
+        # 条带继承源图宽度约束：按同一百分比显示时，条带高度与切片几何严格一致
+        style = ' style="width:%s%%"' % pm.group(1).strip() if pm else ""
         tags = []
         for i in range(len(cuts) - 1):
             fp = os.path.join(out_dir, "strip-%02d.png" % (i + 1))
@@ -1729,9 +1744,9 @@ def _slice_tall_images(body_html, icb_w_mm, img_maxh_mm):
                 try:
                     im.crop((0, cuts[i], w, cuts[i + 1])).save(fp, "PNG")
                 except Exception:
-                    return m.group(0)
-            tags.append('<img src="/static/_slice/%s/strip-%02d.png" alt="%s">'
-                        % (digest, i + 1, alt))
+                    return tag
+            tags.append('<img src="/static/_slice/%s/strip-%02d.png" alt="%s"%s>'
+                        % (digest, i + 1, alt, style))
         return "".join(tags)
 
     return img_re.sub(_repl, body_html)
@@ -2119,6 +2134,34 @@ def _run_picker(script, tmpname):
         py_exe = sys.executable
     try:
         subprocess.run([py_exe, picker, tmp], timeout=900,
+                       creationflags=0x08000000)
+    except Exception:
+        pass
+    try:
+        return io.open(tmp, encoding="utf-8").read().strip()
+    except Exception:
+        return ""
+
+
+def _pick_file_subprocess(initdir=""):
+    """原生"打开文件"框（GetOpenFileNameW，过滤 .md/.smd）；独立子进程弹窗，
+    路径经临时文件回传（与 _pick_dir_subprocess 同模式）。取消/失败返回空串。"""
+    here = os.path.dirname(os.path.abspath(__file__))
+    picker = os.path.join(here, "_pickfile.py")
+    if not os.path.exists(picker):
+        return ""
+    tmp = os.path.join(tempfile.gettempdir(), "mdeditor_pickfile.txt")
+    try:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    except Exception:
+        pass
+    exe_dir = os.path.dirname(sys.executable)
+    py_exe = os.path.join(exe_dir, "python.exe")
+    if not os.path.exists(py_exe):
+        py_exe = sys.executable
+    try:
+        subprocess.run([py_exe, picker, tmp, initdir or ""], timeout=900,
                        creationflags=0x08000000)
     except Exception:
         pass

@@ -131,6 +131,18 @@
     padding:14px 16px; overflow:auto; margin:.9em 0;
   }
   .markdown-body pre code{background:none; padding:0; font-size:.85em; line-height:1.6;}
+  /* Mermaid 图容器：渲染结果 SVG 居中；失败降级显示源码+错误 */
+  .markdown-body .diagram{
+    margin:.9em 0; text-align:center; overflow-x:auto;
+    border:1px solid var(--border); border-radius:var(--radius); padding:10px;
+    background:var(--code-bg);
+  }
+  .markdown-body .diagram svg{max-width:100%; height:auto;}
+  .markdown-body .diagram .diagram-pending{color:var(--muted,#8a93a6); font-size:13px; padding:16px;}
+  .markdown-body .diagram pre.diagram-err{
+    background:none; border:none; padding:0; margin:0; text-align:left;
+    color:#e06c75; font-size:12px; white-space:pre-wrap;
+  }
   .markdown-body blockquote{
     margin:.9em 0; padding:.4em 1em; border-left:3px solid var(--accent);
     background:var(--accent-soft); border-radius:0 var(--radius) var(--radius) 0; color:var(--text);
@@ -138,6 +150,10 @@
   .markdown-body blockquote p{margin:.4em 0;}
   .markdown-body ul,.markdown-body ol{margin:.7em 0; padding-left:1.6em;}
   .markdown-body li{margin:.3em 0;}
+  /* 无序列表标记语义（本工具方言）：+ = 实心点、- = 空心圈；样式跟标记符走，与缩进/层级无关，
+     故显式覆盖浏览器按嵌套深度换 marker 的默认行为 */
+  .markdown-body li.u-solid{list-style-type:disc;}
+  .markdown-body li.u-hollow{list-style-type:circle;}
   .markdown-body li.task{list-style:none; margin-left:-1.4em;}
   .markdown-body li.task input{margin-right:.5em; vertical-align:middle;}
   .markdown-body hr{border:none; border-top:1px solid var(--border); margin:1.6em 0;}
@@ -243,6 +259,7 @@
   <div class="tb-group"><button id="btnNew" class="tb-btn" title="新建文档 (Ctrl+N)">新建</button></div>
   <div class="tb-group right">
     <button id="btnView" class="tb-btn" title="视图切换">分屏</button>
+    <button id="btnFollow" class="tb-btn" title="预览跟随编辑区滚动（仅分屏模式生效），点击开/关">跟随</button>
     <button id="btnTheme" class="tb-btn" title="主题切换">暗色</button>
     <button id="btnFiles" class="tb-btn" title="最近文件与切换">文件</button>
     <button id="btnOpen" class="tb-btn" title="打开 .md 文件">打开</button>
@@ -467,13 +484,23 @@ function sanitizeUrl(u){
 function parseInline(text){
   var codes=[];
   text=text.replace(/`([^`]+)`/g,function(m,c){codes.push(c);return '@@C'+(codes.length-1)+'@@';});
+  /* 反斜杠转义（CommonMark 口径）：\X（X 为 ASCII 标点）→ 占位符，行内语法全部
+     处理完再还原为字面 X。文档里展示 \!\[示例\](路径) 这类语法原文必须走这里，
+     否则 \! 原样漏出、且 \[..\](..) 仍会被链接正则吃成真 <a>。
+     在代码段提取之后做：代码段内反斜杠保持字面，双保险不冲突。 */
+  var escs=[];
+  text=text.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g,function(m,c){escs.push(c);return '\x00E'+(escs.length-1)+'\x00';});
   text=escapeHtml(text);
   /* 生成的标签先进占位符：后续强调/加粗等行内语法绝不能触碰属性值
      （否则下划线文件名 20261015_181923_3419.png 会被 _.._ 改写成 <em>，图片必 404）。
      链接只占位开标签，链接文字仍参与行内格式化。 */
   var toks=[];
-  text=text.replace(/!\[([^\]]*)\]\(([^)]+?)(?:\s+"([^"]*)")?\)/g,function(m,alt,src,title){
-    toks.push('<img src="'+escAttr(src)+'" alt="'+escAttr(alt)+'"'+(title?' title="'+escAttr(title)+'"':'')+'>');
+  /* 图片宽度参数：![alt](src){30} → 版面宽度的 30%，等比缩放（仅设 width，height 自动）。
+     [1-9]\d{0,2} 捕获，>100 钳到 100；0/非数字不进参数组（后缀原样留在正文可见，fail-closed）。
+     参数组在 `)` 之外，保存时的路径改写只动括号内路径，天然不触碰后缀。 */
+  text=text.replace(/!\[([^\]]*)\]\(([^)]+?)(?:\s+"([^"]*)")?\)(?:\s*\{([1-9]\d{0,2})\})?/g,function(m,alt,src,title,wpct){
+    var w=wpct?(' style="width:'+Math.min(parseInt(wpct,10),100)+'%"'):'';
+    toks.push('<img src="'+escAttr(src)+'" alt="'+escAttr(alt)+'"'+(title?' title="'+escAttr(title)+'"':'')+w+'>');
     return '\x00T'+(toks.length-1)+'\x00';
   });
   text=text.replace(/\[([^\]]+)\]\(([^)]+?)(?:\s+"([^"]*)")?\)/g,function(m,txt,href,title){
@@ -485,6 +512,9 @@ function parseInline(text){
   text=text.replace(/~~([^~]+)~~/g,'<del>$1</del>');
   text=text.replace(/@@C([0-9]+)@@/g,function(m,i){return '<code>'+escapeHtml(codes[+i])+'</code>';});
   text=text.replace(/\x00T(\d+)\x00/g,function(m,i){return toks[+i];});
+  /* 转义还原放最后：逐字符 escapeHtml（如 \< → &lt;），只作用于还原出的单个字符，
+     不触碰 toks 已注入的标签。 */
+  text=text.replace(/\x00E([0-9]+)\x00/g,function(m,i){return escapeHtml(escs[+i]);});
   return text;
 }
  function parseList(lines,start,indent,seq){
@@ -498,7 +528,7 @@ function parseInline(text){
   var listOrdered=null;
   while(i<lines.length){
     var line=lines[i];
-    var m=line.match(/^([ ]*)([-*+]|[0-9]+\.)([ ]+)(.*)$/);
+    var m=line.match(/^([ ]*)([-+]|[0-9]+\.)([ ]+)(.*)$/);
     if(!m){break;}
     var li=m[1].length;
     if(li<indent){break;}
@@ -511,14 +541,14 @@ function parseInline(text){
       } else {break;}
     }
     var ordered=/[0-9]+\./.test(m[2]);
-    /* 标记类型切换（有序↔无序）＝新列表起点，本列表到此收口。
-       防 1./- 软换行混排被吸进同一 <ol>/<ul>。 */
+    /* 标记语义（本工具方言）：无序 + = 实心点（disc）、- = 空心圈（circle），样式跟标记符走、
+       与缩进无关（缩进只管层级归并）；星号不作列表标记（专注行内斜体与加粗强调）。 */
     if(listOrdered===null){
       listOrdered=ordered;
     } else if(ordered!==listOrdered){
       break;
     }
-    cur={raw:m[4],ordered:ordered,children:''};
+    cur={raw:m[4],ordered:ordered,mark:m[2],children:''};
     items.push(cur);
     i++;
   }
@@ -539,7 +569,9 @@ function parseInline(text){
       var checked=tm[1].toLowerCase()==='x';
       html+='<li class="task"><input type="checkbox" disabled'+(checked?' checked':'')+'> '+parseInline(tm[2])+it.children+'</li>';
     } else {
-      html+='<li>'+parseInline(it.raw)+it.children+'</li>';
+      /* 仅无序项带 marker 样式类（+ 实心 / - 空心）；有序项无 class */
+      var icls=it.ordered?'':(it.mark==='-'?' class="u-hollow"':' class="u-solid"');
+      html+='<li'+icls+'>'+parseInline(it.raw)+it.children+'</li>';
     }
   }
   html+=listOrdered?'</ol>':'</ul>';
@@ -583,6 +615,13 @@ function parseTable(lines,start){
   }).join('')+'</tr></thead>';
   return ['<table>'+thead+'<tbody>'+body+'</tbody></table>',i];
 }
+/* 围栏语言行解析：```lang {N} —— N=版面百分比，与图片 {N} 同一规矩（空白可选、>100 钳 100）。
+   非法形态（{0}/非数字/多余词）→ 整体视为 lang 原样返回、width=0（fail-closed：字面可见不吞错）。 */
+function parseFenceLang(raw){
+  var m=raw.match(/^(\S+?)(?:\s*\{([1-9]\d{0,2})\})?$/);
+  if(!m)return {lang:raw,width:0};
+  return {lang:m[1], width:m[2]?Math.min(100,parseInt(m[2],10)):0};
+}
 function parseMarkdown(src){
   var lines=src.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
   var html='';
@@ -591,12 +630,26 @@ function parseMarkdown(src){
   while(i<lines.length){
     var line=lines[i];
     if(/^```/.test(line)){
-      var lang=line.slice(3).trim();
+      var rawLang=line.slice(3).trim();
+      var fl=parseFenceLang(rawLang);   /* 图表围栏支持 ```mermaid {30} 版面百分比宽度 */
+      var lang=fl.lang, fW=fl.width;
       i++;
       var code='';
       while(i<lines.length && !/^```/.test(lines[i])){code+=lines[i]+'\n';i++;}
       i++;
-      html+='<pre><code'+(lang?' class="lang-'+lang+'"':'')+'>'+escapeHtml(code.replace(/\n$/,'')).replace(/</g,'&lt;')+'</code></pre>';
+      code=code.replace(/\n$/,'');
+      if(lang==='mermaid'||lang==='dot'||lang==='graphviz'||lang==='viz'||lang==='wavedrom'||lang==='wavejson'||lang==='vega'||lang==='vega-lite'||lang==='vegalite'){
+        /* 图容器：源码存 data-code（URI 编码），mountDiagrams 懒加载渲染。
+           mermaid→mermaid；dot/graphviz/viz→Graphviz (viz-js WASM)；
+           wavedrom/wavejson→WaveDrom 波形图（严格 JSON）；vega/vega-lite/vegalite→Vega-Lite（严格 JSON） */
+        var kind='mermaid';
+        if(lang==='dot'||lang==='graphviz'||lang==='viz')kind='dot';
+        else if(lang==='wavedrom'||lang==='wavejson')kind='wavedrom';
+        else if(lang==='vega'||lang==='vega-lite'||lang==='vegalite')kind='vega';
+        html+='<div class="diagram" data-diagram="'+kind+'"'+(fW?' style="width:'+fW+'%"':'')+' data-code="'+encodeURIComponent(code)+'"><div class="diagram-pending">图表渲染中…</div></div>';
+      }else{
+        html+='<pre><code'+(rawLang?' class="lang-'+rawLang+'"':'')+'>'+escapeHtml(code).replace(/</g,'&lt;')+'</code></pre>';
+      }
       olSeq=0;
       continue;
     }
@@ -625,13 +678,13 @@ function parseMarkdown(src){
       var t=parseTable(lines,i);
       html+=t[0];i=t[1];olSeq=0;continue;
     }
-    if(/^[ ]*([-*+]|[0-9]+\.)[ ]+/.test(line)){
-      var ind=/^([ ]*)([-*+]|[0-9]+\.)/.exec(line)[1].length;
+    if(/^[ ]*([-+]|[0-9]+\.)[ ]+/.test(line)){
+      var ind=/^([ ]*)([-+]|[0-9]+\.)/.exec(line)[1].length;
       var lst=parseList(lines,i,ind,olSeq);
       html+=lst[0];i=lst[1];olSeq=lst[2];continue;
     }
     var para=[];
-    while(i<lines.length && !/^[ ]*$/.test(lines[i]) && !/^```/.test(lines[i]) && !/^(#{1,6})[ ]+/.test(lines[i]) && !/^[ ]*>/.test(lines[i]) && !/^[ ]*([-*+]|[0-9]+\.)[ ]+/.test(lines[i]) && !(lines[i].indexOf('|')>=0 && i+1<lines.length && /^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1]) && lines[i+1].indexOf('-')>=0)){
+    while(i<lines.length && !/^[ ]*$/.test(lines[i]) && !/^```/.test(lines[i]) && !/^(#{1,6})[ ]+/.test(lines[i]) && !/^[ ]*>/.test(lines[i]) && !/^[ ]*([-+]|[0-9]+\.)[ ]+/.test(lines[i]) && !(lines[i].indexOf('|')>=0 && i+1<lines.length && /^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1]) && lines[i+1].indexOf('-')>=0)){
       para.push(lines[i]);i++;
     }
     html+='<p>'+parseInline(para.join('\n')).replace(/\n/g,'<br>')+'</p>';
@@ -672,6 +725,7 @@ function parseMarkdown(src){
   var STORE_KEY='md-editor-content-v1';
   var THEME_KEY='md-editor-theme';
   var VIEW_KEY='md-editor-view';
+  var FOLLOW_KEY='md-editor-follow';
   var BUILTIN_DOCS=[{name:'使用指南',file:'MDEditor 使用指南.md'},
                     {name:'版权与开源组件声明',file:'版权与开源组件声明.md'}];
 
@@ -852,6 +906,138 @@ function parseMarkdown(src){
     return 'h'+h.toString(36);
   }
   var renderQueue=null;
+  /* ---- 图表围栏渲染：vendor 懒加载，全部本地（/static/ 路由） ----
+     mermaid           → /static/mermaid/mermaid.min.js（v10.9.3 UMD 全量，无 ESM 分包断链）
+     dot/graphviz/viz  → /static/viz/viz-standalone.js（viz-js 3.2.0 standalone，Graphviz 9.0.0 内嵌 WASM）
+     注意：3.31.0 的 viz-global.js 不内嵌 WASM（运行时外取，离线挂）——必须用 standalone 形态
+     wavedrom/wavejson → /static/wavedrom/ 皮肤(default+dark)+wavedrom.min.js（v3.7.0，严格 JSON 源）
+       注意：RenderWaveForm 依赖 window.WaveSkin（皮肤独立文件，缺皮肤=childNodes of null）；
+       第三参是 id 前缀字符串（内部 getElementById(前缀+index)），不能传 DOM 元素
+     vega/vega-lite    → /static/vega/ 三件套链式加载（vega 6.4 + vega-lite 6.5 + embed 7.3，严格 JSON spec）
+     四引擎共用 .diagram 容器（源码存 data-code），按 kind 分流；mermaid securityLevel strict 防 XSS；
+     wavedrom/vega 源码只做 JSON.parse（不 eval，fail-closed），失败降级显示源码 + 错误。 */
+  var diagState={mermaid:{ready:false,loading:false,queue:[]},dot:{ready:false,loading:false,queue:[]},wavedrom:{ready:false,loading:false,queue:[]},vega:{ready:false,loading:false,queue:[]}};
+  var diagUrl={mermaid:['/static/mermaid/mermaid.min.js'],dot:['/static/viz/viz-standalone.js'],wavedrom:['/static/wavedrom/skins/default.js','/static/wavedrom/skins/dark.js','/static/wavedrom/wavedrom.min.js'],vega:['/static/vega/vega.min.js','/static/vega/vega-lite.min.js','/static/vega/vega-embed.min.js']};
+  var vizInstance=null;
+  function mermaidThemeName(){ return document.body.classList.contains('light')?'default':'dark'; }
+  function chainScripts(urls,i,ok,err){
+    if(i>=urls.length){ok();return;}
+    var s=document.createElement('script');
+    s.src=urls[i];
+    s.onload=function(){ chainScripts(urls,i+1,ok,err); };
+    s.onerror=function(){ err(); };
+    document.head.appendChild(s);
+  }
+  function loadVendor(kind,cb){
+    var st=diagState[kind];
+    if(st.ready){cb();return;}
+    st.queue.push(cb);
+    if(st.loading)return;
+    st.loading=true;
+    chainScripts(diagUrl[kind],0,function(){
+      try{
+        if(kind==='mermaid')mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme:mermaidThemeName()});
+        st.ready=true;
+        var q=st.queue.slice(); st.queue=[];
+        while(q.length)q.shift()();
+      }catch(e){ st.loading=false; diagramFailAll(kind); }
+    },function(){ st.loading=false; diagramFailAll(kind); });
+  }
+  function diagramErr(el,src,e){
+    el.innerHTML='<pre class="diagram-err">'+escapeHtml(src)+'\n\n'+escapeHtml(String((e&&e.message)||e||'渲染失败'))+'</pre>';
+  }
+  function diagramFailAll(kind){
+    var pend=preview.querySelectorAll('.diagram[data-diagram="'+kind+'"]:not([data-done]) .diagram-pending');
+    for(var i=0;i<pend.length;i++){
+      var box=pend[i].parentNode;
+      box.setAttribute('data-done','1');
+      box.innerHTML='<pre class="diagram-err">'+escapeHtml(decodeURIComponent(box.getAttribute('data-code')||''))+'\n\n[vendor 加载失败：'+diagUrl[kind]+' 不可达]</pre>';
+    }
+  }
+  var diagramSeq=0;
+  function mountDiagrams(root){
+    if(!root||!root.querySelectorAll)return;
+    var mm=root.querySelectorAll('.diagram[data-diagram="mermaid"]:not([data-done])');
+    var dd=root.querySelectorAll('.diagram[data-diagram="dot"]:not([data-done])');
+    if(mm.length)loadVendor('mermaid',function(){
+      for(var i=0;i<mm.length;i++){
+        (function(el){
+          if(el.getAttribute('data-done'))return;
+          el.setAttribute('data-done','1');
+          var src=decodeURIComponent(el.getAttribute('data-code')||'');
+          mermaid.render('mmd-'+(++diagramSeq), src).then(function(res){
+            el.innerHTML=res.svg;
+            el.classList.add('diagram-ok');
+          }).catch(function(e){ diagramErr(el,src,e); });
+        })(mm[i]);
+      }
+    });
+    if(dd.length)loadVendor('dot',function(){
+      for(var j=0;j<dd.length;j++){
+        (function(el){
+          if(el.getAttribute('data-done'))return;
+          el.setAttribute('data-done','1');
+          var src=decodeURIComponent(el.getAttribute('data-code')||'');
+          var done=function(svg){ el.innerHTML=''; el.appendChild(svg); el.classList.add('diagram-ok'); };
+          try{
+            if(vizInstance){ done(vizInstance.renderSVGElement(src)); }
+            else{ Viz.instance().then(function(v){ vizInstance=v; done(vizInstance.renderSVGElement(src)); }).catch(function(e){ diagramErr(el,src,e); }); }
+          }catch(e){ diagramErr(el,src,e); }
+        })(dd[j]);
+      }
+    });
+    var ww=root.querySelectorAll('.diagram[data-diagram="wavedrom"]:not([data-done])');
+    if(ww.length)loadVendor('wavedrom',function(){
+      for(var w=0;w<ww.length;w++){
+        (function(el){
+          if(el.getAttribute('data-done'))return;
+          el.setAttribute('data-done','1');
+          var src=decodeURIComponent(el.getAttribute('data-code')||'');
+          try{
+            var obj=JSON.parse(src);   /* 严格 JSON，fail-closed：不 eval 任意源码 */
+            /* RenderWaveForm(index, source, output) 内部 getElementById(output+index)：
+               必须自建带 id 的容器并传 id 前缀，传元素会 null 闪退 */
+            var wi=++diagramSeq;
+            var holder=document.createElement('div');
+            holder.id='wd-'+wi;
+            el.innerHTML=''; el.appendChild(holder);
+            /* 暗色 UI 用 dark 皮肤；源码显式声明 skin 时尊重源码 */
+            if(!obj.skin && !document.body.classList.contains('light'))obj.skin='dark';
+            WaveDrom.RenderWaveForm(wi, obj, 'wd-');
+            el.classList.add('diagram-ok');
+          }catch(e){ diagramErr(el,src,e); }
+        })(ww[w]);
+      }
+    });
+    var vg=root.querySelectorAll('.diagram[data-diagram="vega"]:not([data-done])');
+    if(vg.length)loadVendor('vega',function(){
+      for(var k=0;k<vg.length;k++){
+        (function(el){
+          if(el.getAttribute('data-done'))return;
+          el.setAttribute('data-done','1');
+          var src=decodeURIComponent(el.getAttribute('data-code')||'');
+          try{
+            var spec=JSON.parse(src);  /* 严格 JSON，fail-closed */
+            vegaEmbed(el, spec, {renderer:'svg'}).then(function(){ el.classList.add('diagram-ok'); })
+              .catch(function(e){ diagramErr(el,src,e); });
+          }catch(e){ diagramErr(el,src,e); }
+        })(vg[k]);
+      }
+    });
+  }
+  /* 主题切换联动：mermaid 图按新主题重渲（dark/default）；wavedrom 图按 dark/default 皮肤重渲；
+     Graphviz/Vega 图样式由源码自定，不受 UI 主题影响 */
+  function rerenderMermaidForTheme(){
+    var done=preview.querySelectorAll('.diagram[data-diagram="mermaid"][data-done],.diagram[data-diagram="wavedrom"][data-done]');
+    if(!done.length)return;
+    if(diagState.mermaid.ready)mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme:mermaidThemeName()});
+    for(var i=0;i<done.length;i++){
+      done[i].removeAttribute('data-done');
+      done[i].innerHTML='<div class="diagram-pending">图表渲染中…</div>';
+    }
+    mountDiagrams(preview);
+  }
+
   function render(){
     buildMirrorMap();   /* 镜像测量表只依赖编辑器内容与排版，任何内容变化必经此处 */
     var src=extractMath(getText());
@@ -888,6 +1074,7 @@ function parseMarkdown(src){
       div.setAttribute('data-src-line', String(q.startLines[bi]||0));
       div.innerHTML=parseMarkdown(q.blocks[bi]);
       restoreMath(div); fixLocalImages(div);
+      mountDiagrams(div);
       if(fresh){
         var next=q.existing[bi+1];
         preview.insertBefore(div, next||null);
@@ -1026,6 +1213,7 @@ function parseMarkdown(src){
   }
   var syncRaf=null;
   function syncPreviewToEditor(){
+    if(!followOn) return;                       /* 跟随开关：关=预览不联动 */
     if(document.body.classList.contains('view-edit')||
        document.body.classList.contains('view-preview')) return;
     if(syncRaf) return;
@@ -1157,10 +1345,24 @@ function parseMarkdown(src){
     viewIdx=(viewIdx+1)%3;applyView();
   });
 
+  /* 分屏联动开关：开=预览跟随编辑滚动（分屏联动管线照常），关=各滚各的。
+     与视图/主题同模式：localStorage 持久化 + 工具栏文字态按钮。默认开。 */
+  var followOn=true;
+  function applyFollow(){
+    document.getElementById('btnFollow').textContent=followOn?'跟随':'不跟随';
+    document.getElementById('btnFollow').classList.toggle('active',followOn);
+    try{localStorage.setItem(FOLLOW_KEY,followOn?'1':'0');}catch(e){}
+  }
+  document.getElementById('btnFollow').addEventListener('click',function(){
+    followOn=!followOn;applyFollow();
+    if(followOn)syncPreviewToEditor();   /* 重新打开立即对齐，不等下次滚动 */
+  });
+
   function applyTheme(t){
     if(t==='light')document.body.classList.add('light');else document.body.classList.remove('light');
     document.getElementById('btnTheme').textContent=(t==='light'?'亮色':'暗色');
     try{localStorage.setItem(THEME_KEY,t);}catch(e){}
+    rerenderMermaidForTheme();
   }
   document.getElementById('btnTheme').addEventListener('click',function(){
     applyTheme(document.body.classList.contains('light')?'dark':'light');
@@ -1471,6 +1673,9 @@ function parseMarkdown(src){
   var st=null;try{st=localStorage.getItem(THEME_KEY);}catch(e){}
   applyTheme(st||'dark');
   applyView();
+  var sf=null;try{sf=localStorage.getItem(FOLLOW_KEY);}catch(e){}
+  if(sf==='0')followOn=false;
+  applyFollow();
   render();updateStats();
   /* 字体就绪后折行可能变化：重建镜像测量表；窗口缩放同理（防抖） */
   if(document.fonts&&document.fonts.ready){
@@ -1614,7 +1819,11 @@ function parseMarkdown(src){
         continue;
       }
       if(ind.mode==='first'){
-        css+=IND_SEL[ik]+'{text-indent:'+ind.chars+'em !important;}';
+        /* 列表档"首行缩进"用 padding-left 而非 text-indent：text-indent 只缩进文本行、
+           不缩进 outside 的编号/圆点 marker（渲染成"1.  顶格+文本右移"的错位感）；
+           padding-left 让整项（含 marker）一起右移 N em。p/quote 无 marker，维持 text-indent。 */
+        css+=(ik==='li'?IND_SEL[ik]+'{padding-left:'+ind.chars+'em !important;}'
+                       :IND_SEL[ik]+'{text-indent:'+ind.chars+'em !important;}');
       }else{
         css+=IND_SEL[ik]+'{padding-left:'+ind.chars+'em;text-indent:-'+ind.chars+'em !important;}';
       }

@@ -205,6 +205,12 @@ namespace MDEditorSetup
             string fonts = Path.Combine(tmp, @"katex\fonts");
             string uico = Path.Combine(tmp, "uninstall-md.ico");
             string ucs = Path.Combine(tmp, "UninstallMDEditor.cs");
+            string mjs = Path.Combine(tmp, @"mermaid\mermaid.min.js");
+            string vjs = Path.Combine(tmp, @"viz\viz-standalone.js");
+            string wjs = Path.Combine(tmp, @"wavedrom\wavedrom.min.js");
+            string wsk = Path.Combine(tmp, @"wavedrom\skins\default.js");
+            string wskd = Path.Combine(tmp, @"wavedrom\skins\dark.js");
+            string gejs = Path.Combine(tmp, @"vega\vega-embed.min.js");
             lines.Add("total_files=" + Directory.GetFiles(tmp, "*", SearchOption.AllDirectories).Length);
             lines.Add("guide_md_exists=" + (File.Exists(guide) ? 1 : 0));
             lines.Add("license_doc_exists=" + (File.Exists(lic) ? 1 : 0));
@@ -215,6 +221,12 @@ namespace MDEditorSetup
             lines.Add("katex_fonts_count=" + (Directory.Exists(fonts) ? Directory.GetFiles(fonts).Length : 0));
             lines.Add("pythonw_exists=" + (File.Exists(Path.Combine(tmp, @"python\pythonw.exe")) ? 1 : 0));
             lines.Add("webview2=" + (WebView2Present() ? 1 : 0));
+            lines.Add("mermaid_vendor_size=" + (File.Exists(mjs) ? new FileInfo(mjs).Length : 0));
+            lines.Add("viz_vendor_size=" + (File.Exists(vjs) ? new FileInfo(vjs).Length : 0));
+            lines.Add("wavedrom_vendor_size=" + (File.Exists(wjs) ? new FileInfo(wjs).Length : 0));
+            lines.Add("wavedrom_skin_size=" + (File.Exists(wsk) ? new FileInfo(wsk).Length : 0));
+            lines.Add("wavedrom_skin_dark_size=" + (File.Exists(wskd) ? new FileInfo(wskd).Length : 0));
+            lines.Add("vega_embed_vendor_size=" + (File.Exists(gejs) ? new FileInfo(gejs).Length : 0));
             lines.Add("version=" + Version);
             File.WriteAllLines(Path.Combine(Path.GetTempPath(), "md_setup_smoke_report.txt"), lines);
             try { Directory.Delete(tmp, true); } catch { }

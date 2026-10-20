@@ -26,7 +26,8 @@ OUT = os.path.join(SRC, "_setup_out")
 SMOKE_REPORT = os.path.join(tempfile.gettempdir(), "md_setup_smoke_report.txt")
 
 # dist checklist minimum set (sections 1+2+3+4). Keep in sync with docs checklist.
-DIST_DIRS = ["python", "katex", "pagedjs", "LICENSES"]
+DIST_DIRS = ["python", "katex", "pagedjs", "LICENSES",
+             "mermaid", "viz", "wavedrom", "vega"]
 DIST_DOCS_FILES = ["MDEditor 使用指南.md", "版权与开源组件声明.md"]
 DIST_DOCS_DIRS = ["MDEditor 使用指南.assets"]
 DIST_FILES = ["md_launch.pyw", "_md_run.py", "md_server.py", "markdown-editor.html",
@@ -147,6 +148,22 @@ def run_smoke(exe):
         ("katex fonts >= 50", int(rep.get("katex_fonts_count", "0")) >= 50,
          rep.get("katex_fonts_count", "?")),
         ("pythonw.exe present", rep.get("pythonw_exists") == "1", ""),
+        ("mermaid vendor in payload (>=3MB)",
+         int(rep.get("mermaid_vendor_size", "0")) > 3 * 1024 * 1024,
+         rep.get("mermaid_vendor_size", "?")),
+        ("viz-js vendor in payload (>=1MB)",
+         int(rep.get("viz_vendor_size", "0")) > 1024 * 1024,
+         rep.get("viz_vendor_size", "?")),
+        ("wavedrom vendor in payload (>=50KB)",
+         int(rep.get("wavedrom_vendor_size", "0")) > 50 * 1024,
+         rep.get("wavedrom_vendor_size", "?")),
+        ("wavedrom skins in payload (>=30KB x2)",
+         int(rep.get("wavedrom_skin_size", "0")) > 30 * 1024
+         and int(rep.get("wavedrom_skin_dark_size", "0")) > 30 * 1024,
+         rep.get("wavedrom_skin_size", "?") + "/" + rep.get("wavedrom_skin_dark_size", "?")),
+        ("vega-embed vendor in payload (>=50KB)",
+         int(rep.get("vega_embed_vendor_size", "0")) > 50 * 1024,
+         rep.get("vega_embed_vendor_size", "?")),
         ("version parsed", rep.get("version", "?") != "?", rep.get("version", "?")),
         ("webview2 detected (this machine)", rep.get("webview2") == "1", ""),
     ]

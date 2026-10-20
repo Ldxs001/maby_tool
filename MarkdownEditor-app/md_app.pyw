@@ -132,10 +132,19 @@ class Api:
         返回完整路径；取消返回空串。缺后缀补 .md，已带 .md/.smd 尊重用户。"""
         try:
             import webview
-            res = self.window.create_file_dialog(
-                webview.SAVE_DIALOG,
+            kwargs = dict(
                 directory=last_dir if last_dir and os.path.isdir(last_dir) else "",
                 save_filename=default_name or "未命名.md")
+            # 文件类型限定为 .md/.smd（pywebview 6.x：每个元素须为完整 '描述 (通配)' 格式）
+            try:
+                dlg = self.window.create_file_dialog(
+                    webview.SAVE_DIALOG,
+                    file_types=("Markdown (*.md;*.smd)",), **kwargs)
+            except Exception as e2:
+                # 过滤参数任何形态的失败（版本差异/格式差异）都回退无过滤调用，保证可用性
+                log("pick_save_path file_types fallback: %s" % e2)
+                dlg = self.window.create_file_dialog(webview.SAVE_DIALOG, **kwargs)
+            res = dlg
             if not res:
                 return ""
             path = res if isinstance(res, str) else (res[0] if res else "")

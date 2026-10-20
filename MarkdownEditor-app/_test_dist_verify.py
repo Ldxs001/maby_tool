@@ -33,14 +33,16 @@ FILES = ["md_launch.pyw", "_md_run.py", "md_server.py",
          "LICENSE", "README.md"]
 for f in FILES:
     shutil.copy2(os.path.join(SRC, f), os.path.join(DIST, f))
-for d in ["python", "katex", "pagedjs", "docs", "LICENSES"]:
+for d in ["python", "katex", "pagedjs", "docs", "LICENSES",
+          "mermaid", "viz", "wavedrom", "vega"]:
     subprocess.run(["cmd", "/c", "mklink", "/J",
                     os.path.join(DIST, d), os.path.join(SRC, d)],
                    capture_output=True, creationflags=NO_WINDOW)
-check("dist assembled (16 files + 5 junctions)",
+check("dist assembled (16 files + 9 junctions)",
       all(os.path.exists(os.path.join(DIST, f)) for f in FILES)
       and all(os.path.isdir(os.path.join(DIST, d))
-              for d in ["python", "katex", "pagedjs", "docs", "LICENSES"]))
+              for d in ["python", "katex", "pagedjs", "docs", "LICENSES",
+                        "mermaid", "viz", "wavedrom", "vega"]))
 check("no runtime/ pycache/ in dist",
       not os.path.exists(os.path.join(DIST, "runtime"))
       and not os.path.exists(os.path.join(DIST, "__pycache__")))
@@ -73,7 +75,8 @@ while time.time() - t0 < 20:
         time.sleep(0.05)
 check("cold start from dist (no pyc)", ver is not None,
       "%.2fs" % (time.time() - t0) if ver else "timeout")
-check("version == 52 with sessions", ver and ver.get("version") == 52
+EXPECT_VER = __import__('md_server').MD_SERVER_VERSION   # 单一来源：不再硬编码版本号
+check("version == %d with sessions" % EXPECT_VER, ver and ver.get("version") == EXPECT_VER
       and "sessions" in ver, str(ver))
 
 # --- 3) 页面与静态资源 ---
@@ -82,6 +85,15 @@ check("page served", "MDEditor" in body and
       'defer src="/static/katex/katex.min.js"' in body,
       "%d bytes" % len(body))
 check("katex.min.js", len(get("/static/katex/katex.min.js")) > 200000)
+# 图表 vendor 四引擎（v1.12.0：mermaid / graphviz / wavedrom / vega-lite）
+check("mermaid vendor", len(get("/static/mermaid/mermaid.min.js")) > 3000000)
+check("viz-js vendor (graphviz, standalone=embedded wasm)", len(get("/static/viz/viz-standalone.js")) > 1000000)
+check("wavedrom vendor + skins", len(get("/static/wavedrom/wavedrom.min.js")) > 50000
+      and len(get("/static/wavedrom/skins/default.js")) > 30000
+      and len(get("/static/wavedrom/skins/dark.js")) > 30000)
+check("vega vendor", len(get("/static/vega/vega.min.js")) > 500000)
+check("vega-lite vendor", len(get("/static/vega/vega-lite.min.js")) > 200000)
+check("vega-embed vendor", len(get("/static/vega/vega-embed.min.js")) > 50000)
 fonts = json.loads(get("/static/katex/fonts/").decode("utf-8")) \
     if False else None
 try:
@@ -128,7 +140,7 @@ check("runtime/ auto-created on first save",
 
 # --- 8) splash 在分发目录可起（进程能存活=消息循环正常） ---
 sp = subprocess.Popen([PY, os.path.join(DIST, "_splash.py"),
-                       "", "4", "18766", "52"], cwd=DIST,
+                       "", "4", "18766", str(EXPECT_VER)], cwd=DIST,
                       creationflags=NO_WINDOW)
 time.sleep(1.0)
 alive = sp.poll() is None

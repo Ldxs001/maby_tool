@@ -11,6 +11,45 @@
 
 ---
 
+## v2.0.0（2026-10-20）
+
+**本次改动：四种本地图表引擎 + 预览滚动跟随开关 + 打开/另存为扩展名过滤 + 图表 vendor 两处缺陷修复**
+
+**新增**
+
+- **无序列表标记方言**：`+` 渲染实心圆点（disc）、`-` 渲染空心圆圈（circle），样式跟标记符走、与缩进无关（缩进只决定嵌套层级），逐 `<li>` 显式 `list-style-type` 覆盖浏览器按嵌套深度换 marker 的默认行为；**星号退出列表标记**（`*星号*` 斜体 / `**双星**` 加粗专属，行首 `* 内容` 按普通段落处理）；有序列表编号接力语义不变。`_test_list_parse.py` 断言更新至新输出并扩至 20 例（20/20 PASS）。
+- **使用指南示例图片不渲染（指南误用转义 + 解析器无转义双重根因）**：现象——指南「图片」章三处 `\!\[内嵌示例图\](...)` 预览中反斜杠原样漏出，且 `\[...\](..)` 仍被链接正则吃成真 `<a>`，示例图片全部不渲染。根因——① 指南示例写成了 `\!\[...\]` 转义形态（本意内嵌真图，写法错误）；② 解析器无反斜杠转义处理，转义与非转义之间的行为不可预期。修法——指南三处示例改回真图片写法（`![内嵌示例图](路径)`、40% 例带 `{40}`）；`parseInline` 按 CommonMark 口径补 `\X`（X 为 ASCII 标点）转义：占位符隔离后行内语法全部失效、末尾还原为字面 X（逐字符 HTML 转义不产生真标签），代码段内反斜杠保持字面（代码段优先），LaTeX 公式在 `extractMath` 文档级占位不受影响。新增 `_test_escape.py` 11 例全 PASS；`_test_img_width.py` 6/6、`_test_list_parse.py` 20/20 回归 PASS。使用指南「约定」补转义条目。
+- **语法速查文档**：使用指南新增「语法速查与本工具的特殊写法」章（与标准 Markdown 差异表 + 特有写法表：`{N}` / 图表围栏 / 任务列表 / 删除线 / 公式 + 钳制与只读约定）；「列表与任务」章改用 `+/-` 双语义活示例；「排版」章补列表首行缩进行为说明；README 功能速览补方言条目与指南指引。
+
+- **四种图表围栏本地渲染（全程离线）**：` ```mermaid `（mermaid 10.9.3 UMD 全量 3.34MB，无 ESM 分包断链）、` ```dot `／` ```graphviz `／` ```viz `（viz-js 3.2.0 standalone 1.36MB，内嵌 Graphviz 9.0.0 WASM）、` ```wavedrom `／` ```wavejson `（WaveDrom 3.7.0 55KB + default/dark 双皮肤 87KB）、` ```vega `／` ```vega-lite `／` ```vegalite `（Vega 6.4.0 + Vega-Lite 6.5.0 + Vega-Embed 7.3.0 共 840KB）。按需懒加载：文档无图零加载，首遇对应围栏才加载引擎；渲染失败容器内原样显示源码与错误；暗/亮主题切换重渲（mermaid 换 theme、wavedrom 换皮肤）；`wavedrom`／`vega` 源码仅 `JSON.parse`（fail-closed，不 eval）。后端零改动（复用 `/static/` 通用路由）。
+- **预览滚动跟随开关**：工具栏「跟随」按钮（分屏切换旁），`localStorage` 键 `md-editor-follow` 持久化，默认开；`syncPreviewToEditor` 入口守卫，联动管线零侵入。
+- **使用指南「图表作图」章**：mermaid 流程图（判定分支+样式）、mermaid 时序图（autonumber+alt）、dot 模块依赖拓扑、wavedrom 请求握手波形、vega 柱状图共 5 个真实示例 + 围栏对照表；wavedrom/vega 示例过严格 JSON 校验。
+- **图片与图表宽度参数 `{N}`**：`![说明](路径){30}` 与 ` ```mermaid {30} `（四引擎围栏通用）→ 宽度 = 版面宽度的 30%、等比缩放；基准为版面而非原图，不同原图同参数等宽，**原始文件只读不写**（切片产生的条带存缓存目录）。预览 / 导出 HTML / 分页三处一致（内联 `style="width:N%"` 随 bodyHtml 流转）；`{150}` 钳到 100，`{0}`/非数字不生效且后缀字面保留（fail-closed）；围栏与图片的 `{N}` 规矩对称（空白可选均生效）；vega 渲染器切 `svg`（矢量缩放无损，打印同益）。分页超长图切片决策基于调整后落地宽度（`eff_w_mm = 版心 × pct`），条带继承同一宽度样式（实测 400×2400 图：满宽切 23 条、50% 切 12 条，条带几何随 eff 宽换算）；资源路径改写只动括号内路径，`){N}` 后缀原样保留。测试 `_test_img_width.py` 6/6 PASS（前端解析 21 例含围栏 13 例 + 改写保留 + 切片 4 断言）；`_test_list_parse.py` 18/18、`_test_list_ui.py`、`_test_outline_jump.py` 回归全 PASS。
+
+**修复**
+
+- **排版列表档「首行缩进」错位**：现象——列表设首行缩进 N 字符后渲染成「编号顶格 + 文本右移 + 中间大空隙」（`1.   xxxx`）。根因——CSS 用 `text-indent`，而它只缩进文本行、不缩进 outside 定位的编号/圆点 marker。修法——列表档首行缩进改用 `padding-left`（整项含 marker 一起右移 N em），正文段落与引用档维持 `text-indent`；排版 CSS 经 `#ts-style` 整体随导出/分页传递，预览与导出自动一致。
+- **viz vendor 不内嵌 WASM**：现象——3.31.0 `viz-global.js` 无 WASM 魔数（`AGFzbQ` 计 0）、无 base64 块，运行时外部 fetch，离线 dot 渲染必挂；3.21–3.31 各版本 dist 均为同形态。根因——vendor 选型只验了路由 200，未做真实渲染验证。修法——回退 3.2.0 `lib/viz-standalone.js`（内嵌 WASM）；node 实测 `graphvizVersion 9.0.0`、11 引擎（dot/neato/fdp/circo/twopi 等）加载；五处引用同步改名（编辑器加载链、`_test_dist_verify.py`、`_setup_win.cs` 冒烟、分发清单、LICENSES）。
+- **WaveDrom 渲染 childNodes null（两层叠加）**：现象——指南波形块报 `Cannot read properties of null (reading 'childNodes')`。根因——① WaveDrom 皮肤为独立必需文件（`skins/*.js` 定义 `window.WaveSkin`），未随包分发；② `RenderWaveForm(index, source, output)` 第三参为 id 前缀字符串（内部 `getElementById(output + index)`），调用误传 DOM 元素。修法——落地 `skins/default.js`+`skins/dark.js`（各 43KB）；加载链补双皮肤；渲染改自建 `#wd-{seq}` 容器并传 `'wd-'` 前缀；暗色 UI 自动注入 `obj.skin='dark'`（源码显式声明时尊重源码）。验证——真实浏览器同代码路径 E2E：`svg=YES | svgChildren=3 | width=400 | RESULT=PASS`。
+- **打开/另存为对话框扩展名过滤**：现象——打开与另存对话框不限定文件类型，可选中任意文件且另存无类型提示。根因——`md_app.pyw` 内嵌窗口 SAVE_DIALOG 未传 `file_types`；浏览器/降级路径走原生框时无过滤。修法——`md_app.pyw` 传 `file_types=("Markdown (*.md;*.smd)",)`（pywebview 6.x 要求每元素为完整「描述 (通配)」格式），过滤参数任何形态失败即回退无过滤调用保可用；`md_server.py` 新增 `_pick_file_subprocess`（GetOpenFileNameW，过滤 `.md;.smd`／`.md`／`.smd`／`.txt`／所有文件五档，路径经临时文件回传，与选目录同模式）；`_pickfile.py` 过滤器同步五档。
+
+**变更**
+
+- **文档对齐图表能力面**：README（简介、核心必需表 +4 vendor 行、功能速览）、`docs/分发清单.md`（图表 vendor 4 行、最小分发集更新、皮肤必需依赖注）、`docs/版权与开源组件声明.md`（组件表 +6 行、许可要点补 MIT/EPL-1.0/BSD-3、pip 版差异注）；`LICENSES/` +6 文件（版本与 vendor 一一锁定；viz-js 包无 LICENSE 文件，MIT 文本手写并附 Graphviz EPL-1.0 注记）。
+- **服务版本 53→54**：`MD_SERVER_VERSION` 自愈换代，旧页面自动刷新至图表能力版。
+
+**测试**
+
+- **`_test_dist_verify.py` 22/22 PASS**：干净目录组装 + junction 9 目录 + 真实服务 + 6 vendor 路由与双皮肤路由断言；版本断言改动态读 `MD_SERVER_VERSION`（原硬编码 52 系 v1.11.4 时期漏同步）。
+- **指南围栏与语法校验**：5 个围栏提取成功，wavedrom/vega `JSON.parse` PASS；`markdown-editor.html` 内嵌 JS 与双 vendor `node --check` PASS。
+
+**说明**
+
+- 版本直接进 2 时代：同一版本内新增四引擎、跟随开关与文件对话框行为变更，为发布以来最大能力面增量。
+- pip 安装版（markdowneditor-ldxs）不含四个图表目录，差异已在分发清单与版权声明注明。
+
+---
+
 ## v1.11.4（2026-10-19）
 
 **修复**
@@ -190,6 +229,8 @@
 - **增量保存（两阶段提交）**：现象——大量图片时保存若整包重写需重压全部资源（8MB 图包为秒级~十秒级）。修法——顺序字节拷贝当前包到临时副本（旧 entry 不重新压缩，成本为顺序 IO），副本上仅追加变化的 entry（重名以后写为准，`warnings` 压掉 Duplicate name 设计依赖告警），fsync 后 `os.replace` 原子替换。实测：改字保存追加 2 entry、包大小 385→650 字节（对照全量重建为 MB 级 IO）；任意时刻断电原包完好，不存在半写状态。
 - **阈值自动整理**：死空间以解包目录现状为准计算——包内 entry 不在当前 `assets/`（业务上已替换/删除）或同名不同大小均计死空间，占比 >30% 且文件 >5MB 时全量重建原子替换。实测：8MB 图被替换后首次保存即触发（dead≈96%），整理后旧图 entry 清除、包体积 8391499→8391602 字节（新图等大），后续保存恢复纯增量。
 - **另存为格式选择器**：现象——`.smd` 与 `.md` 的选择依赖手输文件名后缀，易误存。修法——保存对话框新增格式下拉（`Markdown 文档（.md）` / `自包含文档（.smd）`），文件名输入框不再携带后缀，提交时统一剥离用户误填后缀并拼接所选格式；打开对话框时按当前文档格式预选。验证：`node --check` 通过；服务端按后缀识别逻辑不变，前端规范化后两种格式落点正确。
+- **内嵌另存为弹框类型限定**：现象——内嵌窗口模式「另存为」的原生保存对话框（pywebview SAVE_DIALOG）未传 `file_types`，文件类型显示“所有文件 (*.*)”。修法——`md_app.pyw` 的 `pick_save_path` 传入 `file_types=(“Markdown (*.md;*.smd)”,)`（pywebview 6.x 每个元素须为完整“描述 (通配)”格式；多元素交替对写法触发`ValueError: not a valid file filter`，异常被外层捕获后静默返回，表现为按钮点开无反应）；另加两层可用性兜底——过滤参数任何异常先记 `runtime/md_app.log` 再回退无过滤调用，保证按钮永远可弹。验证：两版 `py_compile` 通过；以本机嵌入式 Python 实测 `parse_file_type`——新格式解析为(`Markdown`, `*.md;*.smd`) 通过、旧错误格式复现与日志一致的 ValueError，根因闭环。
+- **「打开」按钮过滤修复（内嵌与浏览器模式同时生效）**：现象——「打开」弹框无 `.smd` 类型（仅 .md/.txt/所有文件）。根因——两版 `md_server.py` 的 `/api/open-file` 路由调用 `_pick_file_subprocess`，但该函数定义缺失（历史清理误删），每次点击即 `NameError`→500→前端兜底 WebView2 内置文件框（无类型过滤）。修法——补回 `_pick_file_subprocess(initdir)`：子进程执行 `_pickfile.py`（GetOpenFileNameW，过滤器第一组即 `Markdown (*.md;*.smd)`），`hwndOwner=GetForegroundWindow()` 置前，路径经临时文件回传；`MD_SERVER_VERSION` 44→45 / 52→53 触发版本自愈换代。验证：两版 `py_compile` 通过；嵌入式 Python 实测 `import md_server` 后函数存在、签名为 `(initdir='')`。
 - **安全与关联**：解包前逐条校验 ZIP entry 名，拒绝绝对路径/盘符/`..` 穿越（实测构造恶意包被拒）；`install.cmd` 注册 `.smd` 关联（`MDViewer.smd` ProgID + shim 转发，纯 ASCII 断言 PASS）；原生打开框过滤器加 `*.smd`；浏览器兜底入口（拿不到完整路径）对 `.smd` 明确提示拒绝而非读成乱码。
 - **跨容器资产双向换算**：现象——普通 `.md` 另存 `.smd`、`.smd` 改名另存 `.md` 时，磁盘契约 `<文档名>.assets/` 与包内契约 `assets/` 互不对认，图片必然断链。修法——服务端新增 `_rewrite_assets_ref` 助手（左边界断言防误伤）：打包时把 `<文档名>.assets/` 引用统一改写为 `assets/` 后进包；导出时反向改写并把图片落盘到目标目录；资产源三级解析（`base/assets` → 源文档同目录 `<文档名>.assets` → 手写图收编）。验证：单测 T10/T11 + 真实服务 E2E（另存→改名导出→图片数量一致）。
 - **手写图保存时收编进容器**：现象——用户手写绝对路径引用（如 `C:/user/x.png`），`.smd` 打包时原样进包，包不自包含，换机碎图。修法——`md_assets.materialize_into` 核心抽取（落盘目录与引用前缀参数化），`.smd` 打包与增量保存前统一物化：真实存在的本地图收编进容器、引用改写为容器契约；不存在的原样保留破图可见（fail-closed）；网络图维持外链不收编。验证：T12 + E2E F2/F3。
