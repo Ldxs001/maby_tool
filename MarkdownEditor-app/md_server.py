@@ -64,8 +64,36 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 54  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 55  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 SETTINGS_PATH = os.path.join(HERE, "runtime", "settings.json")
+
+# UI 状态服务端持久化（v2.0.x）：WebView2 内嵌窗口下 localStorage 只活在内存
+# （关窗进程终止，异步刷盘从未发生——实测 userdata leveldb 自安装日起零增长）。
+# 排版/主题/视图/跟随/最近文件/草稿等 UI 状态单一来源 = 本文件；前端启动时
+# 同步拉取回放进 localStorage（后续代码照旧读 LS，零侵入），写入经 lsSet
+# 节流后 POST 增量合并到此。原子写（tmp+replace）+ 线程锁防多窗口并发竞态。
+UI_SETTINGS_PATH = os.path.join(HERE, "runtime", "ui-settings.json")
+_UI_LOCK = threading.Lock()
+
+
+def _ui_settings_read():
+    try:
+        with io.open(UI_SETTINGS_PATH, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _ui_settings_write(d):
+    try:
+        os.makedirs(os.path.dirname(UI_SETTINGS_PATH), exist_ok=True)
+        tmp = UI_SETTINGS_PATH + ".tmp"
+        with io.open(tmp, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False)
+        os.replace(tmp, UI_SETTINGS_PATH)
+    except Exception:
+        pass
 
 # .smd 自包含文档格式（v1.2.0）；导入失败落错误日志，相关路由返回明确错误而非静默
 try:
@@ -495,6 +523,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                  "sessions": len(_LIVE_SESSIONS)},
                 ensure_ascii=False))
             return
+        if u.path == "/api/ui-settings":
+            # UI 状态全量读取（前端启动时同步 XHR 回放进 localStorage）
+            self._send(200, json.dumps(
+                {"ok": True, "data": _ui_settings_read()},
+                ensure_ascii=False))
+            return
         if u.path == "/api/ping":
             # 页面心跳：登记本会话存活（token 区分多窗口/多标签），并撤销待退出。
             # 注意：闲置（切标签页/最小化）绝不触发退出。
@@ -840,6 +874,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if u.path in ("/api/ping", "/api/bye"):
             # sendBeacon 走 POST（pagehide 心跳/卸载通知），路由与 GET 同一实现
             self.do_GET()
+            return
+        if u.path == "/api/ui-settings":
+            # UI 状态增量合并写入：body={key:value}，value=null 表示删除该键。
+            # 值一律为字符串（localStorage 原值原样存取，前端零转换）。
+            try:
+                obj = json.loads(self.rfile.read(
+                    int(self.headers.get("Content-Length", 0))
+                ).decode("utf-8"))
+                if not isinstance(obj, dict):
+                    raise ValueError("body must be a JSON object")
+                with _UI_LOCK:
+                    d = _ui_settings_read()
+                    for k, v in obj.items():
+                        if v is None:
+                            d.pop(k, None)
+                        else:
+                            d[k] = v
+                    _ui_settings_write(d)
+                self._send(200, '{"ok":true}', "application/json; charset=utf-8")
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
             return
         if u.path == "/api/file":
             try:

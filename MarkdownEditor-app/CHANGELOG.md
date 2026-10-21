@@ -11,6 +11,37 @@
 
 ---
 
+## v2.1.0（2026-10-21）
+
+**本次改动：缩进包围块 `<<<` 语法 + 列表/引用「整体缩进」档合并 + UI 状态服务端持久化 + 排版实时重渲**
+
+**新增**
+
+- **缩进包围块 `<<< ... <<<`**：块内容以上一段缩进位置为起点整体右移。继承链只流容器级缩进（包围块 margin、列表/引用整体缩进档），段内 text-indent（首行/悬挂）永不进链；curIndent 顺序状态机（空行/标题/围栏/hr/表格清零，与列表编号接力同口径），顶层段落 = 正文首行缩进档、列表/引用 = 各自整体缩进档，`<<<` 冻结当前值为块内左边界（块内递归天然封闭），闭合时 curInd += 块内容器级子块叠加（列表/引用档取 max，供下个包围继承；div margin 只冻结当前值不含叠加，叠加进 margin 会与块内列表 CSS 档位双算，实测 4em 渲染成 8.5em），紧邻连续块逐级递进。开闭同符号状态翻转、不支持嵌套（块内 `<<<` 即闭合）；判定置于 hr 之前（`<<<` 三连字符会被 hr 规则吃掉，实测抓出）；未闭合 fail-closed 字面保留；标记行吞掉。排版档经 `window.__IND_EM__` 桥接进解析器，applyTypeset 更新后触发 render 重算。新增 `_test_indent_block.py` 10 例（继承/打断/封闭性/叠加/阶梯/fail-closed/吞标记/接力回归）全 PASS。
+
+- **列表与引用排版档合并为「整体缩进」**：引用从「悬挂缩进」（text-indent 系）改为容器级 `margin-left`，列表档位由 `margin-left` 承载并清零浏览器/主题自带左内边距（40px / 1.6em 隐形底座，实测把 marker 顶偏 1.5em——4em 预期落 4.5em），两元素各留一档「无 / 整体缩进」；旧配置 first/hang 有值一次性迁移为 block；正文保留首行/悬挂两档（段内装饰）。容器级统一是 `<<<` 继承链可精确定值的前提。`_test_list_parse.py` 20/20、`_test_list_ui.py`、`_test_img_width.py` 6/6 回归 PASS。
+
+- **列表档位几何校准**：现象——排版面板开关列表整体缩进时预览与导出几何偏移，开启后 marker 落点比设定档位多约 1.5em。根因——浏览器 UA 默认（40px）与主题（1.6em）给 ol/ul 的 padding-left 构成隐形底座，与档位叠加。修法——`IND_OLUL` 规则组改为 `padding-left:0 !important; margin-left:<档>em !important; list-style-position:inside !important`，并中性化块内 `li p` 的 text-indent；「无」档同样归零底座。验证——playwright 量取渲染坐标（px/16 转 em）：开启正文首行 2em + 列表整体 2em 时，包围块内列表 marker 精确落在 4em / 6em（方块图模型逐项吻合），正文悬挂盒左缘 2em；`_test_indent_block.py` 10/10、`_test_list_parse.py` 20/20 回归 PASS。观感变化——inside 下多行列表项续行顶格（与标记对齐）而非悬挂在外。
+
+- **列表/引用「整体缩进」应用即丢（守卫白名单缺 block）**：现象——面板选「整体缩进」点应用，重开面板回到「无」（字符数保留），缩进始终设置不上。根因——tsApply 收集守卫 `m!=='none'&&m!=='first'&&m!=='hang'` 沿用旧版白名单，`block` 不在名单内被兜底吃成 `none`；内存 tsCfg 同步被污染，存储层随之写丢。修法——白名单补 `block`（p 的下拉无 block 选项、quote/li 无 first/hang 选项，放宽无副作用）。验证——新增 `_test_ind_apply.py`（真实服务 + playwright 面板操作）：应用后 localStorage `indent.li/quote.mode==='block'`、重开面板下拉与字符数回读一致、预览 ol 计算样式 `margin-left=2em/padding-left=0/inside`、`window.__IND_EM__` 桥接值 2/2，12/12 PASS。
+
+- **UI 状态服务端持久化（WebView2 localStorage 从未落盘根治）**：现象——排版设置点应用后关闭整个窗口重开，全部恢复默认（实测实锤）。根因——取证 `runtime/userdata` 的 Local Storage leveldb：MANIFEST 与日志文件自安装日起零增长、`md-editor-typeset-v3` 键在磁盘上不存在——WebView2 内嵌窗口下 localStorage 只活在内存，pywebview 关窗进程终止使 Chromium 异步刷盘从未发生，此前一切 localStorage 状态（排版/防丢稿草稿/主题/分屏/跟随/最近文件）实际均未持久化。修法——按 SSOT 原则把 UI 状态单一来源迁至 `runtime/ui-settings.json`：md_server 新增 `GET/POST /api/ui-settings`（全量读 / 增量合并写，值一律字符串原样存取，原子写 tmp+replace，线程锁防多窗口竞态，`MD_SERVER_VERSION` 54→55 触发自愈换代）；前端启动时同步 XHR 全量拉取逐键回放进 localStorage（后续既有代码照旧读 LS，零侵入），服务端为空而 LS 有值（老用户首启）整包种子上云；所有 localStorage 写入收敛到 `lsSet/lsRemove` 包装（300ms 节流合并 POST，同步 XHR 仅启动一次）。验证——`_test_persist.py` 改造（独立端口 18767，绝不复用 18766 防误杀用户实例）：应用后服务端文件出现全部键值、全新 context（LS 空=模拟关窗）重开后恢复引导回放、面板四项回填一致、重启后 ol 渲染样式保持，12/12 PASS；`_test_indent_block.py` 10/10、`_test_list_parse.py` 20/20、`_test_ind_apply.py`、`_test_img_width.py` 6/6、`_test_escape.py` 11/11 回归 PASS。
+
+- **改排版后 `<<<` 包围块不重渲（块哈希短路吞掉非源文本变更）**：现象——排版面板改缩进档点应用，包围块 margin 不更新，需在编辑区敲回车/删除才生效。根因——`render()` 按 `data-h`（源文本哈希）短路逐块跳过，而缩进包围块的 `margin-left` 是解析期内联写入的，排版变化不改变源文本哈希，所有块全被跳过；CSS 规则类排版（字体/对齐/文本缩进）即时生效而内联 margin 类（包围块）永远滞后。修法——`render(force)`：force 时跳过哈希短路全量重渲，`tsApply` 调 `render(true)`。验证——`_test_persist.py` 断言：不碰编辑器，排版 `p` 档字符 2→3 应用后 `.ind-blk` 内联 margin 即时 2em→3em PASS。
+
+**变更**
+
+- **服务版本 54→55**：`MD_SERVER_VERSION` 自愈换代，旧页面自动刷新至 UI 状态持久化版。
+
+**测试**
+
+- **`_test_indent_block.py` 10/10 PASS**：缩进包围块继承/打断/封闭性/叠加/阶梯/fail-closed/吞标记/接力回归。
+- **`_test_ind_apply.py` 12/12 PASS**：排版面板整体缩进应用即持久化（守卫修复）+ 面板回填一致。
+- **`_test_persist.py` 12/12 PASS**：UI 状态服务端持久化（独立端口 18767 模拟关窗重开）+ 排版实时重渲（render force）。
+- **回归全绿**：`_test_list_parse.py` 20/20、`_test_img_width.py` 6/6、`_test_escape.py` 11/11、内联脚本语法校验 PASS。
+
+---
+
 ## v2.0.0（2026-10-20）
 
 **本次改动：四种本地图表引擎 + 预览滚动跟随开关 + 打开/另存为扩展名过滤 + 图表 vendor 两处缺陷修复**
