@@ -13,3 +13,11 @@ resume_*.json
 # ── 系统 ─────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# ── 宣传视频合成中间产物(_video_syntax: 源码脚本入库, 产物不入库) ──
+MarkdownEditor-app/_video_syntax/raw10/
+MarkdownEditor-app/_video_syntax/video_only.mp4
+MarkdownEditor-app/_video_syntax/narr.m4a
+MarkdownEditor-app/_video_syntax/bgm.m4a
+MarkdownEditor-app/_video_syntax/tts/
+MarkdownEditor-app/_video_syntax/*.log
