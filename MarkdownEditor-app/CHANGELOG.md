@@ -11,6 +11,100 @@
 
 ---
 
+## v2.3.0（2026-10-22）
+
+**新增**
+
+- **图片排版三件套：图片段锚定统一 + 图片对齐体系（面板档 + 语法单图覆盖）+ `@@ fill` 图片分栏**。① 图片段不参与正文首行缩进（历史缺陷：真实图是 p 内行内 img 被正文首行 text-indent 推开两字符，`.diagram` 块级容器却紧贴版心左边——同为图两种起点）——四链路统一：预览主 CSS / 导出 HTML 模板 / 打印 PAGED_BASE_CSS 三处 `p:has(>img){text-indent:0 !important}`（!important 同级按源序 ts-style 后置会盖主 CSS，applyTypeset 正文缩进档同时显式排除图片段）、docx `_img_only_para` 纯图段跳过首行/悬挂缩进（此前同样被 28pt 推开）。② 对齐体系 A+B：排版面板新增**图片**元素行（仅对齐档，TS_KEYS/TS_MAP 扩展 img；容器 text-align + 图块级化 auto margin）；语法 `{N c/l/r}` 单图覆盖（`{40c}`/`{c}` 合法，图片与图表围栏同语法 ` ```mermaid {30r} `）——对齐**内联进 img 自身 style 且带 !important**（CSS 规范：作者 important 胜内联普通；且三值全写覆盖而非叠加——全局档 center 的 margin-right:auto 会与语法级 margin-left:auto 合成两边 auto=居中）；docx 侧 `data-img-align`/`data-diagram-align` 桥接 + `_align_from_attr` 语法级优先于内联 text-align。③ `@@ begin fill {a|b[|c[|d]]}` … `@@ end fill` 分栏：比例为版面宽度**百分比**（50|50 与 `{50}` 同口径）、2~4 栏、相加须=100；栏内容按空行分隔（段数=栏数）；栏内 `{N}` 失效（CSS `fill-col img/.diagram{width:auto!important;max-width:100%!important}` 压制，宽度全权栏比例，图等比缩入栏宽小图保原尺寸）；fail-closed 口径与 `<<<` 一致（比例和≠100/段数≠栏数/未闭合 → 整块按普通文本）；预览/HTML/打印 flex 渲染（gap 1em、break-inside:avoid 防跨栏断裂）；docx 以**无边框表格**作布局骨架（Word 原生多图并排做法：`_tbl_no_borders` 清 tblBorders/tblCellMar、列宽按版心×比例落 tblGrid（须同时设 columns[i].width）、`_CellDoc` 写入代理把段落/表格转投单元格、tblInd 承载 `<<<` 继承缩进）；fill 语义经 `data-fill-row`/`data-fill` 桥接（inlineStylesInto 剥 class 前定格）。验证——新增 `_test_img_features.py` 18/18 PASS（真实图片文件）：图片段 textIndent=0、面板全局档居中（pTA=center）、`{c}`/`{{r}` 单图几何（真图 x=714 靠右 vs 居中 293）、fill 两栏 454/454 各半、栏内 {30} 失效（两图同宽 400）、三栏 25|25|50（446=2×223）、60|60 fail-closed、docx jc 序列 center/center/right、fill 表 2 张、两栏列宽 4698365 EMU 各半、三栏 25|25|50 精确、无边框（tblBorders 6×none）、shapes=10 栏内含图；node 级围栏参数 8 用例（{50r} 直连/带空格/无参/纯对齐/dot 代码）与 fill 解析 10 用例全过；`_test_docx_export.py` 35/35、`_test_real_export.py`、`_test_export_ui.py`、`_test_docx_indent_ui.py`、`_test_paper_layout.py`、`_test_indent_align.py`、`_test_list_ui.py`、`_test_indent_block.py` 全回归 PASS。使用指南同步（宽度参数章节扩对齐后缀、新增 fill 章节、特有写法表 3 行）。MD_SERVER_VERSION 66。
+
+---
+## v2.2.7（2026-10-22）
+
+**修复**
+
+- **docx 列表编号退回 Word 默认悬挂布局（编号偏左 + 大间隔）**：现象——顶层无 `<<<` 的有序列表在列表整体缩进档下，预期 `□□1.□有序列表项一`（编号站在档位、后跟一个空格），实际 `1.□□□有序列表项一`（编号被拉到左侧、编号与文字大间隔）——Word 默认列表的样子。根因——python-docx 模板 ListNumber/ListBullet 的 abstractNum lvl0 自带悬挂布局三件套：`<w:ind w:left="360" w:hanging="360"/>`（悬挂底座）+ `<w:tabs><w:tab w:val="num" w:pos="360"/></w:tabs>`（制表位）+ 无 `w:suff`（默认编号后是制表符而非空格）；v2.2.4 的段落级防御 `firstLine=0` 脆弱——Word 保存规范化会**剥掉 0 值属性**（`w:firstLine="0"` 被丢弃），防御失效后段落只写 left、hanging 从编号定义继承，编号悬到 left−360、tab 跳 stop，视觉即用户所见。修法（正攻编号定义本身）——新增 `_prep_list_abstract`（`build_docx` 开头调用）：对 ListNumber 与 ListBullet 的 abstractNum lvl0 三件事——① 加 `<w:suff w:val="space"/>`：编号后一个空格紧贴文字（与预览 `list-style-position:inside` 完全同构）；② 删 lvl0 `w:ind`：去掉悬挂底座，编号起点 = 段落 left（段落全权定位，不再依赖 firstLine=0 防御，Word 剥不剥 0 值属性都无影响）；③ 删 lvl0 `w:tabs`：去掉悬挂布局的制表位干扰。本导出文档所有 li 段落均显式写 left_indent，改共享定义安全；hollow 空心圈克隆发生在 prep 之后自动继承干净定义；顺带抽出公共 `_style_abstract_num`（样式→编号定义查找），`_new_ol_num`/`_bullet_num` 复用去重。验证——单元级：顶层 ol（列表档 37.33px）输出编号定义 lvl0 `suff=space` 且无 ind/tabs 残留、段落 `w:left="560" w:firstLine="0"`（编号站在 560 档位 + 空格 + 文字，几何即 `□□1.□文字`）；`_test_docx_indent_ui.py` 新增"编号定义 inside 化"断言共 15/15 PASS；`_test_docx_export.py` 35/35、`_test_real_export.py`、`_test_export_ui.py`、`_test_paper_layout.py`、`_test_indent_align.py`、`_test_list_ui.py` 全 PASS。MD_SERVER_VERSION 65。
+
+---
+## v2.2.6（2026-10-22）
+
+**修复**
+
+- **导出 HTML/docx 的无序列表 marker 退化为浏览器/Word 默认（层级制）**：现象——导出 HTML 与 docx 里 `-` 顶层渲染实心、嵌套 `-` 渲染空心（浏览器/Word 按**嵌套层级**决定 marker：顶层 disc、二级 circle），而非本工具"+ 实心 / - 空心**跟标记符走、与层级无关**"的规则。根因——预览端该规则由页面主 CSS `li.u-solid{list-style-type:disc}`/`li.u-hollow{list-style-type:circle}`（markdown-editor.html:155-156）承载，而 ① 导出 HTML 模板（`build_standalone_html`）与打印版（`PAGED_BASE_CSS`）均未携带这两条规则——li 的 class 原样在 bodyHtml 里但无 CSS 匹配，浏览器落到默认层级制；② docx 侧所有 ul li 统一走 List Bullet 样式（Symbol 实心圆），marker 语义无承载，且 `inlineStylesInto` 剥 class 后服务端无从判断。修法——① 两处模板补 `li.u-solid/li.u-hollow`（连带 `li.task{list-style:none}`）规则；② 前端 `prepareExportClone` 增加 **li 级** marker 桥接：遍历 ul li，class 含 u-hollow → `data-li-marker="hollow"`（不写=默认实心；li 级而非 ul 级——`+` 与 `-` 可混排于同一 ul，ul 级判定会把混合列表整体错判，实测"空心圈列表项（减号）"位于 +/- 混排 ul 中曾因此漏绑）；③ docx `_bullet_num`：懒建一次空心圈编号定义（克隆 List Bullet 的 abstractNum，lvlText 换 Wingdings U+F0A7 空心圆字符、rFonts 换 Wingdings、摘除 pStyle 交叉引用），`_walk` ul 分支逐 li 按 `data-li-marker` 绑定——不用 ilvl 层级 marker（那是"层级换样式"，违反本工具规则），层级缩进仍由段落 left_indent 承载；bullet 无计数语义全文档共享一个 numId 无连号问题，且 marker 字体不同=结构不同不会被 Word 保存规范化合并。验证——`_test_real_export.py` 新增 4 断言全 PASS：docx `-` 项（含同级混排与嵌套）全绑空心圈编号（num=10）、`+` 项走默认实心、HTML marker CSS 随导出携带、li class 未剥；浏览器实测导出 HTML：`实心点列表项`→disc、`空心圈列表项`→circle、嵌套 `-`→circle（跟标记符不变）、混排 ul 内 `+`→disc 与嵌套 `-`→circle 各归各；单元验证 hollow ul 及其嵌套共享同 num 全空心。回归——`_test_docx_export.py` 35/35、`_test_export_ui.py`、`_test_docx_indent_ui.py`、`_test_paper_layout.py`、`_test_indent_align.py`、`_test_list_ui.py` 全 PASS；`_test_real_export.py`/`_test_export_ui.py`/`_test_img_export.py` 补 kill_stale（此前三测试无进程清理，遗留 `_md_run.py` 服务占 18766 时新进程静默退出、测试打旧代码——本轮断言反复"时对时错"的总根源）。MD_SERVER_VERSION 64。
+
+---
+## v2.2.5（2026-10-22）
+
+**文档**
+
+- **明确层级缩进的语法定位：`<<<` 为本工具标准，嵌套子列表降级为兼容语法**：使用指南三处更新——① 无序列表章节新增注意块：缩进嵌套子项是**兼容语法**，仅为承接外部 Markdown（GitHub / Typora / AI 输出粘贴）而保留、保证外部多级列表不拍平；本工具表达层级退层的标准写法是 `<<<` 缩进包围块，列表内部层级细分与任意内容的整体缩进均建议用 `<<<`。② 「缩进包围块」章节标题下加"本工具表达整体缩进的标准语法"定位。③ 「与标准 Markdown 不同的地方」速查表增一行对照（嵌套子项：本工具=兼容语法、标准=层级写法）。纯文档变更，代码与渲染行为不变（嵌套解析照常工作，`<<<` 状态机无改动）；`_test_real_export.py`、`_test_list_ui.py` 回归 PASS。
+
+---
+## v2.2.4（2026-10-22）
+
+**修复**
+
+- **docx 列表编号悬挂继承压垮 `<<<` 继承缩进**：现象——v2.2.3 后编号正确（各列表独立、接力生效），但列表整体缩进比 `<<<` 块内正文还浅：演示段"正文模式"→"1. 第一项"的编号未继承正文模式的缩进位置再进一层，反而回退。根因——ListNumber/ListBullet 样式绑定的 abstractNum lvl0 自带 `<w:ind w:left="360" w:hanging="360"/>`（python-docx 默认模板实测）；段落级只写 `w:left` 时该属性的**其余分量从编号级继承**——hanging=360 生效，Word 把编号悬挂在 left−360 处：块内列表 left=1120 → 编号实际悬在 760 twips，比块内正文首字（1120）浅一层半，继承链视觉断裂。修法——列表 li 段落显式写 `first_line_indent=0`（`<w:ind w:left="N" w:firstLine="0"/>`）：firstLine 与 hanging 互斥，显式 0 压掉编号级悬挂，编号与文本都从容器左缘起（与预览 `list-style-position:inside` 同几何）。验证——`_test_docx_indent_ui.py` 增 2 断言共 14/14 PASS（li ind 含 `w:firstLine="0"` 且无 hanging 泄漏）；真实文档完整链路终验演示段最终几何：有序列表项一/二 left=560+so=1/2（编号 1./2.）、正文模式 firstLine=560+left=560（首字 1120）、第一项/第二项 left=1120+firstLine=0+so=1（**编号恰在正文模式首字位置——继承缩进+列表档**）、再进一层 left=1680（三层阶梯完整）；`_test_docx_export.py` 35/35、`_test_real_export.py`、`_test_export_ui.py`、`_test_paper_layout.py`、`_test_indent_align.py` 全 PASS。MD_SERVER_VERSION 63。
+
+---
+## v2.2.3（2026-10-22）
+
+**修复**
+
+- **docx 有序列表编号经 Word 保存后全局连号（接力/独立计数丢失）**：现象——导出的 docx 打开查看正常（各列表 1./2. 独立、接力列表显示 2.），但被 Word 打开并保存后再看，全文档 List Number 连续编号：有序列表项一=1、项二=2、`<<<` 演示段第一项=3、第二项=4，`<<<` 继承缩进同时脱节。根因——v2.2.2 的独立编号实现采用"克隆 abstractNum + 各自设 lvl0 w:start"——非标准做法：Word 保存时做编号规范化，把结构相同（仅 start 不同）的 abstractNum **合并为一个**并重接所有 numId（实测用户文件三个 numId 归一指向同一 abstractNum 且 start=1），Word 按 abstractNum 共享序列计数即全局连号。修法——改用 Word 原生"重新开始编号"机制：所有 ol 共享 List Number 的同一 abstractNum（格式定义），每个 ol 建独立 `w:num` 指向它并写 `<w:lvlOverride w:ilvl="0"><w:startOverride w:val="N"/>`（startOverride 必写含 1——num 不带 override 时 Word 视为"继续序列"并回主序列）；Word 按 num 实例分组计数、startOverride 定起始值，此结构即 Word 自身生成重启列表所用，打开/再保存语义不丢。验证——`_test_docx_indent_ui.py` 断言重写并 12/12 PASS（两个 ol 绑不同 numId、共享同一 abstractNum、so1=1/so2=2 精确）；单元级验证三 ol 输出 numId=10/11/12 全指 abs=7 且 startOverride=1/2/1；`_test_docx_export.py` 35/35、`_test_real_export.py`、`_test_export_ui.py`、`_test_paper_layout.py`、`_test_indent_align.py` 全 PASS；三个 UI 测试的 kill_stale 补 `_md_run.py` 匹配（shim 进程命令行不含 md_server.py，杀不到导致测试连旧代码服务——本轮排障曾再次被它误导）。MD_SERVER_VERSION 62。
+
+---
+## v2.2.2（2026-10-22）
+
+**修复**
+
+- **导出 docx 缩进/对齐/有序列表编号四重问题（含嵌套列表文本双份）**：现象——① 导出的 Word 文档没有任何缩进（正文首行缩进、列表整体缩进、引用缩进、`<<<` 包围块阶梯全丢）；② 排版面板设置的对齐不生效；③ 有序列表编号不对：跨列表连续编号、接力起始值丢失（预览正确显示 `2.` 的列表在 docx 重计为 `1.`）；④ 嵌套列表文本双份——父列表项段落文本被拼接上嵌套子项全文（真实文档实测"单行回车不断序单行回车不断序"合一段 + 子项段落再一份）。根因四层——① 前端 `inlineStylesInto`（样式内联进克隆树供 docx 序列化）单遍按文档序"边量边剥"：处理父元素时先剥其 class/id，`#preview p`/`.markdown-body p` 等后代选择器即刻失配，子元素量出的全是无规则默认值（text-indent 0px 被过滤、字号回退 15px）；且 `getComputedStyle` 返回 **live 对象**，即使先量后存，第二遍剥掉祖先后再读"快照"也已回退默认——ts-style 排版规则从未真正进入导出链路（v2.1.1 构造测试用直接内联 style 的 body 掩盖了此缺陷）；② 服务端 `docx_export` 从不消费 text-indent/margin-left：v2.2.1 的 px 档位数据已在 bodyHtml 里但无人读取；③ 所有 List Number 段落共享样式绑定的同一 numId（Word 按 numId 分组计数）→ 跨列表连续编号且 `<ol start>` 丢失；另 CSSOM 序列化会把与 shorthand 一致的 margin-left 合并进 `margin:10.5px 0px 10.5px 37.33px`，解析侧需从 shorthand 提取；④ `_fill_inline` 对 li 的全部后代递归拉平（含嵌套 ul/ol 的文本），随后 `_walk` 又把嵌套列表完整处理一遍——嵌套内容双份。修法——① 前端改**两遍快照法**：第一遍全树遍历时即时把 computed 值提取为字符串数组（live 对象读值即定格），第二遍统一写入 style+剥 class/id；② 服务端 `_walk` 全分支消费 px 缩进：p 分支 text-indent→`first_line_indent`（悬挂组合 padding-left+负 text-indent→`left_indent`+负首行）、ol/ul 分支 margin-left（含 shorthand 提取）→li `left_indent`、blockquote margin-left→`left_indent`（无档回落 0.3in）、`.ind-blk` div margin-left 进 ctx 块级缩进栈逐层叠加（嵌套列表/引用内段落统一消费）、代码块叠加；③ `_new_ol_num`：每个 ol 克隆 List Number 的 abstractNum 为独立定义并设 lvl0 `w:start` 为起始值（`<ol start="2">` 接力语义），段落 numPr 绑定新 numId；④ `_fill_inline` 增加 `_SKIP_INLINE_TAGS`（ul/ol/table/blockquote/pre/div）块级子元素跳过，不拉平由结构分支处理。验证——新增 `_test_docx_indent_ui.py`（playwright 端到端：真实排版面板设置 14pt/首行缩进2/列表缩进2/引用缩进2/居中 + 接力列表 + `<<<` + 引用；quote 档显式设置——依赖 ui-state 恢复会被诊断脚本残留状态重置）10/10 PASS：段落 `w:firstLine="560"`（37.33px×0.75=28pt）、`w:jc="center"` 生效（left/right/justify 走同一 `_align` 路径）、两个 ol 绑定不同 numId 且接力 ol 的 abstract lvl0 `w:start="2"`、列表 li `w:left="560"`、块内列表=块边界+档、引用 560；真实文档"docs/MDEditor 使用指南.md"导出逐段 dump 验证嵌套列表父 450/子 900 各归各位无拼接；`_test_docx_export.py` 35/35、`_test_real_export.py`、`_test_export_ui.py`、`_test_paper_layout.py`、`_test_indent_align.py`、`_test_img_export.py` 全 PASS。MD_SERVER_VERSION 61（服务端导出模块行为变更，依换代机制重启生效；嵌套双份修复后曾漏 bump——版本停在 60 致自愈换代未触发、用户服务内存仍旧代码，表现为"有序列表项一=1、项二=2、第一项=3、第二项=4"的样式级全局连续编号与继承缩进脱节；bump 61 后随重启恢复。真实文档磁盘代码实测演示段输出正确：正文模式 left=450（继承前段正文档）、第一项/第二项 num=12 start=1 → Word 显示 1./2.、列表 900=块边界+档、再进一层 1350 三层阶梯）。
+
+---
+
+## v2.2.1（2026-10-22）
+
+**修复**
+
+- **缩进档 `em` 双尺漂移：列表 marker 比正文首字缩进浅**：现象——正文首行缩进 2 字符、列表整体缩进 2 字符、`<<<` 包围块场景下，有序列表的 `1.` 比上一段正文首字更靠左（实测差 7.3px）；`<<<` 阶梯几何同理偏移。根因——缩进档 CSS 与 `<<<` 继承链全部以 `em` 表达，而 `em` 基准是**元素自身字号**：正文段（如 14pt→18.67px）的 `text-indent:2em`=37.3px，列表（自身字号 15px 或独立设置的更小字号）的 `margin-left:2em`=30px——同一个"2 字符"在两把尺下量出不同宽度；`.ind-blk` 容器 margin 同理随容器字号漂移。修法——缩进档统一钉死**正文字号一把尺**：`applyTypeset` 把各档 chars × 正文字号（未设置时 body 默认 15px）换算为 px 绝对值写入 ts-style（正文 text-indent / 引用与列表 margin-left / `.ind-blk` 由继承链直写 px）；`<<<` 桥接由 `__IND_EM__`（em）改为 `__IND_PX__`（px），parser 状态机 curInd 全域 px 运算；px 绝对值随 ts-style 导出，导出 HTML/打印版与预览口径天然一致（em 在导出侧同样漂移）。正文字号独立设置（那是字，不是档位）保留。验证——新增 `_test_indent_align.py`（playwright，正文 14pt + 列表 11.25pt 字号差场景，即 em 双尺漂移触发条件）8/8 PASS：列表档 `margin-left=37.33px`（=2×18.67 正文字号基准）、「1.」与「正」x 坐标完全对齐（69=69）、`<<<` 阶梯边界 0/0/37.33px px 域叠加、第三层「+」=块边界+档（107px）、导出 HTML 档位为 px 且无 `2em` 残留；`_test_indent_block.py` 注入口径同步 `__IND_PX__` 10/10 PASS；`_test_list_parse.py` 20/20、`_test_list_ui.py`、`_test_real_export.py` 回归 PASS（其 `{N}` 图片断言改为从源文档动态读参数——文档被手动编辑如 `{40}`→`{50}` 时不再误报）。纯前端改动（HTML 每请求读盘），刷新页面即生效。
+
+---
+
+## v2.2.0（2026-10-21）
+
+**本次改动：排版纸张/页边距贯通四条链路（预览/导出 HTML/打印/docx 同口径）**
+
+**新增**
+
+- **纸张/页边距全链路口径统一**：此前排版面板的纸张规格与页边距仅打印版消费——预览栏为窗口宽连续流、导出 HTML 版心写死 `max-width:820px`、docx 走 python-docx 默认 Letter/1in-1.25in 模板，三处与排版设置脱节（`{N}` 图片宽度语义以"版面宽度为 1"，版心漂移导致同一文档各出口相对尺寸不一致）。修法——① 预览栏：`#preview` 宽度改为版心宽（纸宽−左右边距，mm 直写 CSS），独立 style 节 `#preview-paper-style`（不进 ts-style：导出链会把 ts-style 的 `#preview` 选择器替换为 `.markdown-body`，宽度规则不能被带走），`#previewPane` 开横向滚动，超窗自动出滚动条；排版面板应用/启动恢复两处触发。② 导出 HTML：payload 增加 `page` 节，`build_standalone_html` 版心按同口径计算（`width:<W>mm` 取代 `max-width:820px`，去掉 20px padding），导出版心与预览栏一致。③ docx：`build_docx` 新增 `_apply_page_section`（纸张表 A0–A3/B/Letter/自定义 mm + 四边距 Mm()），默认 A4（与排版面板默认一致）；`{N}` 图片版心宽经 `_content_width_in` 动态读 section 自动跟随，无需另改。④ 分屏联动零影响：`aPv/bPv` 每次滚动实时实测、`f` 为纯比例插值，无静态像素假设，预览宽度变化自动适配（实测验证）。验证——新增 `_test_paper_layout.py`（playwright + 便携 python 服务，跑前杀遗留 md_server 进程防打旧代码）12/12 PASS：预览 A4 版心 174mm（658px±3）、改 A3 实时 261mm（986px±3）且超窗出横滚条、固定版心宽下分屏联动锚对齐（末锚 rel=453px 在 589px 视口内）、docx A3 section 297×420mm + 边距 25/18/25/18mm 精确、`{40}` 图 = A3 版心 261mm×0.4=4.110in（实测 4.111in）、导出 HTML `width:261mm` 且无 820px 残留。回归——`_test_docx_export.py` 35/35（宽度断言改 A4 版心 6.85in 口径：pct=30→2.055in、大图钳 6.85in、pct=50→3.425in）、`_test_real_export.py`、`_test_export_ui.py` 全 PASS（两测试显式设 A4：服务端 ui-state 会恢复本机真实排版（如 A3/mt=30），版心断言须确定态）；`_test_img_width.py` 6/6、`_test_list_ui.py` PASS。MD_SERVER_VERSION 59。
+
+---
+
+## v2.1.3（2026-10-21）
+
+**修复**
+
+- **导出 HTML/打印里代码作图显示为黑点（图片加载失败）**：现象——导出的独立 HTML 用浏览器打开，部分图表位置只显示破裂图片图标（黑点）；打印版同样。根因——`build_standalone_html` 的相对路径重写正则 `src="(?!https?:|file:|/|#)..."` 未排除 `data:` 协议，图表栅格化图的 `data:image/png;base64,...` src 被当相对路径拼上文档目录前缀，产出 `file:///docs/data:image/png;base64,...` 垃圾 src（同一 src 里的 base64 冒号等字符使其彻底不可解析）；内嵌 base64 图片同理遭殃。修法——排除清单加入 `data:`。打印版（`build_paged_html`）图片 src 保持 `/img` 代理原样：打印版由系统浏览器打开的是服务端 http URL（`/static/document.paged.html`），http 页面按浏览器安全策略禁止加载 `file:///` 本地资源（曾误改为 file:/// 重写致真实图片全挂——图表因 data: 内嵌幸存，恰好造成"只有真实图挂"的假象）；`/img` 代理同源 http 可用，用户打印/存 PDF 时浏览器渲染完成的最终产物自带图片像素，页面无需离线可开。验证——新增 `_test_real_export.py`（用户真实文档"docs/MDEditor 使用指南.md"：相对路径图片 ×3、`{40}` 参数图、mermaid×2/dot/wavedrom/vega 图表 ×5、带空格目录名）16/16 PASS：浏览器打开导出 HTML 实测 5 图表全部正常加载显示、普通图片 file:/// 路径真实存在；打印版以服务端 http URL 打开实测 3 张真实图片经 `/img` 代理全部加载成功。
+- **docx 图表栅格化失败回落为 `[图表]` 文本占位**：现象——docx 里 wavedrom 与 vega 图表缺失，出现 `[图表]` 文本占位（另 vega 图后跟 3 处 `[图表]`）。根因有二：① `_rasterOne` 栅格化成功后用 `diagEl.insertBefore(im,svg)` 插回，假设 svg 的父节点就是 `.diagram` 容器——mermaid/dot 确实如此，但 wavedrom 的 svg 套在 `div#wd-N` 里、vega 的套在 `.chart-wrapper` 里，跨层级 `insertBefore` 抛 `NotFoundError` 被 catch 吞掉，静默回落原 SVG；② vega-embed 自带 actions 工具栏（`details>summary` 折叠块，summary 含箭头图标 svg，实测该 details 无 class），其小图标 svg 混入导出产物，docx 侧按 svg 分支输出 `[图表]` 占位、HTML 侧残留无样式图标。修法——① 插回改为按 svg 真实父节点操作（`svg.parentNode.insertBefore/removeChild`），不假设层级；栅格化失败路径补 console.warn（此次排障靠它 3 分钟定位）；② 导出克隆时删除 `.vega-actions` 与图表容器内全部 `details`（仅克隆树，渲染预览不受影响）。验证——`_test_real_export.py` docx 侧 `inline_shapes=8`（3 普通图 + 5 图表全量嵌入，含 240px→2.50in、vega 198px→2.06in）、无 `[图表]`/`[图片:]` 占位、`{40}`→2.40in=版心×0.4；`_test_docx_export.py` 35/35、`_test_export_ui.py` 全 PASS、`_test_img_export.py`、`_test_list_ui.py` 回归 PASS。MD_SERVER_VERSION 58。
+
+---
+
+## v2.1.2（2026-10-21）
+
+**修复**
+
+- **三种导出的图片尺寸未遵循 `{N}` 宽度规则**：现象——① 导出 HTML 与打印版里栅格化图表普遍放大（约 2 倍）或被钳到与预览不一致的尺寸；② 导出 docx 的全部图片（普通图片与图表）尺寸失控：大图溢出版心、`{30}` 等宽度参数不生效、栅格化图表按 2 倍物理像素放大。规则口径（与编辑器一致）：`![a](x){30}` 与图表围栏 ` ```mermaid {30} ` → 版面宽度的 30% 仅设 width 等比缩放（`{150}` 钳 100、非法值不生效）；无参数 → 大图不超过版面宽 100%、小图保持原始尺寸。根因——v2.1.1 栅格化 PNG 为 2 倍清晰度物理像素，但插入的 `<img>` 只给了 `max-width:100%` 未给显式宽度，HTML/打印按物理像素显示导致放大；docx 侧 `add_picture` 从未传宽度，python-docx 按图片 DPI 元数据换算（栅格化 PNG 无 DPI 元数据），版心与 `{N}` 语义均无承载。修法——前端：栅格化 img 写显式 `width:Wpx`（挂载态量得的 1x 显示尺寸）+ `data-x-w` 属性；导出克隆准备时把宽度语义抄写为 `data-x-pct`（图片自身 `width:N%` 或图表 `.diagram` 容器的百分比，正则精确匹配 `width:` 以排除 `max-width:100%` 误抓——初版实现曾把两图全部误判为 100%）。服务端 `_add_image` 增加 `_img_width_in` 三级宽度决策：`data-x-pct` → 版心 × N%（钳 100）；`data-x-w` → px/96dpi；自然尺寸（PIL 读像素）兜底——全部以版心宽为上限，只传 width 高度自动等比，与前端"仅设 width"同口径；版心宽动态取自 `doc.sections[0]`（默认模板 6.0in）。验证——`_test_docx_export.py` 新增 `test_docx_img_width_rules` 35/35 PASS（pct=30→1.8in、data-x-w=227px→2.364in、大图 800px 钳版心 6.0in、小图 300px 原始 3.125in、pct=50→3.0in）；`_test_export_ui.py` 全链路扩双图表场景 18/18 PASS（`{30}` 图表 docx 宽 1.800in=版心×0.3、无参图表 3.292in=显示宽 316px/96、HTML 侧栅格化图显式定宽 + `width:30%` 容器语义保留），等待条件改精确数量（分块渲染下"至少 1 个全部完成"会提前通过，曾致第二图未渲染就导出）；`_test_img_width.py` 6/6、`_test_list_ui.py` 回归 PASS。MD_SERVER_VERSION 57。
+
+---
+
+## v2.1.1（2026-10-21）
+
+**修复**
+
+- **导出 docx 结构/样式/图表三重丢失**：现象——导出的 Word 文档标题全变普通段落、列表/表格/引用/代码块拉平为连串文字、字号颜色等内联样式不生效、Mermaid/Graphviz/WaveDrom/Vega-Lite 图表的 SVG 被当纯文本抽取（出现大段 `#mmd-x{font-family:...}` CSS 垃圾文字），仅公式（OMML）与普通图片正常。根因有四：① 前端预览为增量分块渲染（`#preview > .pblk > 实际元素`），导出前内联样式流程剥掉 class 后 pblk 变裸 div，服务端 `_walk` 把裸 div 当段落调 `_fill_inline` 拉平其全部内容，块级语义全灭；② 样式内联在克隆树（未插入文档）上调 `getComputedStyle`，Chromium 对 detached 元素返回空值，字号/颜色从未真正写入 style 属性；③ `_add_table` 只遍历 table 直接子级 `tr`，而真实前端输出为 `<table><thead><tr><th>`/`<tbody><tr><td>` 包装结构，行收集恒为空，表格整块静默丢弃；④ 图表 SVG 无任何导出处理，`_fill_inline` 递归钻入 SVG 把 `<style>` 与 `<text>` 节点当文字抽出。修法——前端新增 `prepareExportClone()` 导出准备流程（三种导出统一接入）：克隆预览挂到屏外容器保持真实布局（`getBoundingClientRect`/`getComputedStyle`/foreignObject 样式均需挂载态），把 `.diagram[data-done]` 的 SVG 经 canvas 栅格化为 2 倍清晰度 PNG（mermaid 的 foreignObject HTML 标签先行转为 svg text 节点防画布污染），图表以"所见即所得"图片定格（含当前主题配色），栅格化失败回落保原 SVG；样式内联改为挂载态就地写入（`inlineStylesInto` 取代克隆后内联的 `inlineStylesClone`）。服务端 `docx_export`：`_walk` 裸 div 一律下钻递归（直接文本节点兜底为段落）、新增块级 `img` 分支（继承容器对齐、支持 data URL 直接解码嵌入）、新增 `svg` 占位分支（`[图表]` 文本，不再抽取 SVG 文字）、`_add_table` 改 `xpath` 任意深度收 `tr` 兼容 thead/tbody 包装；`build_standalone_html` 补 `img,svg{max-width:100%}` 尺寸约束（栅格化回落场景防溢出）。
+- **导出 HTML 图表与预览观感割裂**：现象——导出的独立 HTML 里图表大小失控溢出版心、配色与文档风格不搭（预览暗色主题时 Mermaid 按 dark 主题渲染，导出 HTML 为亮色版式，暗图贴亮底）、文字标签字体随系统回落，与预览栏"不是一套"。根因——预览端 `.diagram` 容器样式与 `svg{max-width:100%}` 约束未随导出携带，且图表主题跟随编辑器亮暗主题而导出文档版式固定亮色。修法——HTML/docx/paged 三种导出统一走前端栅格化：图表以预览栏当时的渲染结果（含主题配色）整图转 PNG 嵌入，data URL 自包含，无需携带任何图表 CSS/字体，观感与预览栏一致。验证——`_test_docx_export.py` 扩充 pblk 裸 div 场景 29/29 PASS（裸 div 下钻后 Heading 1/List Bullet/表格/颜色 CC0000/字号 13.5pt 全生效、data URL PNG 嵌入 inline_shapes=1、SVG 回落 `[图表]` 占位且无 CSS 垃圾文本、公式 OMML 正常、纯文本兜底不丢）；新增 `_test_export_ui.py`（playwright + 便携 python 服务全链路）13/13 PASS——真实渲染 mermaid 流程图→点击导出按钮→拦截原生保存对话框→落盘断言：docx 侧栅格化图片入 word/media、无 `#mmd` 垃圾、Heading1/w:tbl 语义保留；HTML 侧图表为 data:image/png 自包含、无 `<svg` 残留、标题表格结构保留；`_test_list_ui.py`、`_test_routes.py` 回归全 PASS。MD_SERVER_VERSION 56（服务端导出模块行为变更，依换代机制重启生效）。
+
+---
+
 ## v2.1.0（2026-10-21）
 
 **本次改动：缩进包围块 `<<<` 语法 + 列表/引用「整体缩进」档合并 + UI 状态服务端持久化 + 排版实时重渲**

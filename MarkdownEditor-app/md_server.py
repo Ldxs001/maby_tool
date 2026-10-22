@@ -64,7 +64,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 55  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 66  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 SETTINGS_PATH = os.path.join(HERE, "runtime", "settings.json")
 
 # UI 状态服务端持久化（v2.0.x）：WebView2 内嵌窗口下 localStorage 只活在内存
@@ -560,6 +560,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if p:
                     _LAST_DOC_DIR[0] = os.path.dirname(p)
                 self._send(200, json.dumps({"ok": True, "path": p},
+                                           ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
+            return
+        if u.path == "/api/pick-save":
+            # 原生"另存为"框：前端先来此拿用户所选路径，再去导出端点写盘
+            try:
+                q = urllib.parse.parse_qs(u.query)
+                ext = (q.get("ext", ["docx"])[0] or "docx").strip().lstrip(".")
+                initdir = q.get("dir", [""])[0] or ""
+                name = q.get("name", [""])[0] or ("未命名文档." + ext)
+                title = q.get("title", ["导出为 .%s" % ext])[0]
+                path = _pick_save_subprocess(ext, initdir, title, name)
+                if not path:
+                    self._send(200, json.dumps({"ok": False, "canceled": True},
+                                               ensure_ascii=False))
+                    return
+                if not path.lower().endswith(".%s" % ext.lower()):
+                    path += ".%s" % ext
+                self._send(200, json.dumps({"ok": True, "path": path},
                                            ensure_ascii=False))
             except Exception as e:
                 self._send(500, json.dumps({"ok": False, "error": str(e)},
@@ -1112,13 +1133,41 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 obj = json.loads(self.rfile.read(length).decode("utf-8"))
-                html = build_standalone_html(obj.get("path") or None,
-                                             obj.get("bodyHtml", ""),
-                                             obj.get("tsCss", ""))
-                name = "document.html"
-                with open(os.path.join(HERE, name), "w", encoding="utf-8") as f:
+                html = build_standalone_html(obj.get("mdPath") or obj.get("path") or None,
+                                              obj.get("bodyHtml", ""),
+                                              obj.get("tsCss", ""),
+                                              obj.get("page") or None)
+                # 优先写到用户"另存为"所选路径；未提供时回退应用目录（兼容老调用）
+                out = obj.get("path") or os.path.join(HERE, "document.html")
+                d = os.path.dirname(out)
+                if d:
+                    os.makedirs(d, exist_ok=True)
+                with open(out, "w", encoding="utf-8") as f:
                     f.write(html)
-                self._send(200, json.dumps({"ok": True, "url": "/static/" + name},
+                self._send(200, json.dumps({"ok": True, "path": out},
+                                           ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
+            return
+        if u.path == "/api/export-docx":
+            try:
+                _ensure_docx_deps()
+                import docx_export
+                length = int(self.headers.get("Content-Length", 0))
+                obj = json.loads(self.rfile.read(length).decode("utf-8"))
+                data = docx_export.build_docx(obj.get("mdPath") or obj.get("path"),
+                                              obj.get("bodyHtml", ""),
+                                              obj.get("tsCss", ""),
+                                              obj.get("page") or None)
+                # 优先写到用户"另存为"所选路径；未提供时回退应用目录（兼容老调用）
+                out = obj.get("path") or os.path.join(HERE, "document.docx")
+                d = os.path.dirname(out)
+                if d:
+                    os.makedirs(d, exist_ok=True)
+                with open(out, "wb") as f:
+                    f.write(data)
+                self._send(200, json.dumps({"ok": True, "path": out},
                                            ensure_ascii=False))
             except Exception as e:
                 self._send(500, json.dumps({"ok": False, "error": str(e)},
@@ -1693,6 +1742,8 @@ PAGED_BASE_CSS = """
 .markdown-body blockquote p{margin:.4em 0;}
 .markdown-body ul,.markdown-body ol{margin:.7em 0;padding-left:1.6em;}
 .markdown-body li{margin:.3em 0;break-inside:avoid;}
+.markdown-body li.u-solid{list-style-type:disc;}
+.markdown-body li.u-hollow{list-style-type:circle;}
 .markdown-body li.task{list-style:none;margin-left:-1.4em;}
 .markdown-body li.task input{margin-right:.5em;vertical-align:middle;}
 .markdown-body hr{border:none;border-top:1px solid #ddd;margin:1.6em 0;}
@@ -1702,7 +1753,18 @@ PAGED_BASE_CSS = """
 .markdown-body th,.markdown-body td{border:1px solid #bbb;padding:7px 12px;text-align:left;word-break:keep-all;overflow-wrap:anywhere;}
 .markdown-body th{background:#f0f2f6;font-weight:650;}
 .markdown-body img{display:block;margin:0 auto;max-width:100%;max-height:__IMGMAXH__mm;break-inside:avoid;}
-.markdown-body p:has(>img){margin:0;}
+.markdown-body p:has(>img){margin:0;text-indent:0 !important;}
+.markdown-body p:has(>img[data-img-align="center"]){text-align:center !important;}
+.markdown-body p:has(>img[data-img-align="left"]){text-align:left !important;}
+.markdown-body p:has(>img[data-img-align="right"]){text-align:right !important;}
+.markdown-body .diagram[data-diagram-align="center"]{margin-left:auto;margin-right:auto;}
+.markdown-body .diagram[data-diagram-align="right"]{margin-left:auto;}
+.markdown-body .diagram[data-diagram-align="left"]{margin-right:auto;}
+.markdown-body .fill-row{display:flex;gap:1em;margin:.6em 0;break-inside:avoid;}
+.markdown-body .fill-col{min-width:0;}
+.markdown-body .fill-col img{width:auto !important;max-width:100% !important;height:auto;}
+.markdown-body .fill-col .diagram{width:auto !important;max-width:100% !important;}
+.markdown-body .fill-col .diagram svg{max-width:100%;height:auto;}
 .markdown-body table.ref-table{table-layout:fixed;}
 .markdown-body table.ref-table th:nth-child(1),.markdown-body table.ref-table td:nth-child(1){width:8%;}
 .markdown-body table.ref-table th:nth-child(2),.markdown-body table.ref-table td:nth-child(2){width:47%;}
@@ -1877,8 +1939,10 @@ def _strip_tags(s):
 
 
 
-def build_standalone_html(md_path, body_html, ts_css):
-    """普通 .html 导出组装（py 全权：图片路径还原 + katex css + 排版样式）"""
+def build_standalone_html(md_path, body_html, ts_css, page_cfg=None):
+    """普通 .html 导出组装（py 全权：图片路径还原 + katex css + 排版样式）。
+    版心宽度按排版 page 节（纸宽−左右边距，mm），与预览栏/打印版口径一致
+    （此前写死 max-width:820px，{N} 图片宽度语义随版心漂移）。"""
     katex_css = ""
     kp = os.path.join(HERE, "katex", "katex.min.css")
     if os.path.exists(kp):
@@ -1890,28 +1954,146 @@ def build_standalone_html(md_path, body_html, ts_css):
     body = re.sub(r'src="/img\?path=([^"]+)"', _proxy, body_html)
     if md_path:
         mdir = os.path.dirname(md_path).replace("\\", "/")
-        body = re.sub(r'src="(?!https?:|file:|/|#)([^"]+)"',
+        # 排除 data:（内嵌图/栅格化图表；历史缺陷：data: 被当相对路径拼上
+        # 目录前缀，成 file:///dir/data:image/png;base64,... 垃圾 src）
+        body = re.sub(r'src="(?!https?:|file:|data:|/|#)([^"]+)"',
                       lambda m: 'src="file:///%s/%s"' % (mdir, m.group(1)), body)
     m1 = re.search(r"<h1[^>]*>([\s\S]*?)</h1>", body)
     title = re.sub(r"<[^>]+>", "", m1.group(1)).strip() if m1 else "未命名文档"
     ts = ts_css.replace("#preview", ".markdown-body")
+    # 版心宽（mm）：纸宽−左右边距（与预览栏 applyPaperWidth 同口径）
+    _pc = page_cfg or {}
+    _paper = _pc.get("paper", "A4")
+    if _paper == "custom":
+        try:
+            _pwv = float(_pc.get("pw") or 0)
+        except Exception:
+            _pwv = 0
+        if _pwv <= 0:
+            _paper = "A4"
+    if _paper == "custom":
+        _w_mm = _pwv
+    else:
+        _w_mm = PAPER_W_MM.get(_paper, 210.0)
+    try:
+        _mlv = float(_pc.get("ml", 18))
+        _mrv = float(_pc.get("mr", 18))
+    except Exception:
+        _mlv, _mrv = 18.0, 18.0
+    _w_mm = max(50.0, _w_mm - _mlv - _mrv)
     html = ('<!DOCTYPE html>\n<html lang="zh-CN"><head><meta charset="UTF-8"><title>__TITLE__</title>'
         "<style>__KATEX__</style><style>div.md-math-block{overflow-x:auto;margin:.8em 0;}"
         "span.md-math-inline{white-space:nowrap;}__TS__</style>"
         '<style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",'
-        '"Microsoft YaHei",sans-serif;max-width:820px;margin:40px auto;padding:0 20px;'
+        '"Microsoft YaHei",sans-serif;width:__CONTENTW__mm;max-width:none;'
+        'margin:40px auto;padding:0;'
         'line-height:1.7;color:#222;}'
         'h1,h2{border-bottom:1px solid #eee;padding-bottom:.3em;}'
         'code{background:#f4f4f4;padding:.15em .4em;border-radius:4px;font-family:Consolas,monospace;}'
         'pre{background:#f4f4f4;padding:14px;border-radius:8px;overflow:auto;}'
         'blockquote{border-left:3px solid #4a6cf7;background:#f5f7ff;padding:.4em 1em;margin:1em 0;}'
         'table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ddd;padding:7px 12px;}'
-        'img{max-width:100%;}a{color:#4a6cf7;}</style></head><body class="markdown-body">__BODY__</body></html>')
+        'li.u-solid{list-style-type:disc;}li.u-hollow{list-style-type:circle;}'
+        'li.task{list-style:none;}'
+        'p:has(>img){text-indent:0 !important;}'
+        'p:has(>img[data-img-align="center"]){text-align:center !important;}'
+        'p:has(>img[data-img-align="left"]){text-align:left !important;}'
+        'p:has(>img[data-img-align="right"]){text-align:right !important;}'
+        '.diagram[data-diagram-align="center"]{margin-left:auto;margin-right:auto;}'
+        '.diagram[data-diagram-align="right"]{margin-left:auto;}'
+        '.diagram[data-diagram-align="left"]{margin-right:auto;}'
+        '.fill-row{display:flex;gap:1em;margin:.6em 0;}'
+        '.fill-col{min-width:0;}'
+        '.fill-col img{width:auto !important;max-width:100% !important;height:auto;}'
+        '.fill-col .diagram{width:auto !important;max-width:100% !important;}'
+        '.fill-col .diagram svg{max-width:100%;height:auto;}'
+        'img,svg{max-width:100%;}svg{height:auto;}a{color:#4a6cf7;}</style></head><body class="markdown-body">__BODY__'
+        '<button id="__copyBtn" style="position:fixed;right:18px;bottom:18px;z-index:2147483647;'
+        'padding:9px 16px;border:0;border-radius:8px;background:#4a6cf7;color:#fff;'
+        'font:14px/1.2 -apple-system,Segoe UI,PingFang SC,Microsoft YaHei,sans-serif;'
+        'cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.25)">一键复制</button>'
+        '<script>'
+        'function __inlineClone(src){'
+        'var props=["font-family","font-size","font-weight","font-style","font-variant",'
+        '"color","background-color","text-align","line-height","text-decoration",'
+        '"letter-spacing","vertical-align","text-indent","border-top","border-bottom",'
+        '"border-left","border-right","padding","margin"];'
+        'var c=src.cloneNode(true);'
+        'var all=[c].concat([].slice.call(c.querySelectorAll("*")));'
+        'all.forEach(function(el){'
+        'if(!el.style)return;'
+        'var cs=getComputedStyle(el),keep=[];'
+        'props.forEach(function(p){var v=cs.getPropertyValue(p);'
+        'if(v&&v!=="none"&&v!=="normal"&&v!=="0px"&&v!=="rgba(0, 0, 0, 0)")keep.push(p+":"+v);});'
+        'el.removeAttribute("class");el.removeAttribute("id");'
+        'if(keep.length)el.style.cssText=keep.join(";");else el.removeAttribute("style");});'
+        'return c;}'
+        'document.getElementById("__copyBtn").addEventListener("click",function(){'
+        'var btn=this,mb=document.querySelector(".markdown-body");'
+        'if(!mb)return;'
+        'var clone=__inlineClone(mb);'
+        'var html=clone.outerHTML;'
+        'var plain=mb.innerText||"";'
+        'function ok(){var t=btn.textContent;btn.textContent="已复制";setTimeout(function(){btn.textContent=t;},1500);}'
+        'function compat(){try{var r=document.createRange();r.selectNode(mb);'
+        'var s=getSelection();s.removeAllRanges();s.addRange(r);'
+        'document.execCommand("copy");s.removeAllRanges();ok();}catch(e){btn.textContent="复制失败";}}'
+        'try{'
+        'if(window.ClipboardItem&&navigator.clipboard&&navigator.clipboard.write){'
+        'var b1=new Blob([html],{type:"text/html"});'
+        'var b2=new Blob([plain],{type:"text/plain"});'
+        'navigator.clipboard.write([new ClipboardItem({"text/html":b1,"text/plain":b2})]).then(ok,compat);'
+        '}else{compat();}'
+        '}catch(e){compat();}'
+        '});'
+        '</script>'
+        '</body></html>')
     html = html.replace("__TITLE__", html_module.escape(title))
     html = html.replace("__KATEX__", katex_css)
     html = html.replace("__TS__", ts)
+    html = html.replace("__CONTENTW__", ("%.2f" % _w_mm).rstrip("0").rstrip("."))
     html = html.replace("__BODY__", body)
     return html
+
+
+# ---------------------------------------------------------------------------
+# docx 导出：依赖内置（随应用分发，无需联网）
+#   - python-docx / lxml / latex2mathml / Pillow 的 cp311 wheel 一并归入
+#     docxdeps/，随 MarkdownEditor-app 一起打包发布；
+#   - 各包许可证文本收录于 docxdeps/LICENSES/，均为 BSD/MIT 等宽松许可，
+#     可闭源分发、无需开源本应用代码，仅需随包附带其许可声明。
+# ---------------------------------------------------------------------------
+DOCX_DEPS = os.path.join(HERE, "docxdeps")
+_docx_ready = False
+
+
+def _ensure_docx_deps():
+    """确保 docx 导出依赖可用。依赖随应用内置（docxdeps/），无需联网下载。"""
+    global _docx_ready
+    if _docx_ready:
+        return True
+    import sys
+    # 1) 运行环境已可 import -> 直接用
+    try:
+        import docx  # noqa: F401
+        import lxml  # noqa: F401
+        import latex2mathml  # noqa: F401
+        import PIL  # noqa: F401
+        return True
+    except Exception:
+        pass
+    # 2) 内置 docxdeps/ 已随应用分发 -> 加入 sys.path 复用
+    if (os.path.isdir(os.path.join(DOCX_DEPS, "docx"))
+            and os.path.isdir(os.path.join(DOCX_DEPS, "latex2mathml"))
+            and os.path.isdir(os.path.join(DOCX_DEPS, "lxml"))
+            and os.path.isdir(os.path.join(DOCX_DEPS, "PIL"))):
+        sys.path.insert(0, DOCX_DEPS)
+        _docx_ready = True
+        return True
+    raise RuntimeError(
+        "docx 导出依赖缺失：找不到内置 docxdeps/ 目录"
+        "（应在 MarkdownEditor-app/docxdeps/ 内随应用分发）")
+
 
 def build_paged_html(md_path, body_html, ts_css, page_cfg):
     paper = page_cfg.get("paper", "A4")
@@ -2006,6 +2188,13 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
 
     # 超高长图切片：高 > 版心的图切小条带续排（切点吸附静默行）
     body = _slice_tall_images(body, icb_w, img_maxh)
+
+    # 图片 src 保持 /img 代理原样：打印版由系统浏览器打开的是服务端
+    # http URL（/static/document.paged.html），http 页面按浏览器安全策略
+    # 禁止加载 file:/// 本地资源（重写即真实图片全挂——v2.1.3 曾改反）；
+    # /img 代理同源 http 可用，长图切片 /static/_slice/ 同理；图表为
+    # data: 内嵌天然自包含。用户打印/存 PDF 由浏览器渲染完成后输出，
+    # 图片像素已进最终产物，无需页面本身离线可开。
 
     # 基础正文样式（表格边框/图片版面/断行纪律）——此前缺失是表格边框
     # 在分页导出中消失的根因；置于 ts_css 之前，排版设置的 !important 仍可覆盖
@@ -2219,6 +2408,35 @@ def _pick_file_subprocess(initdir=""):
     try:
         subprocess.run([py_exe, picker, tmp, initdir or ""], timeout=900,
                        creationflags=0x08000000)
+    except Exception:
+        pass
+    try:
+        return io.open(tmp, encoding="utf-8").read().strip()
+    except Exception:
+        return ""
+
+
+def _pick_save_subprocess(ext, init_dir="", title="", default_name=""):
+    """原生"另存为"框（GetSaveFileNameW，过滤 <ext>）；独立子进程弹窗，
+    路径经临时文件回传。取消/失败返回空串。"""
+    here = os.path.dirname(os.path.abspath(__file__))
+    picker = os.path.join(here, "_picksave.py")
+    if not os.path.exists(picker):
+        return ""
+    tmp = os.path.join(tempfile.gettempdir(), "mdeditor_picksave.txt")
+    try:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    except Exception:
+        pass
+    exe_dir = os.path.dirname(sys.executable)
+    py_exe = os.path.join(exe_dir, "python.exe")
+    if not os.path.exists(py_exe):
+        py_exe = sys.executable
+    try:
+        subprocess.run([py_exe, picker, tmp, ext, init_dir or "",
+                        title or "", default_name or ""],
+                       timeout=900, creationflags=0x08000000)
     except Exception:
         pass
     try:

@@ -165,6 +165,24 @@
   }
   .markdown-body th{background:var(--code-bg); font-weight:650;}
   .markdown-body img{max-width:100%; border-radius:var(--radius); margin:.5em 0;}
+  /* 图片段不参与正文首行缩进（与 .diagram 块级容器口径统一锚定版心左边；
+     历史缺陷：真实图是 p 内行内 img 被 text-indent 推开两字符，图表块
+     却贴左边距——同为图却两种起点） */
+  .markdown-body p:has(>img){text-indent:0 !important;}
+  /* 图片单图对齐（语法 {N c/l/r} 覆盖面板全局档；优先级高于 ts-style） */
+  .markdown-body p:has(>img[data-img-align="center"]){text-align:center !important;}
+  .markdown-body p:has(>img[data-img-align="left"]){text-align:left !important;}
+  .markdown-body p:has(>img[data-img-align="right"]){text-align:right !important;}
+  .markdown-body .diagram[data-diagram-align="center"]{margin-left:auto;margin-right:auto;}
+  .markdown-body .diagram[data-diagram-align="right"]{margin-left:auto;}
+  .markdown-body .diagram[data-diagram-align="left"]{margin-right:auto;}
+  /* @@ fill 图片分栏：flex 行、各栏比例宽；栏内 {N} 失效（宽度全权栏比例，
+     图等比缩入栏宽，小图保持原尺寸）；跨栏防断裂（打印/分页） */
+  .markdown-body .fill-row{display:flex;gap:1em;margin:.6em 0;break-inside:avoid;}
+  .markdown-body .fill-col{min-width:0;}
+  .markdown-body .fill-col img{width:auto !important;max-width:100% !important;height:auto;}
+  .markdown-body .fill-col .diagram{width:auto !important;max-width:100% !important;}
+  .markdown-body .fill-col .diagram svg{max-width:100%;height:auto;}
   .markdown-body .toc-anchor{color:var(--muted);}
 
   @media print{
@@ -265,7 +283,7 @@
     <button id="btnOpen" class="tb-btn" title="打开 .md 文件">打开</button>
     
     
-    <button id="btnExportPaged" class="tb-btn" title="打印：生成分页版 HTML（纸张/页码/目录）并在浏览器打开，Ctrl+P 即可打印或存为 PDF">打印</button><button id="btnExportHtml" class="tb-btn" title="导出 HTML">.html</button>
+    <button id="btnExportPaged" class="tb-btn" title="打印：生成分页版 HTML（纸张/页码/目录）并在浏览器打开，Ctrl+P 即可打印或存为 PDF">打印</button><button id="btnExportHtml" class="tb-btn" title="导出 HTML">.html</button><button id="btnExportDocx" class="tb-btn" title="导出 Word(.docx)：保留样式与可编辑公式">.docx</button>
     <button id="btnLLM" class="tb-btn" title="AI 设置：润色 / 智能备注的后端与模型">AI</button>
     <button id="btnTypeset" class="tb-btn" title="排版设置：字体/表格/缩进/自动落盘">排版</button>
     <button id="btnSave" class="tb-btn" title="保存（Ctrl+S）">保存</button>
@@ -328,6 +346,7 @@
       <div class="ts-row"><label>表格</label><select data-ts="table"></select><input data-tssz="table" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="table"></select></div>
       <div class="ts-row"><label>代码</label><select data-ts="code"></select><input data-tssz="code" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="code"></select></div>
       <div class="ts-row"><label>公式（KaTeX，字体固定）</label><input data-tssz="math" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="math"></select></div>
+      <div class="ts-row"><label>图片</label><select data-algn="img"></select></div>
       <div class="ts-sep"><span>段落缩进（按元素独立，字符数 × 当前字号自动换算）</span></div>
       <div class="ts-row"><label>正文</label><select data-ind="p"></select><input data-indchars="p" type="number" min="0" max="8" step="0.5" value="2"></div>
       <div class="ts-row"><label>引用块</label><select data-ind="quote"></select><input data-indchars="quote" type="number" min="0" max="8" step="0.5" value="2"></div>
@@ -495,12 +514,28 @@ function parseInline(text){
      （否则下划线文件名 20261015_181923_3419.png 会被 _.._ 改写成 <em>，图片必 404）。
      链接只占位开标签，链接文字仍参与行内格式化。 */
   var toks=[];
-  /* 图片宽度参数：![alt](src){30} → 版面宽度的 30%，等比缩放（仅设 width，height 自动）。
-     [1-9]\d{0,2} 捕获，>100 钳到 100；0/非数字不进参数组（后缀原样留在正文可见，fail-closed）。
+  /* 图片宽度+对齐参数：![alt](src){30} / {30c} / {c} → 版面宽度 30% 等比缩放
+     + 可选对齐 c=居中 l=左 r=右（单图覆盖排版面板全局图片档）。
+     [1-9]\d{0,2} 捕获，>100 钳到 100；对齐后缀独立可选（仅 {c} 也合法）；
+     非法整体不进参数组（后缀原样留在正文可见，fail-closed）。
      参数组在 `)` 之外，保存时的路径改写只动括号内路径，天然不触碰后缀。 */
-  text=text.replace(/!\[([^\]]*)\]\(([^)]+?)(?:\s+"([^"]*)")?\)(?:\s*\{([1-9]\d{0,2})\})?/g,function(m,alt,src,title,wpct){
-    var w=wpct?(' style="width:'+Math.min(parseInt(wpct,10),100)+'%"'):'';
-    toks.push('<img src="'+escAttr(src)+'" alt="'+escAttr(alt)+'"'+(title?' title="'+escAttr(title)+'"':'')+w+'>');
+  text=text.replace(/!\[([^\]]*)\]\(([^)]+?)(?:\s+"([^"]*)")?\)(?:\s*\{([1-9]\d{0,2})?([clr])?\})?/g,function(m,alt,src,title,wpct,algn){
+    /* 对齐内联进 img 自身 style（display:block + margin auto）而非
+       p 的 text-align——ts-style 面板档 !important 按源序后置会盖掉
+       主 CSS 的 p:has() 选择器规则；img 自身 margin 与 p text-align
+       优先级链独立，语法级天然覆盖全局档 */
+    var decls=[];
+    if(wpct)decls.push('width:'+Math.min(parseInt(wpct,10),100)+'%');
+    /* !important：面板全局档规则带 !important（同级按源序），内联不带
+       important 会被盖（CSS 规范：作者 important > 内联普通）。
+       三值全写覆盖而非叠加——全局档 center 会写 margin-left/right auto，
+       语法级只写一侧会被合成为"两边 auto"=居中 */
+    if(algn==='c')decls.push('display:block !important;margin-left:auto !important;margin-right:auto !important');
+    else if(algn==='r')decls.push('display:block !important;margin-left:auto !important;margin-right:0 !important');
+    else if(algn==='l')decls.push('display:block !important;margin-right:auto !important;margin-left:0 !important');
+    var st=decls.length?(' style="'+decls.join(';')+'"'):'';
+    var a=algn?(' data-img-align="'+(algn==='c'?'center':algn==='l'?'left':'right')+'"'):'';
+    toks.push('<img src="'+escAttr(src)+'" alt="'+escAttr(alt)+'"'+(title?' title="'+escAttr(title)+'"':'')+st+a+'>');
     return '\x00T'+(toks.length-1)+'\x00';
   });
   text=text.replace(/\[([^\]]+)\]\(([^)]+?)(?:\s+"([^"]*)")?\)/g,function(m,txt,href,title){
@@ -618,27 +653,31 @@ function parseTable(lines,start){
 /* 围栏语言行解析：```lang {N} —— N=版面百分比，与图片 {N} 同一规矩（空白可选、>100 钳 100）。
    非法形态（{0}/非数字/多余词）→ 整体视为 lang 原样返回、width=0（fail-closed：字面可见不吞错）。 */
 function parseFenceLang(raw){
-  var m=raw.match(/^(\S+?)(?:\s*\{([1-9]\d{0,2})\})?$/);
-  if(!m)return {lang:raw,width:0};
-  return {lang:m[1], width:m[2]?Math.min(100,parseInt(m[2],10)):0};
+  /* 宽度+对齐参数：```mermaid {30} / mermaid{30} / {30c} / {c}（图 {N} 同规矩）。
+     对齐进 data-diagram-align（渲染后应用容器）。lang 与 { 可无空格直连 */
+  var m=raw.match(/^([A-Za-z][\w-]*)(?:\s*\{([1-9]\d{0,2})?([clr])?\})?\s*$/);
+  if(!m)return {lang:raw.trim(),width:0,align:''};
+  return {lang:m[1],
+    width:m[2]?Math.min(100,parseInt(m[2],10)):0,
+    align:m[3]?(m[3]==='c'?'center':m[3]==='l'?'left':'right'):''};
 }
 function parseMarkdown(src){
   var lines=src.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
   var html='';
   var i=0;
   var olSeq=0;   /* 编号区域接力计数：空行/其他块打断即重置（见 parseList 注释） */
-  /* <<< 缩进包围块 · 当前位置状态机（v2.1）：
-     只流容器级缩进（em）——空行/标题/围栏/hr/表格清零；顶层段落=正文首行缩进档、
+  /* <<< 缩进包围块 · 当前位置状态机（v2.1；档位 v2.2.1 起为 px，正文字号基准）：
+     只流容器级缩进（px）——空行/标题/围栏/hr/表格清零；顶层段落=正文首行缩进档、
      列表=列表档、引用=引用档；<<< 冻结当前值为块内左边界（块内封闭不更新），
      闭合时 += 块内容器级子块叠加（列表/引用档，取 max）。段内 text-indent 永不进链。 */
-  var IEM=(typeof window!=='undefined'&&window.__IND_EM__)||{p:0,quote:0,li:0};
+  var IPX=(typeof window!=='undefined'&&window.__IND_PX__)||{p:0,quote:0,li:0};
   var curInd=0;
   while(i<lines.length){
     var line=lines[i];
     if(/^```/.test(line)){
       var rawLang=line.slice(3).trim();
-      var fl=parseFenceLang(rawLang);   /* 图表围栏支持 ```mermaid {30} 版面百分比宽度 */
-      var lang=fl.lang, fW=fl.width;
+       var fl=parseFenceLang(rawLang);   /* 图表围栏支持 ```mermaid {30} 版面百分比宽度 + c/l/r 对齐 */
+       var lang=fl.lang, fW=fl.width, fA=fl.align;
       i++;
       var code='';
       while(i<lines.length && !/^```/.test(lines[i])){code+=lines[i]+'\n';i++;}
@@ -652,7 +691,7 @@ function parseMarkdown(src){
         if(lang==='dot'||lang==='graphviz'||lang==='viz')kind='dot';
         else if(lang==='wavedrom'||lang==='wavejson')kind='wavedrom';
         else if(lang==='vega'||lang==='vega-lite'||lang==='vegalite')kind='vega';
-        html+='<div class="diagram" data-diagram="'+kind+'"'+(fW?' style="width:'+fW+'%"':'')+' data-code="'+encodeURIComponent(code)+'"><div class="diagram-pending">图表渲染中…</div></div>';
+        html+='<div class="diagram" data-diagram="'+kind+'"'+(fA?' data-diagram-align="'+fA+'"':'')+(fW?' style="width:'+fW+'%"':'')+' data-code="'+encodeURIComponent(code)+'"><div class="diagram-pending">图表渲染中…</div></div>';
       }else{
         html+='<pre><code'+(rawLang?' class="lang-'+rawLang+'"':'')+'>'+escapeHtml(code).replace(/</g,'&lt;')+'</code></pre>';
       }
@@ -687,13 +726,71 @@ function parseMarkdown(src){
         else if(/^[ ]*>/.test(inner[q]))hasQuote=true;
       }
       /* div margin 只冻结当前值；块内列表/引用的缩进由自身 CSS 档位生效（否则与
-         overlay 双算——实测 div(含li档)+ol默认padding+li档 = 8.5em 而非预期 4em）。
-         叠加值只更新 curInd 供下一个包围继承（块内列表视觉 = 边界 + 列表档）。 */
+         overlay 双算）。叠加值只更新 curInd 供下一个包围继承
+         （块内列表视觉 = 边界 + 列表档）。px 直写不依赖 ind-blk 字号——
+         em 时基准随容器字号漂移（继承链 15px 环境下 2em 渲染 30px，
+         与正文首行 37.3px 不齐）。 */
       var left=curInd;
-      html+='<div class="ind-blk" style="margin-left:'+left+'em">'+parseMarkdown(inner.join('\n'))+'</div>';
-      curInd=left+Math.max(hasList?IEM.li:0,hasQuote?IEM.quote:0);
+      html+='<div class="ind-blk" style="margin-left:'+left+'px">'+parseMarkdown(inner.join('\n'))+'</div>';
+      curInd=left+Math.max(hasList?IPX.li:0,hasQuote?IPX.quote:0);
       i=j;olSeq=0;
       continue;
+    }
+    /* @@ fill 图片分栏（v2.3）：@@ begin fill {a|b[|c[|d]]} … @@ end fill。
+       比例为版面宽度百分比（50|50 各半，与图 {50} 同口径），2~4 栏、
+       各值 1-100、和须=100。栏内容按空行分隔（每栏 = 一段：图表围栏块
+       或图片行序列）；段数 ≠ 栏数 fail-closed（标记与内容按普通文本渲染）。
+       栏内 {N} 失效（CSS fill-col 覆盖：width:auto/max-width:100%），
+       宽度全权由栏比例决定；分栏是图片布局语法，进 <<< 继承链（容器级
+       margin-left）。 */
+    var fm=line.match(/^[ ]{0,3}@@\s*begin\s+fill\s*\{([\d|]+)\}\s*$/);
+    if(fm){
+      var parts=fm[1].split('|');
+      var okFill=parts.length>=2&&parts.length<=4;
+      var ratios=[];
+      var sumR=0;
+      if(okFill){
+        for(var r=0;r<parts.length;r++){
+          var rv=parseInt(parts[r],10);
+          if(isNaN(rv)||rv<1||rv>100){okFill=false;break;}
+          ratios.push(rv);sumR+=rv;
+        }
+        if(sumR!==100)okFill=false;
+      }
+      var finner=[],fclosed=false,fj=i+1;
+      while(fj<lines.length){
+        if(/^[ ]{0,3}@@\s*end\s+fill\s*$/.test(lines[fj])){fclosed=true;fj++;break;}
+        finner.push(lines[fj]);fj++;
+      }
+      if(okFill&&fclosed){
+        /* 空行分栏：连续非空行属同栏（栏内可放图片行/围栏） */
+        var cols=[],cur=[];
+        for(var c=0;c<finner.length;c++){
+          if(/^[ ]*$/.test(finner[c])){
+            if(cur.length){cols.push(cur.join('\n'));cur=[];}
+          }else{cur.push(finner[c]);}
+        }
+        if(cur.length)cols.push(cur.join('\n'));
+        if(cols.length===ratios.length){
+          var fh='<div class="fill-row" style="margin-left:'+curInd+'px">';
+          for(var ci=0;ci<cols.length;ci++){
+            fh+='<div class="fill-col" style="width:'+ratios[ci]+'%">'+parseMarkdown(cols[ci])+'</div>';
+          }
+          fh+='</div>';
+          html+=fh;
+          i=fj;olSeq=0;curInd=0;
+          continue;
+        }
+      }
+      /* fail-closed：整块（含标记行）按普通文本渲染 */
+      if(fclosed){
+        html+='<p>'+parseInline(line)+'</p>';
+        i++;
+        var ftxt=finner.join('\n');
+        if(ftxt.trim()){html+=parseMarkdown(ftxt);}
+        i=fj;olSeq=0;curInd=0;
+        continue;
+      }
     }
     var stripped=line.replace(/[ ]/g,'');
     if(stripped.length>=3){
@@ -706,7 +803,7 @@ function parseMarkdown(src){
       var quote=[];
       while(i<lines.length && /^[ ]*>/.test(lines[i])){quote.push(lines[i].replace(/^[ ]*>[ ]?/,''));i++;}
       html+='<blockquote>'+parseMarkdown(quote.join('\n'))+'</blockquote>';
-      olSeq=0;curInd=IEM.quote;
+      olSeq=0;curInd=IPX.quote;
       continue;
     }
     if(line.indexOf('|')>=0 && i+1<lines.length && /^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1]) && lines[i+1].indexOf('-')>=0){
@@ -716,14 +813,14 @@ function parseMarkdown(src){
     if(/^[ ]*([-+]|[0-9]+\.)[ ]+/.test(line)){
       var ind=/^([ ]*)([-+]|[0-9]+\.)/.exec(line)[1].length;
       var lst=parseList(lines,i,ind,olSeq);
-      html+=lst[0];i=lst[1];olSeq=lst[2];curInd=IEM.li;continue;
+      html+=lst[0];i=lst[1];olSeq=lst[2];curInd=IPX.li;continue;
     }
     var para=[];
     while(i<lines.length && !/^[ ]*$/.test(lines[i]) && !/^```/.test(lines[i]) && !/^(#{1,6})[ ]+/.test(lines[i]) && !/^[ ]*>/.test(lines[i]) && !/^[ ]*([-+]|[0-9]+\.)[ ]+/.test(lines[i]) && !/^[ ]{0,3}<<<\s*$/.test(lines[i]) && !(lines[i].indexOf('|')>=0 && i+1<lines.length && /^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1]) && lines[i+1].indexOf('-')>=0)){
       para.push(lines[i]);i++;
     }
     html+='<p>'+parseInline(para.join('\n')).replace(/\n/g,'<br>')+'</p>';
-    olSeq=0;curInd=IEM.p;
+    olSeq=0;curInd=IPX.p;
   }
   return html;
 }
@@ -955,6 +1052,7 @@ function parseMarkdown(src){
           var body=tex.replace(/^\$\$/,'').replace(/\$\$$/,'').replace(/^\$/,'').replace(/\$$/,'');
           var el=document.createElement(disp?'div':'span');
           el.className=disp?'md-math-block':'md-math-inline';
+          el.setAttribute('data-tex', body); /* 供 docx 导出走 OMML（latex2mathml 需原始 LaTeX） */
           try{katex.render(body,el,{displayMode:disp,throwOnError:false,output:'html'});}
           catch(e){el.textContent=tex;}
           frag.appendChild(el);
@@ -1505,17 +1603,256 @@ function parseMarkdown(src){
   });
 
 
-  document.getElementById('btnExportHtml').addEventListener('click',function(){
-    uiLog('click 导出html');
-    fetch('/api/export-html',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({path:currentFile,
-        bodyHtml:document.getElementById('preview').innerHTML,
-        tsCss:(document.getElementById('ts-style')||{textContent:''}).textContent})})
+  /* 导出统一入口：先弹原生"另存为"框让用户选路径/文件名，再按所选路径写盘。
+     彻底去掉"后台静默落盘 + 浏览器下载"的模糊行为。*/
+  function exportWithDialog(ext, endpoint, title){
+    var base = '未命名文档';
+    if (currentFile) {
+      var parts = String(currentFile).replace(/\\/g,'/').split('/');
+      var fn = parts[parts.length - 1] || '';
+      base = fn.replace(/\.[^.]+$/, '') || '未命名文档';
+    }
+    var dir = currentFile ? String(currentFile).replace(/[\\\/][^\\\/]*$/, '') : (lastDir || '');
+    fetch('/api/pick-save?ext=' + encodeURIComponent(ext) +
+          '&dir=' + encodeURIComponent(dir) +
+          '&name=' + encodeURIComponent(base + '.' + ext) +
+          '&title=' + encodeURIComponent(title))
       .then(function(r){return r.json();})
       .then(function(j){
-        if(j&&j.ok){openExternal(j.url+'?t='+Date.now());}
-        else{showToast('导出失败：'+((j&&j.error)||'未知错误'));}
-      }).catch(function(e){showToast('导出失败：'+e.message);});
+        if (!j || !j.ok) { return; }   // 用户取消，静默返回
+        var pv = document.getElementById('preview');
+        if (!pv) { showToast('预览不存在'); return; }
+        prepareExportClone().then(function(bundle){
+          var payload;
+          var pageCfg=(function(){try{return JSON.parse(JSON.stringify(tsCfg.page));}catch(e){return {};}})();
+          if (ext === 'docx') {
+            var h = new XMLSerializer().serializeToString(inlineStylesInto(bundle.clone));
+            payload = {mdPath: currentFile, path: j.path, bodyHtml: h,
+                       tsCss:(document.getElementById('ts-style')||{textContent:''}).textContent,
+                       page:pageCfg};
+          } else {
+            payload = {mdPath: currentFile, path: j.path, bodyHtml: bundle.clone.innerHTML,
+                       tsCss:(document.getElementById('ts-style')||{textContent:''}).textContent,
+                       page:pageCfg};
+          }
+          bundle.release();
+          fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(payload)})
+            .then(function(r){return r.json();})
+            .then(function(k){
+              if (k && k.ok) { showToast('已导出：' + (k.path || j.path)); }
+              else { showToast('导出失败：' + ((k && k.error) || '未知错误')); }
+            }).catch(function(e){ showToast('导出失败：' + e.message); });
+        }).catch(function(e){ showToast('导出失败：' + e.message); });
+      }).catch(function(e){ showToast('选择保存位置失败：' + e.message); });
+  }
+  document.getElementById('btnExportHtml').addEventListener('click',function(){
+    uiLog('click 导出html');
+    exportWithDialog('html', '/api/export-html', '导出 HTML');
+  });
+
+  /* 把元素视觉样式计算值内联进 style 属性（供 docx 导出）。
+     移除 class/id 避免外部 CSS 干扰；保留 data-*（公式 tex）。 */
+  /* 导出准备：克隆预览 → 挂到屏外容器（保持挂载态：getBoundingClientRect /
+     getComputedStyle / foreignObject 样式均需真实布局）→ 图表 SVG 栅格化 PNG。
+     所见即所得：预览栏当时的样子（含主题色）整图定格，HTML/docx/paged 三种
+     导出统一走图片，无需携带图表 CSS/字体。栅格化失败回落保原 SVG。
+     release() 负责摘除屏外容器，用完必调。 */
+  function prepareExportClone(){
+    var pv=document.getElementById('preview');
+    var holder=document.createElement('div');
+    holder.style.cssText='position:fixed;left:-99999px;top:0;width:'+pv.clientWidth+'px';
+    var clone=pv.cloneNode(true);
+    holder.appendChild(clone);
+    document.body.appendChild(holder);
+    var released=false;
+    /* vega-embed 自带 actions 工具栏（details>summary 折叠块：View source/
+       导出PNG/导出SVG，summary 带箭头图标 svg；实测 details 无 class）：
+       导出产物里是杂讯（docx 出 [图表] 占位、HTML 残留无样式图标），
+       克隆后即删；仅渲染预览不受影响 */
+    var acts=clone.querySelectorAll('.vega-actions, .diagram details');
+    for(var a=0;a<acts.length;a++){ if(acts[a].parentNode){acts[a].parentNode.removeChild(acts[a]);} }
+    return _rasterAll(clone).then(function(){
+      /* 宽度语义抄写：{N} 百分比（图片自身 style 或图表 .diagram 容器）→
+         data-x-pct，inlineStylesInto 会把百分比换成 computed px，docx 侧的
+         "版面宽度的 N%"语义须在换算前定格 */
+      var ims=clone.querySelectorAll('img');
+      var WRE=/(?:^|;)\s*width:\s*([\d.]+)\s*%/;   /* 只认 width:%，max-width:100% 不算 */
+      for(var i=0;i<ims.length;i++){
+        var im=ims[i],mm=WRE.exec((im.getAttribute('style')||''));
+        if(!mm){
+          var pc=im.parentNode;
+          while(pc&&pc!==clone&&!(pc.className&&String(pc.className).indexOf('diagram')>=0))pc=pc.parentNode;
+          if(pc&&pc!==clone){mm=WRE.exec((pc.getAttribute('style')||''));}
+        }
+        if(mm)im.setAttribute('data-x-pct',mm[1]);
+      }
+      /* 无序 marker 语义抄写：+ 实心(u-solid) / - 空心(u-hollow) 跟标记符
+         走、与层级无关，且 + 与 - 可混排于同一 ul（预览按每个 li 各自
+         class）——桥接须在 li 级；inlineStylesInto 剥 class 后 docx 侧
+         无从判断，定格为 data-li-marker（不写 = 默认实心） */
+      var lis=clone.querySelectorAll('ul li');
+      for(var u=0;u<lis.length;u++){
+        var lcls=String(lis[u].getAttribute('class')||'');
+        if(lcls.indexOf('u-hollow')>=0)lis[u].setAttribute('data-li-marker','hollow');
+      }
+      /* fill 分栏语义抄写：fill-row/fill-col class → data-fill-row/
+         data-fill（docx 侧无边框表格布局；栏宽 X% 供列宽计算，
+         inlineStylesInto 剥 class 前定格） */
+      var frows=clone.querySelectorAll('.fill-row');
+      for(var fr=0;fr<frows.length;fr++){
+        frows[fr].setAttribute('data-fill-row','1');
+        var fcols=frows[fr].querySelectorAll(':scope > .fill-col');
+        for(var fc=0;fc<fcols.length;fc++){
+          var fw2=(fcols[fc].getAttribute('style')||'').match(/width:\s*([\d.]+)%/);
+          fcols[fc].setAttribute('data-fill',fw2?fw2[1]:'');
+        }
+      }
+      return {
+        clone:clone,
+        release:function(){
+          if(!released&&holder.parentNode){holder.parentNode.removeChild(holder);}
+          released=true;
+        }
+      };
+    });
+  }
+  function _rasterAll(container){
+    var diags=container.querySelectorAll('.diagram[data-done]');
+    var jobs=[];
+    for(var i=0;i<diags.length;i++){ jobs.push(_rasterOne(diags[i])); }
+    return Promise.all(jobs);
+  }
+  function _rasterOne(diagEl){
+    return new Promise(function(resolve){
+      var svg=diagEl.querySelector('svg');
+      if(!svg){resolve();return;}
+      var rect=svg.getBoundingClientRect();
+      var w=Math.max(1,Math.ceil(rect.width));
+      var h=Math.max(1,Math.ceil(rect.height));
+      var xml='';
+      try{
+        var c=svg.cloneNode(true);
+        _foToText(svg,c);   /* foreignObject→纯 text（canvas 绘 foreignObject 会污染画布） */
+        c.setAttribute('xmlns','http://www.w3.org/2000/svg');
+        c.setAttribute('width',w);
+        c.setAttribute('height',h);
+        if(c.style&&c.style.maxWidth){c.style.removeProperty('max-width');}
+        xml=new XMLSerializer().serializeToString(c);
+      }catch(e){console.warn('raster ser-fail',diagEl.getAttribute('data-diagram'),e.message);resolve();return;}
+      var img=new Image();
+      img.onload=function(){
+        try{
+          var cv=document.createElement('canvas');
+          cv.width=w*2; cv.height=h*2;   /* 2x 清晰度 */
+          var cx=cv.getContext('2d');
+          cx.setTransform(2,0,0,2,0,0);
+          cx.drawImage(img,0,0,w,h);
+          var png=cv.toDataURL('image/png');
+          var im=document.createElement('img');
+          im.src=png;
+          /* 显式显示尺寸（1x）：物理像素是 2x，不显式定宽会在导出文档里放大；
+             max-width 兜底窄版心。data-x-w 供 docx 按显示尺寸换算 */
+          im.style.width=w+'px';
+          im.style.maxWidth='100%';
+          im.style.height='auto';
+          im.setAttribute('data-x-w',String(w));
+          /* svg 的父节点不一定是 .diagram 容器（wavedrom 套 div#wd-N、
+             vega 套 .chart-wrapper）——按 svg 真实父节点插回，不假设层级 */
+          var par=svg.parentNode;
+          if(par){ par.insertBefore(im,svg); par.removeChild(svg); }
+        }catch(e){ /* 画布污染等：回落保原 SVG */
+          console.warn('raster canvas-fail',diagEl.getAttribute('data-diagram'),e.message); }
+        resolve();
+      };
+      img.onerror=function(){
+        console.warn('raster img-load-fail',diagEl.getAttribute('data-diagram'),'xmllen='+xml.length);
+        resolve();
+      };
+      img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(xml);
+    });
+  }
+  /* foreignObject（HTML 标签）→ svg text+tspan：样式/位置从挂载态的真实
+     foreignObject 上量（克隆树 detached 量不到），按文档序一一配对替换 */
+  function _foToText(realSvg,cloneSvg){
+    var fos=realSvg.querySelectorAll('foreignObject');
+    var cfs=cloneSvg.querySelectorAll('foreignObject');
+    for(var i=0;i<fos.length&&i<cfs.length;i++){
+      var fo=fos[i],cf=cfs[i];
+      var parent=cf.parentNode;
+      if(!parent){continue;}
+      var txt=(fo.textContent||'').split('\n').map(function(s){return s.trim();})
+        .filter(function(s){return s;});
+      if(!txt.length){parent.removeChild(cf);continue;}
+      var probe=fo.querySelector('div,span,p')||fo;
+      var cs=getComputedStyle(probe);
+      var w=parseFloat(cf.getAttribute('width')||'0');
+      var x=parseFloat(cf.getAttribute('x')||'0');
+      var hgt=parseFloat(cf.getAttribute('height')||'14');
+      var y=parseFloat(cf.getAttribute('y')||'0')+hgt*0.72;
+      var t=document.createElementNS('http://www.w3.org/2000/svg','text');
+      if(cs.textAlign==='center'&&w>0){
+        t.setAttribute('text-anchor','middle');
+        t.setAttribute('x',x+w/2);
+      }else{
+        t.setAttribute('x',x+2);
+      }
+      t.setAttribute('y',y);
+      if(cs.fill&&cs.fill!=='none'){t.setAttribute('fill',cs.fill);}
+      if(cs.fontSize){t.setAttribute('font-size',cs.fontSize);}
+      if(cs.fontFamily){t.setAttribute('font-family',cs.fontFamily);}
+      if(cs.fontWeight&&cs.fontWeight!=='400'&&cs.fontWeight!=='normal'){
+        t.setAttribute('font-weight',cs.fontWeight);
+      }
+      for(var L=0;L<txt.length;L++){
+        var line=document.createElementNS('http://www.w3.org/2000/svg','tspan');
+        if(L>0){line.setAttribute('x',t.getAttribute('x'));line.setAttribute('dy','1.15em');}
+        line.textContent=txt[L];
+        t.appendChild(line);
+      }
+      parent.replaceChild(t,cf);
+    }
+  }
+
+  /* 把元素视觉样式计算值就地内联进 style 属性（供 docx 导出）。
+     要求传入元素处于挂载态（detached 元素 getComputedStyle 返回空值——
+     历史缺陷一）。两遍快照法：第一遍把 computed 值提取为字符串快照，
+     第二遍统一写入+剥 class/id——两个历史缺陷：单遍"边量边剥"，父元素
+     class/id 被剥后 `#preview p` 等后代选择器失配（缺陷二）；即使先量
+     后写，getComputedStyle 返回的是 live 对象，第二遍剥祖先后再读快照
+     已回退默认值（缺陷三，"docx 没有任何缩进"的根因）——故必须第一遍
+     即时提取字符串。保留 data-*（公式 tex/图表宽度语义）。 */
+  function inlineStylesInto(el){
+    var props=["font-family","font-size","font-weight","font-style","font-variant",
+      "color","background-color","text-align","line-height","text-decoration",
+      "letter-spacing","vertical-align","text-indent","border-top","border-bottom",
+      "border-left","border-right","padding","padding-left","margin","margin-left"];
+    var all=[el].concat([].slice.call(el.querySelectorAll("*")));
+    var snap=[];
+    for(var i=0;i<all.length;i++){
+      var kv=[];
+      if(all[i].style){
+        var cs=getComputedStyle(all[i]);
+        for(var k=0;k<props.length;k++){
+          var v=cs.getPropertyValue(props[k]);
+          if(v&&v!=="none"&&v!=="normal"&&v!=="0px"&&v!=="rgba(0, 0, 0, 0)")kv.push(props[k]+":"+v);
+        }
+      }
+      snap.push(kv);
+    }
+    for(var j=0;j<all.length;j++){
+      var elm=all[j];
+      if(!elm.style)continue;
+      elm.removeAttribute("class");elm.removeAttribute("id");
+      if(snap[j].length)elm.style.cssText=snap[j].join(";");
+      else elm.removeAttribute("style");
+    }
+    return el;
+  }
+
+  document.getElementById('btnExportDocx').addEventListener('click',function(){
+    uiLog('click 导出docx');
+    exportWithDialog('docx', '/api/export-docx', '导出 Word 文档');
   });
   var pagedBusy = false;
   /* 打印（原「分页」按钮，二者已合并）：内嵌窗口下 window.print() 会阻塞，
@@ -1527,7 +1864,10 @@ function parseMarkdown(src){
     pagedBusy = true;
     var pv = document.getElementById('preview');
     uiBeacon('打印:2 preview存在=' + (!!pv));
-    var bh = pv ? pv.innerHTML : '';
+    if (!pv) { pagedBusy = false; showToast('预览不存在'); return; }
+    prepareExportClone().then(function(bundle){
+    var bh = bundle.clone.innerHTML;
+    bundle.release();
     uiBeacon('打印:3 html长度=' + bh.length);
     var payload;
     try {
@@ -1561,6 +1901,11 @@ function parseMarkdown(src){
         uiBeacon('打印:ERR ' + (e && e.message));
         showToast('导出失败：'+(e && e.message));
       });
+    }).catch(function(e){
+      pagedBusy = false;
+      uiBeacon('打印:ERR clone ' + (e && e.message));
+      showToast('导出失败：'+(e && e.message));
+    });
   });
 
 
@@ -1844,6 +2189,10 @@ function parseMarkdown(src){
   });
   /* ---- typeset settings v4 (align + local fonts) + auto disk save ---- */
   var TS_KEY='md-editor-typeset-v3';
+  /* 纸张宽 mm 表（与 md_server PAPER_W_MM 同源同值；custom 用 tsPw） */
+  var PAPER_W_MM={A0:841,A1:594,A2:420,A3:297,A4:210,A5:148,
+    B0:1000,B1:707,B2:500,B3:353,B4:250,B5:176,
+    Letter:215.9,Legal:215.9,Ledger:279.4};
   var SYS_KEY='md-editor-sysfonts';
   var FONT_OPTS=['(默认)','宋体','黑体','微软雅黑','楷体','仿宋','等线','Arial','Georgia','Times New Roman','Courier New'];
   var FONT_VALS=['','SimSun,serif','SimHei,sans-serif','"Microsoft YaHei",sans-serif','KaiTi,serif','FangSong,serif','DengXian,sans-serif','Arial,sans-serif','Georgia,serif','"Times New Roman",serif','"Courier New",monospace'];
@@ -1854,8 +2203,9 @@ function parseMarkdown(src){
   /* 引用/列表 v2.1：容器级「整体缩进」单档（margin/padding，可被 <<< 包围块继承链使用）；
      正文保留首行/悬挂两档（text-indent 段内装饰，不进继承链） */
   var IND_BLK_VALS=['none','block'],IND_BLK_LBLS=['无','整体缩进'];
-  var TS_KEYS=['p','h1','h2','h3','h4','quote','li','table','code','math'];
+  var TS_KEYS=['p','h1','h2','h3','h4','quote','li','table','code','math','img'];
   var IND_KEYS=['p','quote','li'];
+  /* img 仅对齐档（图片无字体/字号语义；语法 {N}c/l/r 单图覆盖优先于全局档） */
   var TS_MAP={
     p:'#preview p, .markdown-body p',
     h1:'#preview h1, .markdown-body h1',
@@ -1865,7 +2215,8 @@ function parseMarkdown(src){
     quote:'#preview blockquote, .markdown-body blockquote',
     li:'#preview li, .markdown-body li',
     table:'#preview table, .markdown-body table',
-    code:'#preview pre, #preview code, .markdown-body pre, .markdown-body code'};
+    code:'#preview pre, #preview code, .markdown-body pre, .markdown-body code',
+    img:'#preview p:has(>img), .markdown-body p:has(>img), #preview .diagram, .markdown-body .diagram'};
   var IND_SEL={
     p:'#preview p, .markdown-body p',
     quote:'#preview blockquote p, .markdown-body blockquote p',
@@ -1916,25 +2267,51 @@ function parseMarkdown(src){
     var css='';
     for(var k in TS_MAP){
       var c=tsCfg.fonts[k],rules=[];
+      if(k==='img'){
+        /* 图片对齐：容器 text-align + 块级行内元素 auto margin 兜底
+           （.diagram 是块级不受 text-align；图片段 img display:inline 受
+           text-align。两路都给：容器 text-align，图/图容器 margin auto） */
+        if(c.a){
+          css+=TS_MAP.img+'{text-align:'+c.a+' !important;}';
+          css+='#preview p:has(>img) img, .markdown-body p:has(>img) img,'
+            +'#preview .diagram>img, .markdown-body .diagram>img'
+            +'{display:block;'+(c.a==='center'?'margin-left:auto;margin-right:auto;':'')
+            +(c.a==='right'?'margin-left:auto;':'')+'}';
+        }
+        continue;
+      }
       if(c.f)rules.push('font-family:'+c.f+' !important');
       if(c.s)rules.push('font-size:'+c.s+'pt !important');
       if(c.a)rules.push('text-align:'+c.a+' !important');
       if(rules.length)css+=TS_MAP[k]+'{'+rules.join(';')+';}';
     }
+    /* 缩进档统一基准 = 正文字号（px）：em 基准随元素自身字号漂移
+       （正文 14pt 时 2em=37.3px，列表若 15px 则 2em=30px——同一"2 字符"
+       两把尺，列表 marker 比正文首字缩进浅 7.3px）。档位几何钉死一把尺；
+       正文字号未设置时用 body 默认 15px（p 继承之）。px 绝对值随 ts-style
+       导出，导出 HTML/打印版口径同步一致（em 在那边同样漂）。 */
+    var pSzPt=parseFloat(tsCfg.fonts.p.s);
+    var indBase=(!isNaN(pSzPt)&&pSzPt>0)?(pSzPt*96/72):15;
     for(var ik in IND_SEL){
       var ind=tsCfg.indent[ik];
+      var indPx=(ind&&ind.chars)?Math.round(ind.chars*indBase*100)/100:0;
       if(ik==='p'){
-        /* 正文：首行缩进/悬挂 = text-indent 系（段内装饰，不进 <<< 继承链） */
-        if(!ind||ind.mode==='none'||!ind.chars)continue;
+        /* 正文：首行缩进/悬挂 = text-indent 系（段内装饰，不进 <<< 继承链）。
+           图片段不参与（p:has(>img) 中性化——图与 .diagram 容器口径统一
+           锚定版心左边；!important 同级按源序 ts-style 后置会盖主 CSS，
+           故在此显式排除） */
+        if(!ind||ind.mode==='none'||!indPx)continue;
         if(ind.mode==='first'){
-          css+=IND_SEL.p+'{text-indent:'+ind.chars+'em !important;}';
+          css+=IND_SEL.p+'{text-indent:'+indPx+'px !important;}'
+            +'#preview p:has(>img), .markdown-body p:has(>img){text-indent:0 !important;}';
         }else{
-          css+=IND_SEL.p+'{padding-left:'+ind.chars+'em;text-indent:-'+ind.chars+'em !important;}';
+          css+=IND_SEL.p+'{padding-left:'+indPx+'px;text-indent:-'+indPx+'px !important;}'
+            +'#preview p:has(>img), .markdown-body p:has(>img){padding-left:0;text-indent:0 !important;}';
         }
       }else if(ik==='quote'){
         /* 引用：整体缩进 = 容器级 margin-left（进入 <<< 继承链） */
-        if(ind&&ind.mode==='block'&&ind.chars){
-          css+=TS_MAP.quote+'{margin-left:'+ind.chars+'em !important;}';
+        if(ind&&ind.mode==='block'&&indPx){
+          css+=TS_MAP.quote+'{margin-left:'+indPx+'px !important;}';
           css+='#preview blockquote p, .markdown-body blockquote p{text-indent:0 !important;}';
         }else{
           /* 独立设置语义：引用为"无"时，中性化正文规则向其内部段落的泄漏 */
@@ -1944,8 +2321,8 @@ function parseMarkdown(src){
         /* 列表：整体缩进 = ol/ul 容器 margin-left + inside（marker 精确站在 容器+档，
            「□□□□1. 第一项」的 1 恰在档位处）；默认 padding 收编归零。
            嵌套子列表每层 margin 叠档，层级缩进自然成立。 */
-        if(ind&&ind.mode==='block'&&ind.chars){
-          css+=IND_OLUL+'{padding-left:0 !important;margin-left:'+ind.chars+'em !important;list-style-position:inside !important;}';
+        if(ind&&ind.mode==='block'&&indPx){
+          css+=IND_OLUL+'{padding-left:0 !important;margin-left:'+indPx+'px !important;list-style-position:inside !important;}';
           css+='#preview li p, .markdown-body li p{text-indent:0 !important;}';
         }else{
           css+=IND_OLUL+'{padding-left:0 !important;margin-left:0 !important;list-style-position:inside !important;}';
@@ -1971,14 +2348,33 @@ function parseMarkdown(src){
     }
     var st=document.createElement('style');st.id='ts-style';st.textContent=css;
     document.head.appendChild(st);
-    /* 桥接：parseMarkdown 的 <<< 继承链读取容器级缩进档（em）。
+    /* 桥接：parseMarkdown 的 <<< 继承链读取容器级缩进档（px，正文字号基准）。
        只暴露容器级三项（p 首行缩进作为顶层正文流的缩进位置来源、quote/li 整体缩进）；
        段内装饰不进链。更新后由调用方触发 render() 重算 ind-blk margin。 */
-    window.__IND_EM__={
-      p:(function(){var i=tsCfg.indent.p;return (i&&i.mode==='first'&&i.chars)?i.chars:0;})(),
-      quote:(function(){var i=tsCfg.indent.quote;return (i&&i.mode==='block'&&i.chars)?i.chars:0;})(),
-      li:(function(){var i=tsCfg.indent.li;return (i&&i.mode==='block'&&i.chars)?i.chars:0;})()};
+    window.__IND_PX__={
+      p:(function(){var i=tsCfg.indent.p;return (i&&i.mode==='first'&&i.chars)?Math.round(i.chars*indBase*100)/100:0;})(),
+      quote:(function(){var i=tsCfg.indent.quote;return (i&&i.mode==='block'&&i.chars)?Math.round(i.chars*indBase*100)/100:0;})(),
+      li:(function(){var i=tsCfg.indent.li;return (i&&i.mode==='block'&&i.chars)?Math.round(i.chars*indBase*100)/100:0;})()};
     try{lsSet(TS_KEY,JSON.stringify(tsCfg));}catch(e){}
+  }
+  /* 纸张版心宽 → 预览栏宽度：连续流不分页，但宽度/左右边距按排版设置走
+     （版心 = 纸宽 − 左右边距；超出窗口时 pane overflow:auto 出横滚条）。
+     独立 style 节（#preview-paper-style）：不进 ts-style——导出链会把
+     ts-style 的 #preview 选择器替换为 .markdown-body，宽度规则不能被带走。
+     分屏联动零影响：aPv/bPv 每次滚动实时实测，f 为纯比例插值。 */
+  function applyPaperWidth(){
+    var pg=tsCfg.page;
+    var pw=(pg.paper==='custom')?parseFloat(pg.pw):PAPER_W_MM[pg.paper];
+    if(isNaN(pw)||pw<=0)pw=PAPER_W_MM.A4;
+    var ml=parseFloat(pg.ml)||0,mr=parseFloat(pg.mr)||0;
+    var w=Math.max(50,pw-ml-mr);
+    var st=document.getElementById('preview-paper-style');
+    if(!st){
+      st=document.createElement('style');st.id='preview-paper-style';
+      document.head.appendChild(st);
+    }
+    st.textContent='#preview{width:'+w+'mm;max-width:none;margin:0 auto;}'
+      +'#previewPane{overflow-x:auto;}';
   }
   function fillSel(s,vals,labels){
     for(var i=0;i<vals.length;i++){var o=document.createElement('option');o.value=vals[i];o.textContent=labels[i];s.appendChild(o);}
@@ -2300,7 +2696,7 @@ function parseMarkdown(src){
     pg.pn.size=parseFloat(document.getElementById('tsPnSize').value)||9;
     pg.toc.on=document.getElementById('tsTocOn').value;pg.toc.pos=document.getElementById('tsTocPos').value;
     pg.toc.solo=document.getElementById('tsTocSolo').checked;
-    applyTypeset();render(true);resetAutoDisk();
+    applyTypeset();applyPaperWidth();render(true);resetAutoDisk();
     document.getElementById('tsOverlay').hidden=true;
     var ss=document.getElementById('statSave');ss.textContent='排版已更新（缓存）';ss.className='saved';
   });
@@ -2325,7 +2721,7 @@ function parseMarkdown(src){
     diskTimer=null;
     if(tsCfg.autoSaveMin>0){diskTimer=setInterval(function(){if(dirty)diskNow();},tsCfg.autoSaveMin*60000);}
   }
-  tsFill();applyTypeset();render();resetAutoDisk();
+  tsFill();applyTypeset();applyPaperWidth();render();resetAutoDisk();
 
   /* ---- build self-check: hard-reload once when the served HTML changes ---- */
   (function(){

@@ -27,13 +27,15 @@ SMOKE_REPORT = os.path.join(tempfile.gettempdir(), "md_setup_smoke_report.txt")
 
 # dist checklist minimum set (sections 1+2+3+4). Keep in sync with docs checklist.
 DIST_DIRS = ["python", "katex", "pagedjs", "LICENSES",
-             "mermaid", "viz", "wavedrom", "vega"]
+             "mermaid", "viz", "wavedrom", "vega", "docxdeps"]
 DIST_DOCS_FILES = ["MDEditor 使用指南.md", "版权与开源组件声明.md"]
 DIST_DOCS_DIRS = ["MDEditor 使用指南.assets"]
 DIST_FILES = ["md_launch.pyw", "_md_run.py", "md_server.py", "markdown-editor.html",
               "md-editor.ico", "uninstall-md.ico", "llm_client.py", "web_search.py",
               "rag_client.py", "_smd.py", "md_assets.py", "_splash.py",
-              "_pickdir_modern.py", "_pickfile.py", "md_app.pyw", "LICENSE", "README.md",
+              "_pickdir_modern.py", "_pickfile.py", "_picksave.py",
+              "docx_export.py",
+              "md_app.pyw", "LICENSE", "README.md",
               "install.cmd", "MarkdownEditor.cs", "MarkdownEditor.exe", "_mklnk.ps1",
               "uninstall.cmd", "UninstallMDEditor.cs", "desktop-shortcut.cmd", "md_stop.cmd"]
 
@@ -68,6 +70,19 @@ def make_staging(ver):
         shutil.copytree(os.path.join(SRC, "docs", d), os.path.join(docs, d))
     for f in DIST_FILES:
         shutil.copy2(os.path.join(SRC, f), os.path.join(STAGING, f))
+    # docx 导出功能件断言（缺一即 FAIL：md_server 运行时 import，安装包内缺了就是坏功能）
+    _docx_must = [
+        os.path.join(STAGING, "docx_export.py"),
+        os.path.join(STAGING, "_picksave.py"),
+        os.path.join(STAGING, "docxdeps", "docx"),
+        os.path.join(STAGING, "docxdeps", "lxml"),
+        os.path.join(STAGING, "docxdeps", "PIL"),
+        os.path.join(STAGING, "docxdeps", "latex2mathml"),
+        os.path.join(STAGING, "docxdeps", "LICENSES", "README.md"),
+    ]
+    missing = [p for p in _docx_must if not os.path.exists(p)]
+    if missing:
+        raise SystemExit("FAIL staging missing docx export files: %s" % missing)
     n = sum(len(fs) for _, _, fs in os.walk(STAGING))
     return n
 

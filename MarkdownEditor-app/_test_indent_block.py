@@ -19,12 +19,12 @@ def js_part():
     src = open(HTML, encoding="utf-8").read()
     m = re.search(r"/\*PARSER_START\*/(.*?)/\*PARSER_END\*/", src, re.S)
     assert m, "PARSER segment not found"
-    harness = "globalThis.window={__IND_EM__:{p:2,quote:1,li:2}};\n" + m.group(1) + r"""
+    harness = "globalThis.window={__IND_PX__:{p:2,quote:1,li:2}};\n" + m.group(1) + r"""
 const NL=String.fromCharCode(10);
 let fails=0;
-function block(src){ // 返回所有 ind-blk 的 margin 值数组
+function block(src){ // 返回所有 ind-blk 的 margin 值数组（px，v2.2.1 起正文字号基准）
   const out=parseMarkdown(src);
-  const ms=[...out.matchAll(/class="ind-blk" style="margin-left:([0-9.]+)em"/g)].map(x=>x[1]);
+  const ms=[...out.matchAll(/class="ind-blk" style="margin-left:([0-9.]+)px"/g)].map(x=>x[1]);
   return {out,ms};
 }
 function ck(name,cond,extra){
