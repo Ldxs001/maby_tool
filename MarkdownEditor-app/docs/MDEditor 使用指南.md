@@ -71,7 +71,7 @@ $\sum_{k=1}^{n} k = \frac{n(n+1)}{2}$
 
 ### Mermaid：流程图（带判定分支与样式）
 
-```mermaid{50}
+```mermaid{50r}
 flowchart TD
     A[用户请求] --> B{缓存命中?}
     B -- 是 --> C[返回缓存]
@@ -84,6 +84,23 @@ flowchart TD
 ```
 
 ### Mermaid：时序图（编号消息 + 分支场景）
+
+@@ begin fill {40|60}
+```mermaid{50}
+sequenceDiagram
+    autonumber
+    participant 浏览器
+    participant 服务
+    participant 数据库
+    浏览器->>服务: GET /api/文档/123
+    alt 缓存有效
+        服务-->>浏览器: 200 文档内容
+    else 缓存过期
+        服务->>数据库: 查询最新版本
+        数据库-->>服务: 返回数据
+        服务-->>浏览器: 200 文档内容
+    end
+```
 
 ```mermaid{50}
 sequenceDiagram
@@ -100,6 +117,7 @@ sequenceDiagram
         服务-->>浏览器: 200 文档内容
     end
 ```
+@@ end fill
 
 ### Graphviz (DOT)：模块依赖拓扑
 
@@ -160,7 +178,11 @@ digraph G {
 
 图片语法：`![说明](图片路径或网址)`。下面这张图放在**同名资源目录**里，用相对路径引用——**`.md` 与 `.assets/` 是一对，一起拷贝即可完整迁移**：
 
+@@ begin fill{50|50}
 ![内嵌示例图](MDEditor 使用指南.assets/内嵌示例图.png)
+
+![内嵌示例图](MDEditor 使用指南.assets/内嵌示例图.png)
+@@ end fill
 
 网络图片写法相同，把括号内换成 https:// 图片网址即可（需联网）。
 
