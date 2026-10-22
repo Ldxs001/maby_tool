@@ -80,11 +80,12 @@
   .tbl .al{text-align:left;} .tbl .ar{text-align:right;} .tbl .ac{text-align:center;}
   .tcap{font-size:15px;color:#8a93a6;margin-top:6px;}
 
-  /* 图表 2x2 */
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px;width:1180px;margin:0 auto;}
-  .gcell{background:#fff;border:1px solid #d8dee6;border-radius:12px;padding:14px 16px;box-shadow:0 8px 24px rgba(0,0,0,.10);}
-  .gcell .gt{font-size:17px;color:#2c3e60;font-weight:700;margin-bottom:8px;display:flex;justify-content:space-between;}
-  .gcell .gt span{color:#8a93a6;font-weight:400;font-size:14px;}
+  /* 图表 2x2（自适应预览区宽度，避免 overflow:hidden 裁掉右列） */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;width:100%;margin:0 auto;}
+  .gcell{background:#fff;border:1px solid #d8dee6;border-radius:12px;padding:12px 14px;box-shadow:0 8px 24px rgba(0,0,0,.10);min-width:0;}
+  .gcell svg{display:block;width:100%;height:auto;margin:0 auto;}
+  .gcell .gt{font-size:16px;color:#2c3e60;font-weight:700;margin-bottom:8px;display:flex;justify-content:space-between;gap:8px;}
+  .gcell .gt span{color:#8a93a6;font-weight:400;font-size:13px;flex:0 0 auto;}
 
   /* 图片占位 */
   .imgrow{display:flex;gap:16px;align-items:flex-end;margin:10px 0;}
