@@ -30,6 +30,9 @@ DIST_DIRS = ["python", "katex", "pagedjs", "LICENSES",
              "mermaid", "viz", "wavedrom", "vega", "docxdeps"]
 DIST_DOCS_FILES = ["MDEditor 使用指南.md", "版权与开源组件声明.md"]
 DIST_DOCS_DIRS = ["MDEditor 使用指南.assets"]
+# low runner 默认 run 示例（种子：仓库级 runs/ → 安装后 runtime/runs/，
+# md_server 启动 makedirs 不会清掉既有文件，装完 low runner 即有这两个可用 run）
+DIST_RUNS = ["calc_operations.py", "count_words_in_text.py"]
 DIST_FILES = ["md_launch.pyw", "_md_run.py", "md_server.py", "markdown-editor.html",
               "md-editor.ico", "uninstall-md.ico", "llm_client.py", "web_search.py",
               "rag_client.py", "_smd.py", "md_assets.py", "_splash.py",
@@ -70,6 +73,11 @@ def make_staging(ver):
         shutil.copytree(os.path.join(SRC, "docs", d), os.path.join(docs, d))
     for f in DIST_FILES:
         shutil.copy2(os.path.join(SRC, f), os.path.join(STAGING, f))
+    # low runner 默认 run 种子（runs/ → runtime/runs/）
+    rdst = os.path.join(STAGING, "runtime", "runs")
+    os.makedirs(rdst, exist_ok=True)
+    for f in DIST_RUNS:
+        shutil.copy2(os.path.join(SRC, "runs", f), os.path.join(rdst, f))
     # docx 导出功能件断言（缺一即 FAIL：md_server 运行时 import，安装包内缺了就是坏功能）
     _docx_must = [
         os.path.join(STAGING, "docx_export.py"),
@@ -80,7 +88,9 @@ def make_staging(ver):
         os.path.join(STAGING, "docxdeps", "latex2mathml"),
         os.path.join(STAGING, "docxdeps", "LICENSES", "README.md"),
     ]
-    missing = [p for p in _docx_must if not os.path.exists(p)]
+    # low runner 种子断言（缺一即 FAIL：默认工具/示例随包分发）
+    _runs_must = [os.path.join(rdst, f) for f in DIST_RUNS]
+    missing = [p for p in _docx_must + _runs_must if not os.path.exists(p)]
     if missing:
         raise SystemExit("FAIL staging missing docx export files: %s" % missing)
     n = sum(len(fs) for _, _, fs in os.walk(STAGING))

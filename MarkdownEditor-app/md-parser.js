@@ -1,14 +1,12 @@
 /*! md-parser.js — MDEditor 自研 Markdown 方言解释器（独立抽取版）
  * 来源：MarkdownEditor-app/markdown-editor.html
- *       第 490 行 PARSER_START … 第 827 行 PARSER_END （逐字抽取，标记名见原文件）
- * 同步：MDEditor v2.3.0（CHANGELOG 首段 2026-10-22，MD_SERVER_VERSION=66）
+ *       标记 PARSER_START … PARSER_END 之间（逐字抽取，行号以标记定位）
+ * 抽取脚本：_extract_parser.py（重抽后必跑 _test_parser_sync.py 校验）
  * 许可：同项目根 LICENSE（见 MarkdownEditor-app/LICENSE）
  *
  * 用法：
  *   // 浏览器：<script src="md-parser.js"></script> 后
- *   MDParser.parseMarkdown("# 标题
-
-正文");
+ *   MDParser.parseMarkdown("# 标题\n\n正文");
  *   // Node / CommonJS
  *   const { parseMarkdown } = require('./md-parser.js');
  *   parseMarkdown(src);
@@ -19,8 +17,7 @@
  *   1. 外包 UMD：浏览器全局(MDParser) / CommonJS(require) / ESM(import) 通用；
  *   2. parseMarkdown(src, opts) 增加可选第二参 opts.indents = {p, quote, li}
  *      （容器级缩进档，px）——不传时与原文 100% 一致（默认 {p:0,quote:0,li:0}）。
- * 其余解析逻辑（escapeHtml / escAttr / sanitizeUrl / parseInline / parseList /
- * splitRow / parseTable / parseFenceLang / parseMarkdown 本体）逐字复制，未改动。
+ * 其余解析逻辑逐字复制，未改动。改 html 解析器段后必须重新抽取本文件。
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -43,6 +40,21 @@ function sanitizeUrl(u){
   if(/^data:/.test(t) && !/^data:image\//i.test(t)) return '#';
   return t;
 }
+/* MDE 数据点 span（low runner）：data-dp 存 body 原文（URI 编码），
+   显性渲染 == 后的值（无 == 显示原文），隐性 display:none 完全不占位。
+   run pass 从 DOM 收集全部 data-dp 组装 {kv, raw} */
+function mdeDpSpan(body,hidden,alias){
+  var disp='';
+  if(!hidden){
+    var i=body.indexOf('==');
+    disp=(i>=0)?body.slice(i+2).trim():body;
+  }
+  /* data-dp-alias = 数据点归属别名（v2.4.5）：空 = 公共池（喂给所有
+     无 is 执行点）；非空 = 只喂给 is 同名的执行点 */
+  return '<span class="mde-dp'+(hidden?' mde-dp-hidden" style="display:none"':'"')+
+    ' data-dp="'+encodeURIComponent(body)+'"'+
+    ' data-dp-alias="'+escAttr(alias||'')+'">'+escapeHtml(disp)+'</span>';
+}
 function parseInline(text){
   var codes=[];
   text=text.replace(/`([^`]+)`/g,function(m,c){codes.push(c);return '@@C'+(codes.length-1)+'@@';});
@@ -52,11 +64,30 @@ function parseInline(text){
      在代码段提取之后做：代码段内反斜杠保持字面，双保险不冲突。 */
   var escs=[];
   text=text.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g,function(m,c){escs.push(c);return '\x00E'+(escs.length-1)+'\x00';});
+  /* MDE 数据点/执行点（low runner，v2.4）：必须在 escapeHtml 之前——
+     body 需存原文（含 <>& 已转义就还原不回来了）。
+     @@ MDE_{a == 3}        显性公共池（显示 == 后的值，无 == 显示原文）
+     @@ MDE__{...}          隐性公共池（不渲染，只为执行点提供数据）
+     @@ MDE_甲{a == 3}      显性别名池（v2.4.5：只喂 is 甲 的执行点）
+     @@ MDE__甲{...}        隐性别名池
+     @@ MDE import dark [is zzz] / @@ MDE from utils import add [is xxx]
+                            执行点；is 别名决定吃哪个数据池（无 is = 公共池，
+                            两种形式同规矩——import 同样可能多处调用各喂各的）
+     行内体不含 {} 与换行；跨行数据点由块级收集处理（见 parseMarkdown） */
+  var toks=[];
+  text=text.replace(/@@ MDE(_{1,2})([\w\u4e00-\u9fff.-]*)\{([^\n{}]*)\}/g,function(m,u,alias,body){
+    toks.push(mdeDpSpan(body,u==='__',alias));
+    return '\x00T'+(toks.length-1)+'\x00';
+  });
+  text=text.replace(/@@ MDE\s+(?:from\s+([\w\u4e00-\u9fff.-]+?)\s+import\s+([\w\u4e00-\u9fff-]+)|import\s+([\w\u4e00-\u9fff.-]+))(?:\s+is\s+([\w\u4e00-\u9fff.-]+))?/g,function(m,f,fn,imp,alias){
+    toks.push('<span class="mde-run" data-run-mod="'+escAttr(f||imp)+'" data-run-fn="'+escAttr(fn||'run')+'" data-run-alias="'+escAttr(alias||'')+'" data-run-orig="'+encodeURIComponent(m)+'">…</span>');
+    return '\x00T'+(toks.length-1)+'\x00';
+  });
   text=escapeHtml(text);
   /* 生成的标签先进占位符：后续强调/加粗等行内语法绝不能触碰属性值
      （否则下划线文件名 20261015_181923_3419.png 会被 _.._ 改写成 <em>，图片必 404）。
      链接只占位开标签，链接文字仍参与行内格式化。 */
-  var toks=[];
+
   /* 图片宽度+对齐参数：![alt](src){30} / {30c} / {c} → 版面宽度 30% 等比缩放
      + 可选对齐 c=居中 l=左 r=右（单图覆盖排版面板全局图片档）。
      [1-9]\d{0,2} 捕获，>100 钳到 100；对齐后缀独立可选（仅 {c} 也合法）；
@@ -335,6 +366,32 @@ function parseMarkdown(src, opts){
         continue;
       }
     }
+    /* MDE 跨行数据点（@@ MDE_{ 后行内未闭合 → 向后收集到 }）：
+       长文本参数的自然写法。首行标记前的文本与末行 } 后的文本保留
+       （行内渲染）；体到第一个 }。未闭合 fail-closed 走普通段落。 */
+     var mdeOpen=line.match(/@@ MDE_{1,2}[\w\u4e00-\u9fff.-]*\{/);
+     if(mdeOpen && line.indexOf('}',mdeOpen.index)<0){
+       var dchunks=[line],dclosed=false,dj=i+1;
+       while(dj<lines.length){
+         dchunks.push(lines[dj]);
+         if(lines[dj].indexOf('}')>=0){dclosed=true;dj++;break;}
+         dj++;
+       }
+       if(dclosed){
+         var dfull=dchunks.join('\n');
+         var dmm=dfull.match(/@@ MDE(_{1,2})([\w\u4e00-\u9fff.-]*)\{([\s\S]*?)\}/);
+         if(dmm){
+           var dpre=dfull.slice(0,dmm.index),dpost=dfull.slice(dmm.index+dmm[0].length);
+           var dout='';
+           if(dpre.trim())dout+=parseInline(dpre);
+           dout+=mdeDpSpan(dmm[3],dmm[1]==='__',dmm[2]);
+           if(dpost.trim())dout+=parseInline(dpost);
+          html+='<p>'+dout+'</p>';
+          i=dj;olSeq=0;curInd=0;
+          continue;
+        }
+      }
+    }
     var stripped=line.replace(/[ ]/g,'');
     if(stripped.length>=3){
       var ch0=stripped.charAt(0);
@@ -368,7 +425,6 @@ function parseMarkdown(src, opts){
   return html;
 }
 /*PARSER_END*/
-
   /* ===== 抽取结束 ===== */
   return {
     parseMarkdown: parseMarkdown,

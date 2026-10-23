@@ -64,8 +64,22 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 66  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 80  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 SETTINGS_PATH = os.path.join(HERE, "runtime", "settings.json")
+
+# ---------- low runner（v2.4）：文档内参数值的自动化计算 ----------
+# run 库（编辑器级统一管理，所有文档共用；分发 = 拷 runs 目录）。
+# 三方包：pip --target runtime/pylibs 安装，执行时挂 PYTHONPATH——
+# 编辑器只管通道不管装包（集成边界）。run 代码 cwd=run_cache（作图落此处）。
+RUNS_DIR = os.path.join(HERE, "runtime", "runs")
+PYLIBS_DIR = os.path.join(HERE, "runtime", "pylibs")
+RUN_CACHE_DIR = os.path.join(HERE, "runtime", "run_cache")
+PORTABLE_PY = os.path.join(HERE, "python", "python.exe")
+for _d in (RUNS_DIR, RUN_CACHE_DIR):
+    try:
+        os.makedirs(_d, exist_ok=True)
+    except Exception:
+        pass
 
 # UI 状态服务端持久化（v2.0.x）：WebView2 内嵌窗口下 localStorage 只活在内存
 # （关窗进程终止，异步刷盘从未发生——实测 userdata leveldb 自安装日起零增长）。
@@ -268,6 +282,244 @@ def _llm_from_request(obj):
 
 
 _LLM_ERR = _llm.LLMError if _llm is not None else RuntimeError
+
+
+# ---------------------------------------------------------------------------
+# low runner 执行器（v2.4）
+# ---------------------------------------------------------------------------
+# LLM 生成 run 的系统提示词（v2.4.2 加固；v2.4.3 方向修正；v2.4.6 补 D 类）。
+# 四类历史错误纪律：A 幻觉函数（product 非内置）/ B 局部函数不可
+# 导入（用户 from X import fn 找不到顶层）/ C 类型幻觉（kv 全字符串）/
+# D 语义角色误判（v2.4.6，用户实测 count_words 案例：LLM 拿 kv 键名
+#   a/b 当关键词统计、拿 raw[0]（数据点原文行）当被查文本——键名不
+#   承载语义，角色须按值形态推断并注释声明供人工核对）。
+# v2.4.3 修正两条原则性错误（用户纠偏）：
+# ① 三方库是正规能力（runtime/pylibs 通道 + pip --target，执行环境
+#   PYTHONPATH 已挂）——提示词不得劝退三方库，numpy/pandas/matplotlib
+#   直接写；
+# ② 场景中性——run 库服务任意数据加工（数值运算/文本粘合/词频统计/
+#   画图…），提示词不得围着数值例子特化；例子数值文本各半；
+# ③ 不从文档既有执行点反推生成（run 库是源头：用户在管理界面起名
+#   保存，文档之后照库引用——生成时对文档执行点零假设，usage 注入
+#   已撤）。
+_LR_LLM_SYS = (
+    "你是 MDEditor low runner 的代码生成器。用户在写作工具里"
+    "用数据点（@@ MDE_{key == value}）声明数据，用执行点"
+    "（@@ MDE import 名字 或 @@ MDE from 文件 import 函数）"
+    "调用 Python 代码加工文档数据——需求可能是数值运算、文本粘合、"
+    "筛选统计、画图等任意数据加工，按用户需求本身理解场景。\n"
+    "生成规则（必须逐条遵守）：\n"
+    "1.【作用域纪律】用到的每个函数要么是 Python 内置（sum/len/int/"
+    "float/str/sorted/max/min/round/abs/enumerate/zip/range/join 等"
+    "字符串方法），要么来自文件顶部显式 import 的模块。严禁使用未导入"
+    "的函数——product 不是内置（连乘用 math.prod 或 for 循环）、"
+    "reduce 在 functools、Counter 在 collections；不确定就写 for 循环，"
+    "绝不写没 import 的名字。\n"
+    "2.【多操作分函数】需求涉及多个独立操作（多种运算、多种统计口径、"
+    "多种文本加工）时，每个操作定义成**模块顶层函数**，签名统一 "
+    "def 函数名(data):，各自返回 str；**必须**再附一个汇总版 "
+    "def run(data):（拼接各操作结果成一句话返回，不得是空实现——"
+    "实测 LLM 曾生成 return '' 摆烂）。用户会用 "
+    "@@ MDE from 文件 import 函数名 单独调用某个操作"
+    "（数值如 sum_result，文本如 join_text、count_word）——顶层函数名"
+    "与操作语义对应，不能只做 run 内部局部变量。\n"
+    "3.【类型纪律】data 是 dict：data['kv'] 是 {键: 值字符串}（框架已按"
+    "第一个 == 剥离），data['raw'] 是数据点原文列表。kv 的值**全是"
+    "字符串**：数值运算前先转换（先试 int，失败再试 float），转换失败"
+    "返回含键名的中文错误提示字符串，不要抛异常；文本加工则保持字符串"
+    "直接操作（split/join/count 等），不要做数字转换。值**可能是列表"
+    "字面量**（如 \"['词1','词2']\"）：用 ast.literal_eval 解析成列表用"
+    "（import ast；它对单引号/双引号 Python 字面量都认，比 json.loads "
+    "宽容——实测用户数据用单引号、json.loads 会失败）；解析失败按原"
+    "字符串处理，不要抛异常、不要直接返回错误放弃。\n"
+    "4.【角色映射纪律】kv 的**键只是名字**（a/b/中文均可能），不承载任何"
+    "语义——绝不能拿键名当数据用（如把键当关键词去统计）。当不同键的"
+    "数据扮演不同角色（如：一个是关键词列表、一个是被查文本；一个是"
+    "数据、一个是格式）时，按**值的内容形态 + 需求描述**推断角色：值形"
+    "如 ['x','y'] 的 JSON 列表 = 多值参数（词表/轮询项）；值是连续长文本"
+    "= 被处理对象（被查文本/被合并段落）。并在代码顶部注释声明映射"
+    "（如 # 角色映射：a=关键词列表, b=被查文本），供人工查阅核对。"
+    "**严禁**拿 data['raw'][0] 当被处理文本——raw 是含 == 的数据点原文"
+    "行，不是正文；被处理对象一律从 kv 的文本值取。**严禁硬编码键名**"
+    "取被处理文本（如写死 kv['text']——实际键名可能是 a/b/中文）："
+    "用形态推断 + 排除法——列表形值是词表/多值参数，**其余的长文本值"
+    "即被处理对象**（按值长度/是否自然语句判断），代码里动态遍历取值"
+    "而非猜键名。\n"
+    "补充（中文文本事实）：中文没有空格分词——统计中文词/短语出现"
+    "次数用 text.count(词)（子串计数），**不要** split() 分词再比对"
+    "（中文 split 后整句成一个词，永远匹配不上）；中英混合时可先"
+    "count 再对英文词另行处理。\n"
+    "5. 返回值必须是 str——它是直接替换执行点、给读者看的正文内容"
+    "（数值如 '加法 7、减法 -1'，文本如合并后的句子、'共出现 3 次'），"
+    "绝不返回 dict/list（会被强转成难看的 repr）。\n"
+    "6.【三方库直接用】执行环境为便携 Python，用户可通过 "
+    "pip install --target runtime/pylibs 安装三方包。numpy/pandas/"
+    "matplotlib 视为常规可用（数值计算、数据处理、画图的合理选择，"
+    "直接写，勿降级为纯标准库拼凑）；其他三方包也可直接写，并在代码"
+    "顶部注释一行需要安装的包名。若运行时报 ModuleNotFoundError，"
+    "用户按注释安装即可。\n"
+    "7. 作图：matplotlib 保存到当前工作目录（已设为 run_cache），"
+    "返回 '![](文件名.png)' 形式。\n"
+    "8. 代码第一行写注释 # run-name: 建议名（英文或拼音，短横线分隔）。\n"
+    "9. 只输出一个 ```python 代码块，不要多余解释。")
+
+
+def _lr_valid_name(name):
+    """run 库条目名：字母/数字/下划线/连字符/点/中文（\w unicode 含中文）。
+    防路径穿越（拒绝 /\ .. 等）。"""
+    return bool(re.match(r"^[\w.-]+$", str(name or ""), re.U)) and ".." not in str(name)
+
+
+# 常见 import 名 ≠ pip 包名映射（提醒命令要正确）
+_LR_PIP_MAP = {
+    "PIL": "Pillow", "cv2": "opencv-python", "sklearn": "scikit-learn",
+    "bs4": "beautifulsoup4", "yaml": "PyYAML", "OpenSSL": "pyOpenSSL",
+    "Crypto": "pycryptodome", "dateutil": "python-dateutil",
+    "dotenv": "python-dotenv", "attr": "attrs", "skimage": "scikit-image",
+    "serial": "pyserial", "usb": "pyusb", "win32com": "pywin32",
+    "win32api": "pywin32", "win32gui": "pywin32",
+}
+
+
+def _lr_pip_cmd(module):
+    """缺包提醒的安装命令（用户自装：便携包无 pip，任何有 pip 的
+    Python 都行，--target 落 pylibs；需 cp311 版本的编译型包）"""
+    pkg = _LR_PIP_MAP.get(module, module)
+    return 'pip install --target "%s" %s' % (
+        PYLIBS_DIR.replace("\\", "\\\\"), pkg), pkg
+
+
+def _lr_missing_from_error(err):
+    """错误串 → 缺包结构（module/pip_name/cmd）。仅 ModuleNotFoundError。"""
+    m = re.search(r"No module named '([\w.]+)'", str(err))
+    if not m:
+        return None
+    module = m.group(1).split(".")[0]
+    cmd, pkg = _lr_pip_cmd(module)
+    return {"module": module, "pip_name": pkg, "cmd": cmd}
+
+
+def _lr_check_deps(code):
+    """静态依赖检测：解析 import → 便携 python find_spec → 缺哪些包。
+    返回 [{module, installed, pip_name, cmd}]（只含三方包；标准库过滤
+    在子进程里用 sys.stdlib_module_names——3.11 支持，与执行环境同源）。"""
+    mods = []
+    for m in re.finditer(
+            r"^\s*(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))",
+            str(code or ""), re.M):
+        # 取顶层模块名去重
+        top = (m.group(1) or m.group(2) or "").split(".")[0]
+        if top and top not in mods:
+            mods.append(top)
+    if not mods:
+        return []
+    py = PORTABLE_PY if os.path.exists(PORTABLE_PY) else sys.executable
+    driver = (
+        "import sys, json, importlib.util\n"
+        "mods = json.loads(sys.stdin.read())\n"
+        "out = []\n"
+        "for m in mods:\n"
+        "    if m in sys.stdlib_module_names:\n"
+        "        continue\n"
+        "    out.append({'module': m,"
+        " 'installed': importlib.util.find_spec(m) is not None})\n"
+        "sys.stdout.write(json.dumps(out, ensure_ascii=False))\n"
+    )
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONPATH"] = PYLIBS_DIR if os.path.isdir(PYLIBS_DIR) else ""
+    try:
+        cp = subprocess.run(
+            [py, "-c", driver],
+            input=json.dumps(mods).encode("utf-8"),
+            capture_output=True, timeout=15, env=env)
+        raw = cp.stdout.decode("utf-8", "replace").strip()
+        deps = json.loads(raw) if raw else []
+    except Exception:
+        return []
+    for d in deps:
+        cmd, pkg = _lr_pip_cmd(d["module"])
+        d["pip_name"] = pkg
+        d["cmd"] = cmd
+    return deps
+
+
+def _lr_driver_code(mod, fn):
+    """子进程驱动：stdin 喂 data JSON → import 用户模块 → 调函数 → stdout JSON。
+    多行字符串经 -c 执行；UTF-8 输入输出由 env（PYTHONIOENCODING）保证。"""
+    return (
+        "import sys, json\n"
+        "sys.path.insert(0, %r)\n"
+        "sys.path.insert(0, %r)\n"
+        "try:\n"
+        "    import importlib\n"
+        "    m = importlib.import_module(%r)\n"
+        "    f = getattr(m, %r)\n"
+        "    data = json.loads(sys.stdin.read())\n"
+        "    r = f(data)\n"
+        "    if not isinstance(r, str):\n"
+        "        r = str(r)\n"
+        "    sys.stdout.write(json.dumps({'ok': True, 'result': r},"
+        " ensure_ascii=False))\n"
+        "except Exception as e:\n"
+        "    sys.stdout.write(json.dumps({'ok': False, 'error': str(e)},"
+        " ensure_ascii=False))\n"
+    ) % (RUNS_DIR, PYLIBS_DIR, mod, fn)
+
+
+def _lr_rewrite_imgs(result):
+    """run 结果里的相对路径图片引用 → /img 代理（run 代码 cwd=run_cache，
+    约定作图存当前目录返回 ![](文件名)；http/data/file:// 原样不动）。"""
+    def _rw(m):
+        alt, src = m.group(1), m.group(2).strip()
+        if re.match(r"^(https?:|data:|file:|/)", src):
+            return m.group(0)
+        p = os.path.join(RUN_CACHE_DIR, src)
+        if os.path.exists(p):
+            return "![%s](/img?path=%s)" % (
+                alt, urllib.parse.quote(p.replace("\\", "/")))
+        return m.group(0)
+    return re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", _rw, result)
+
+
+def _lr_run(mod, fn, data):
+    """执行 run：便携 python 子进程，超时 10s、stdout 1MB。返回 dict。"""
+    if not _lr_valid_name(mod) or not _lr_valid_name(fn):
+        return {"ok": False, "error": "run 名或函数名不合法"}
+    py = PORTABLE_PY if os.path.exists(PORTABLE_PY) else sys.executable
+    path = os.path.join(RUNS_DIR, mod + ".py")
+    if not os.path.exists(path):
+        return {"ok": False, "error": "run 不存在：%s（low runner 界面可创建）" % mod}
+    code = _lr_driver_code(mod, fn)
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONPATH"] = PYLIBS_DIR if os.path.isdir(PYLIBS_DIR) else ""
+    try:
+        cp = subprocess.run(
+            [py, "-c", code],
+            input=json.dumps(data, ensure_ascii=False).encode("utf-8"),
+            capture_output=True, timeout=10, cwd=RUN_CACHE_DIR, env=env)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "run 执行超时（>10s）"}
+    except Exception as e:
+        return {"ok": False, "error": "子进程启动失败：%s" % e}
+    out = cp.stdout.decode("utf-8", "replace").strip()
+    if len(out) > 1024 * 1024:
+        return {"ok": False, "error": "run 输出超过 1MB 限制"}
+    try:
+        j = json.loads(out)
+    except Exception:
+        err = cp.stderr.decode("utf-8", "replace").strip()
+        return {"ok": False, "error": "run 输出非 JSON：%s%s"
+                % (out[:200], ("\nstderr: " + err[:300]) if err else "")}
+    if j.get("ok") and isinstance(j.get("result"), str):
+        j["result"] = _lr_rewrite_imgs(j["result"])[:1024 * 1024]
+        return j
+    # 失败：错误串解析缺包（前端跟随错误块显示"缺少包"+ 安装命令）
+    miss = _lr_missing_from_error(j.get("error") or "")
+    if miss:
+        j["missing"] = miss
+    return j
 
 
 # ---------------------------------------------------------------------------
@@ -603,6 +855,47 @@ class Handler(http.server.BaseHTTPRequestHandler):
                  "sessions": len(_LIVE_SESSIONS)},
                 ensure_ascii=False))
             return
+        if u.path == "/api/runs" and self.command == "GET":
+            try:
+                qs = urllib.parse.parse_qs(u.query)
+                name = (qs.get("name") or [""])[0]
+                if name:
+                    if not _lr_valid_name(name):
+                        self._send(200, json.dumps(
+                            {"ok": False, "error": "名称不合法"},
+                            ensure_ascii=False),
+                            "application/json; charset=utf-8")
+                        return
+                    p = os.path.join(RUNS_DIR, name + ".py")
+                    if not os.path.exists(p):
+                        self._send(200, json.dumps(
+                            {"ok": False, "error": "不存在"},
+                            ensure_ascii=False),
+                            "application/json; charset=utf-8")
+                        return
+                    code = open(p, encoding="utf-8").read()
+                    self._send(200, json.dumps(
+                        {"ok": True, "name": name, "code": code},
+                        ensure_ascii=False),
+                        "application/json; charset=utf-8")
+                    return
+                items = []
+                if os.path.isdir(RUNS_DIR):
+                    for fn_ in sorted(os.listdir(RUNS_DIR)):
+                        if fn_.endswith(".py"):
+                            fp = os.path.join(RUNS_DIR, fn_)
+                            items.append({
+                                "name": fn_[:-3],
+                                "mtime": int(os.path.getmtime(fp)),
+                                "size": os.path.getsize(fp)})
+                self._send(200, json.dumps(
+                    {"ok": True, "runs": items}, ensure_ascii=False),
+                    "application/json; charset=utf-8")
+            except Exception as e:
+                self._send(200, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False),
+                           "application/json; charset=utf-8")
+            return
         if u.path == "/favicon.ico":
             ico = os.path.join(HERE, "md-editor.ico")
             try:
@@ -772,6 +1065,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(400, json.dumps({"ok": False,
                     "error": "仅允许打开本机服务地址"}, ensure_ascii=False))
             return
+        if u.path == "/api/open-dir":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                obj = json.loads(self.rfile.read(length).decode("utf-8")) \
+                    if length else {}
+                which = str(obj.get("dir", ""))
+                d = {"pylibs": PYLIBS_DIR, "runs": RUNS_DIR,
+                     "run_cache": RUN_CACHE_DIR}.get(which)
+                if not d:
+                    self._send(400, json.dumps(
+                        {"ok": False, "error": "未知目录"},
+                        ensure_ascii=False), "application/json; charset=utf-8")
+                    return
+                os.makedirs(d, exist_ok=True)
+                if hasattr(os, "startfile"):
+                    os.startfile(d)
+                elif sys.platform == "darwin":
+                    subprocess.Popen(["open", d])
+                else:
+                    subprocess.Popen(["xdg-open", d])
+                self._send(200, json.dumps({"ok": True},
+                                           ensure_ascii=False),
+                           "application/json; charset=utf-8")
+            except Exception as e:
+                self._send(200, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False),
+                           "application/json; charset=utf-8")
+            return
         if u.path == "/doc":
             q = urllib.parse.parse_qs(u.query)
             fname = q.get("file", [""])[0]
@@ -888,6 +1209,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             except Exception:
                 pass
+        self._send(404, "not found")
+
+    def do_DELETE(self):
+        # /api/runs?name=x —— BaseHTTPRequestHandler 按 method 分发，
+        # DELETE 不进 do_POST（v2.4.4 修复：此前 404 HTML 错误页——删除
+        # 按钮历史上被 confirm（WebView2 不弹、返回假）挡住从未真正执行，
+        # 该路由缺陷从未暴露；二次点击确认交互上线后才首度验证暴露）
+        u = urllib.parse.urlparse(self.path)
+        if u.path == "/api/runs":
+            try:
+                qs = urllib.parse.parse_qs(u.query)
+                name = (qs.get("name") or [""])[0]
+                if not _lr_valid_name(name):
+                    self._send(200, json.dumps(
+                        {"ok": False, "error": "名称不合法"},
+                        ensure_ascii=False),
+                        "application/json; charset=utf-8")
+                    return
+                p = os.path.join(RUNS_DIR, name + ".py")
+                if os.path.exists(p):
+                    os.remove(p)
+                self._send(200, json.dumps({"ok": True},
+                                           ensure_ascii=False),
+                           "application/json; charset=utf-8")
+            except Exception as e:
+                self._send(200, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False),
+                           "application/json; charset=utf-8")
+            return
         self._send(404, "not found")
 
     def do_POST(self):
@@ -1128,6 +1478,79 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self._send(500, json.dumps({"ok": False, "error": str(e)},
                                            ensure_ascii=False))
+            return
+        # ---------- low runner（v2.4）----------
+        if u.path == "/api/run":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                obj = json.loads(self.rfile.read(length).decode("utf-8"))
+                j = _lr_run(str(obj.get("mod", "")), str(obj.get("fn", "run")),
+                            obj.get("data") or {})
+                self._send(200, json.dumps(j, ensure_ascii=False),
+                           "application/json; charset=utf-8")
+            except Exception as e:
+                self._send(200, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False),
+                           "application/json; charset=utf-8")
+            return
+        if u.path == "/api/runs":
+            try:
+                if self.command == "POST":
+                    length = int(self.headers.get("Content-Length", 0))
+                    obj = json.loads(self.rfile.read(length).decode("utf-8"))
+                    name = str(obj.get("name", "")).strip()
+                    code = str(obj.get("code", ""))
+                    if not _lr_valid_name(name):
+                        self._send(200, json.dumps(
+                            {"ok": False, "error": "名称不合法（仅字母数字下划线连字符点中文）"},
+                            ensure_ascii=False),
+                            "application/json; charset=utf-8")
+                        return
+                    with open(os.path.join(RUNS_DIR, name + ".py"), "w",
+                              encoding="utf-8") as f:
+                        f.write(code)
+                    # 保存即依赖检测（v2.5：管理界面代码区显示缺哪些包
+                    # + 安装命令；便携包无 pip，装包由用户自执行）
+                    deps = _lr_check_deps(code)
+                    self._send(200, json.dumps(
+                        {"ok": True, "deps": deps}, ensure_ascii=False),
+                        "application/json; charset=utf-8")
+                    return
+            except Exception as e:
+                self._send(200, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False),
+                           "application/json; charset=utf-8")
+            return
+        if u.path == "/api/run-llm":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                obj = json.loads(self.rfile.read(length).decode("utf-8")) \
+                    if length else {}
+                client = _llm_from_request(obj)
+                prompt = str(obj.get("prompt", ""))[:4000]
+                if not prompt.strip():
+                    self._send(200, json.dumps(
+                        {"ok": False, "error": "需求描述为空"},
+                        ensure_ascii=False),
+                        "application/json; charset=utf-8")
+                    return
+                sample = str(obj.get("sample", ""))[:2000]
+                sys_msg = _LR_LLM_SYS + (
+                    "\n当前文档数据点样例：\n" + sample if sample else "")
+                r = client.chat([{"role": "system", "content": sys_msg},
+                                 {"role": "user", "content": prompt}])
+                m = re.search(r"```(?:python)?\s*\n([\s\S]*?)```", str(r))
+                code = m.group(1).strip() if m else str(r).strip()
+                nm = re.search(r"#\s*run-name:\s*(.+)", code)
+                name = nm.group(1).strip() if nm else ""
+                self._send(200, json.dumps(
+                    {"ok": True, "code": code, "name": name},
+                    ensure_ascii=False),
+                    "application/json; charset=utf-8")
+            except Exception as e:
+                self._send(200, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False),
+                           "application/json; charset=utf-8")
             return
         if u.path == "/api/export-html":
             try:

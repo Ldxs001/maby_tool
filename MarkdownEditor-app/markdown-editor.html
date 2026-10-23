@@ -183,6 +183,21 @@
   .markdown-body .fill-col img{width:auto !important;max-width:100% !important;height:auto;}
   .markdown-body .fill-col .diagram{width:auto !important;max-width:100% !important;}
   .markdown-body .fill-col .diagram svg{max-width:100%;height:auto;}
+  /* low runner 执行点状态（v2.5）：跟随错误块 / ▶ 按钮 / 手动待运行 */
+  .mde-run-err{color:#e06c75;font-size:.85em;margin-left:.3em;}
+  body.light .mde-run-err{color:#c0392b;}
+  .mde-run-btn{background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent);
+    border-radius:5px;padding:0 7px;font-size:.85em;cursor:pointer;margin-left:.4em;
+    font-family:var(--sans);vertical-align:baseline;}
+  .mde-run-btn:hover{background:var(--accent);color:#fff;}
+  .mde-run-pending{color:var(--muted);font-size:.85em;border:1px dashed var(--border);
+    border-radius:5px;padding:0 6px;}
+  /* v2.5.1：全部运行按钮融入状态栏（用户反馈：悬浮按钮不属于界面） */
+  #btnRunAll{background:var(--accent);color:#fff;border:none;border-radius:12px;
+    padding:3px 14px;font-size:12px;cursor:pointer;font-family:var(--sans);
+    margin-right:10px;flex:0 0 auto;}
+  #btnRunAll[hidden]{display:none;}
+  #btnRunAll:disabled{opacity:.55;cursor:default;}
   .markdown-body .toc-anchor{color:var(--muted);}
 
   @media print{
@@ -211,6 +226,54 @@
   .sv-mini:hover{background:#2f3746;color:#e8eaed;}
   #tsPanel{width:530px;max-height:84vh;overflow:auto;background:#23272f;color:#e8eaed;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.5);}
     body.light #tsPanel{background:#ffffff;color:#222;}
+    /* low runner 管理界面（与排版面板同族风格：主题变量 + ts 控件口径） */
+    #lrOverlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99;display:flex;align-items:center;justify-content:center;}
+    #lrOverlay[hidden]{display:none !important;}
+    #lrPanel{width:780px;max-width:94vw;max-height:86vh;display:flex;flex-direction:column;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);}
+    #lrBody{display:flex;gap:0;min-height:0;flex:1;overflow:hidden;}
+    #lrSide{width:180px;flex:0 0 180px;border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0;background:var(--bg);}
+    .lr-side-hd{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border);}
+    #lrList{overflow:auto;flex:1;padding:4px 0;}
+    .lr-item{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:7px 8px 7px 12px;cursor:pointer;color:var(--muted);border-left:2px solid transparent;}
+    .lr-item:hover{background:var(--accent-soft);color:var(--text);}
+    .lr-item.cur{background:var(--accent-soft);border-left-color:var(--accent);color:var(--text);font-weight:600;}
+    .lr-item .lr-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;}
+    .lr-del{flex:0 0 auto;background:transparent;border:none;color:var(--muted);border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;font-family:var(--sans);}
+    .lr-del:hover{color:#e06c75;background:rgba(224,108,117,.12);}
+    .lr-del.arming{background:#e06c75;color:#fff;border-radius:5px;}
+    .lr-empty{padding:14px 12px;color:var(--muted);font-size:12px;opacity:.8;line-height:1.6;}
+    #lrMain{flex:1;display:flex;flex-direction:column;padding:14px 16px 12px;min-width:0;min-height:0;}
+    .lr-row{display:flex;align-items:center;gap:8px;margin:0 0 10px;}
+    .lr-row label{font-size:12px;font-weight:600;opacity:.85;white-space:nowrap;color:var(--muted);}
+    #lrName{flex:1;min-width:0;width:auto;background:var(--code-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:13px;}
+    #lrName:focus{border-color:var(--accent);}
+    .lr-btn{background:var(--code-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 13px;font-size:12.5px;cursor:pointer;font-family:var(--sans);transition:background .15s,border-color .15s;white-space:nowrap;}
+    .lr-btn:hover{border-color:var(--accent);}
+    .lr-btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
+    .lr-btn.primary:hover{filter:brightness(1.08);}
+    .lr-btn:disabled{opacity:.55;cursor:default;}
+    #lrCode{flex:1;min-height:200px;background:var(--code-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-family:Consolas,monospace;font-size:12.5px;line-height:1.55;resize:vertical;white-space:pre;overflow:auto;}
+    #lrCode:focus{border-color:var(--accent);}
+    .lr-llm{align-items:stretch;margin:10px 0 0;}
+    #lrPrompt{flex:1;min-height:54px;max-height:120px;width:auto;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;resize:vertical;font-size:12.5px;font-family:var(--sans);line-height:1.5;}
+    #lrPrompt:focus{border-color:var(--accent);}
+    #lrGen{flex:0 0 auto;}
+    #lrGen.busy{position:relative;color:transparent !important;}
+    #lrGen.busy::after{content:'';position:absolute;left:50%;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:lrspin .8s linear infinite;}
+    @keyframes lrspin{to{transform:rotate(360deg);}}
+    .lr-foot{display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:10px;}
+    #lrStat{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--muted);}
+    #lrStat.ok{color:var(--accent);}
+    #lrStat.err{color:#e06c75;}
+    /* v2.5：运行模式行 + 依赖提醒 */
+    .lr-mode-seg{display:flex;gap:6px;align-items:center;flex:1;min-width:0;}
+    .lr-mode-seg .lr-btn.cur{background:var(--accent);color:#fff;border-color:var(--accent);}
+    .lr-mode-seg input[type=number]{width:52px;background:var(--code-bg);color:var(--text);border:1px solid var(--border);border-radius:5px;padding:3px 6px;font-size:12px;}
+    .lr-deps{margin:0 0 8px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:12px;line-height:1.7;background:var(--bg);}
+    .lr-deps .dep-miss{color:#e06c75;}
+    body.light .lr-deps .dep-miss{color:#c0392b;}
+    .lr-deps .dep-ok{color:var(--muted);}
+    .lr-deps code{display:block;margin-top:2px;padding:4px 8px;background:var(--code-bg);border-radius:4px;font-family:Consolas,monospace;font-size:11.5px;user-select:all;word-break:break-all;}
     .ts-head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;font-weight:600;border-bottom:1px solid rgba(128,128,128,.25);}
     #tsClose{background:none;border:none;color:inherit;font-size:20px;cursor:pointer;}
     .ts-body{padding:10px 16px 16px;}
@@ -271,6 +334,7 @@
   <meta name="generator" content="MDEditor - AI-assisted (generated with an AI coding agent)">
 </head>
 <body>
+
 <header id="toolbar">
   <div class="tb-group brand" title="本工具由 AI 辅助生成 (AI-assisted)">MDEditor</div>
   <div class="tb-group" id="fmtBtns"></div>
@@ -286,6 +350,7 @@
     <button id="btnExportPaged" class="tb-btn" title="打印：生成分页版 HTML（纸张/页码/目录）并在浏览器打开，Ctrl+P 即可打印或存为 PDF">打印</button><button id="btnExportHtml" class="tb-btn" title="导出 HTML">.html</button><button id="btnExportDocx" class="tb-btn" title="导出 Word(.docx)：保留样式与可编辑公式">.docx</button>
     <button id="btnLLM" class="tb-btn" title="AI 设置：润色 / 智能备注的后端与模型">AI</button>
     <button id="btnTypeset" class="tb-btn" title="排版设置：字体/表格/缩进/自动落盘">排版</button>
+    <button id="btnRun" class="tb-btn" title="low runner：写/生成 Python run，供 @@ MDE 数据点与执行点调用">run</button>
     <button id="btnSave" class="tb-btn" title="保存（Ctrl+S）">保存</button>
     <button id="btnSaveAs" class="tb-btn" title="另存为…">另存为</button>
   </div>
@@ -300,6 +365,7 @@
   </section>
 </main>
 <footer id="status">
+  <button id="btnRunAll" hidden title="运行全部 @@ MDE 执行点（手动模式）">▶ 运行</button>
   <span id="statFile" class="saved">默认文档</span>
   <span id="statAnns" title="文档批注数">批注 0</span>
   <span id="statChars">0 字符</span>
@@ -330,10 +396,10 @@
       </div>
     </div>
   </div>
-<div id="tsOverlay" hidden>
-  <div id="tsPanel">
+  <div id="tsOverlay" hidden>
+   <div id="tsPanel">
     <div class="ts-head"><span>排版设置</span><button id="tsClose" title="关闭">×</button></div>
-  <div class="ts-body">
+   <div class="ts-body">
       <div class="ts-row"><label>自动落盘间隔（分钟，0=仅手动）</label><input id="tsAuto" type="number" min="0" max="60" step="1"></div>
       <div class="ts-sep"><span>字体 / 字号 / 对齐（字号留空 = 保持默认，单位磅；本机字体由后端自动枚举）</span></div>
       <div class="ts-row"><label>正文</label><select data-ts="p"></select><input data-tssz="p" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="p"></select></div>
@@ -366,7 +432,33 @@
       <div class="ts-row"><label>目录</label><select id="tsTocOn"><option value="off">不生成</option><option value="on">生成</option></select><select id="tsTocPos"><option value="top">置于文首</option><option value="afterh1">第一个 # 之下</option></select></div>
       <div class="ts-row"><label>目录独占一页（后续 ## 与正文强制新页，不得侵入）</label><input id="tsTocSolo" type="checkbox" checked></div>
     </div>
-    <div class="ts-foot"><button id="tsApply">应用</button></div>
+     <div class="ts-foot"><button id="tsApply">应用</button></div>
+   </div>
+ </div>
+<div id="lrOverlay" hidden>
+  <div id="lrPanel">
+    <div class="ts-head"><span>low runner · run 库（编辑器级，全文档共用）</span><button id="lrClose" title="关闭">×</button></div>
+    <div id="lrBody">
+      <div id="lrSide">
+        <div class="lr-side-hd"><span>已保存</span><button id="lrNew" class="lr-btn" title="清空编辑区，另写一个新 run">新建</button></div>
+        <div id="lrList"></div>
+      </div>
+      <div id="lrMain">
+        <div class="lr-row lr-mode-row">
+          <label>运行</label>
+          <div class="lr-mode-seg">
+            <button id="lrModeInstant" class="lr-btn" title="渲染完成后 0.4 秒自动运行（原行为）">立即</button>
+            <button id="lrModeWait" class="lr-btn" title="停止输入 N 秒后自动运行">等待 <input id="lrModeWaitSec" type="number" min="1" max="600" step="1" title="等待秒数"> 秒</button>
+            <button id="lrModeManual" class="lr-btn" title="不自动运行：执行点旁 ▶ 单点运行，或左下角「▶ 运行」全部运行">手动</button>
+          </div>
+        </div>
+        <div id="lrDeps" class="lr-deps" hidden></div>
+        <div class="lr-row"><label>名称</label><input id="lrName" type="text" placeholder="如 dark、统计（即文件名，@@ MDE import 用它）"><button id="lrOpenDir" class="lr-btn" title="打开 runtime/pylibs 目录，pip --target 装三方包">依赖目录</button></div>
+        <textarea id="lrCode" spellcheck="false" placeholder="def run(data):&#10;    # data['kv'] = {'键': '值'}（框架按第一个 == 剥离）&#10;    # data['raw'] = 数据点原文列表（== 不够用时自行解析）&#10;    return str(...)  # 返回 str 替换执行点；作图存当前目录返回 ![](文件名)"></textarea>
+        <div class="lr-row lr-llm"><textarea id="lrPrompt" placeholder="对 AI 说出需求，如：求数据点里所有数字之和 / 统计某词出现次数 / 画折线图…（生成后需人工查阅）"></textarea><button id="lrGen" class="lr-btn">AI 生成</button></div>
+        <div class="lr-foot"><span id="lrStat"></span><button id="lrSave" class="lr-btn primary">保存入库</button></div>
+      </div>
+    </div>
   </div>
 </div>
 <div id="fmOverlay" hidden>
@@ -500,6 +592,21 @@ function sanitizeUrl(u){
   if(/^data:/.test(t) && !/^data:image\//i.test(t)) return '#';
   return t;
 }
+/* MDE 数据点 span（low runner）：data-dp 存 body 原文（URI 编码），
+   显性渲染 == 后的值（无 == 显示原文），隐性 display:none 完全不占位。
+   run pass 从 DOM 收集全部 data-dp 组装 {kv, raw} */
+function mdeDpSpan(body,hidden,alias){
+  var disp='';
+  if(!hidden){
+    var i=body.indexOf('==');
+    disp=(i>=0)?body.slice(i+2).trim():body;
+  }
+  /* data-dp-alias = 数据点归属别名（v2.4.5）：空 = 公共池（喂给所有
+     无 is 执行点）；非空 = 只喂给 is 同名的执行点 */
+  return '<span class="mde-dp'+(hidden?' mde-dp-hidden" style="display:none"':'"')+
+    ' data-dp="'+encodeURIComponent(body)+'"'+
+    ' data-dp-alias="'+escAttr(alias||'')+'">'+escapeHtml(disp)+'</span>';
+}
 function parseInline(text){
   var codes=[];
   text=text.replace(/`([^`]+)`/g,function(m,c){codes.push(c);return '@@C'+(codes.length-1)+'@@';});
@@ -509,11 +616,30 @@ function parseInline(text){
      在代码段提取之后做：代码段内反斜杠保持字面，双保险不冲突。 */
   var escs=[];
   text=text.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g,function(m,c){escs.push(c);return '\x00E'+(escs.length-1)+'\x00';});
+  /* MDE 数据点/执行点（low runner，v2.4）：必须在 escapeHtml 之前——
+     body 需存原文（含 <>& 已转义就还原不回来了）。
+     @@ MDE_{a == 3}        显性公共池（显示 == 后的值，无 == 显示原文）
+     @@ MDE__{...}          隐性公共池（不渲染，只为执行点提供数据）
+     @@ MDE_甲{a == 3}      显性别名池（v2.4.5：只喂 is 甲 的执行点）
+     @@ MDE__甲{...}        隐性别名池
+     @@ MDE import dark [is zzz] / @@ MDE from utils import add [is xxx]
+                            执行点；is 别名决定吃哪个数据池（无 is = 公共池，
+                            两种形式同规矩——import 同样可能多处调用各喂各的）
+     行内体不含 {} 与换行；跨行数据点由块级收集处理（见 parseMarkdown） */
+  var toks=[];
+  text=text.replace(/@@ MDE(_{1,2})([\w\u4e00-\u9fff.-]*)\{([^\n{}]*)\}/g,function(m,u,alias,body){
+    toks.push(mdeDpSpan(body,u==='__',alias));
+    return '\x00T'+(toks.length-1)+'\x00';
+  });
+  text=text.replace(/@@ MDE\s+(?:from\s+([\w\u4e00-\u9fff.-]+?)\s+import\s+([\w\u4e00-\u9fff-]+)|import\s+([\w\u4e00-\u9fff.-]+))(?:\s+is\s+([\w\u4e00-\u9fff.-]+))?/g,function(m,f,fn,imp,alias){
+    toks.push('<span class="mde-run" data-run-mod="'+escAttr(f||imp)+'" data-run-fn="'+escAttr(fn||'run')+'" data-run-alias="'+escAttr(alias||'')+'" data-run-orig="'+encodeURIComponent(m)+'">…</span>');
+    return '\x00T'+(toks.length-1)+'\x00';
+  });
   text=escapeHtml(text);
   /* 生成的标签先进占位符：后续强调/加粗等行内语法绝不能触碰属性值
      （否则下划线文件名 20261015_181923_3419.png 会被 _.._ 改写成 <em>，图片必 404）。
      链接只占位开标签，链接文字仍参与行内格式化。 */
-  var toks=[];
+
   /* 图片宽度+对齐参数：![alt](src){30} / {30c} / {c} → 版面宽度 30% 等比缩放
      + 可选对齐 c=居中 l=左 r=右（单图覆盖排版面板全局图片档）。
      [1-9]\d{0,2} 捕获，>100 钳到 100；对齐后缀独立可选（仅 {c} 也合法）；
@@ -790,6 +916,32 @@ function parseMarkdown(src){
         if(ftxt.trim()){html+=parseMarkdown(ftxt);}
         i=fj;olSeq=0;curInd=0;
         continue;
+      }
+    }
+    /* MDE 跨行数据点（@@ MDE_{ 后行内未闭合 → 向后收集到 }）：
+       长文本参数的自然写法。首行标记前的文本与末行 } 后的文本保留
+       （行内渲染）；体到第一个 }。未闭合 fail-closed 走普通段落。 */
+     var mdeOpen=line.match(/@@ MDE_{1,2}[\w\u4e00-\u9fff.-]*\{/);
+     if(mdeOpen && line.indexOf('}',mdeOpen.index)<0){
+       var dchunks=[line],dclosed=false,dj=i+1;
+       while(dj<lines.length){
+         dchunks.push(lines[dj]);
+         if(lines[dj].indexOf('}')>=0){dclosed=true;dj++;break;}
+         dj++;
+       }
+       if(dclosed){
+         var dfull=dchunks.join('\n');
+         var dmm=dfull.match(/@@ MDE(_{1,2})([\w\u4e00-\u9fff.-]*)\{([\s\S]*?)\}/);
+         if(dmm){
+           var dpre=dfull.slice(0,dmm.index),dpost=dfull.slice(dmm.index+dmm[0].length);
+           var dout='';
+           if(dpre.trim())dout+=parseInline(dpre);
+           dout+=mdeDpSpan(dmm[3],dmm[1]==='__',dmm[2]);
+           if(dpost.trim())dout+=parseInline(dpost);
+          html+='<p>'+dout+'</p>';
+          i=dj;olSeq=0;curInd=0;
+          continue;
+        }
       }
     }
     var stripped=line.replace(/[ ]/g,'');
@@ -1230,6 +1382,192 @@ function parseMarkdown(src){
     mountDiagrams(preview);
   }
 
+  /* ---------- low runner：MDE 数据点收集 + 执行点 run pass ----------
+     渲染队列收尾触发 scheduleRunPass。全文档收集（执行点上方/下方/
+     中间的数据点一律进 data，位置无关）。结果缓存（会话内存）：
+     mod/fn + 数据指纹；run 库保存时清空。
+     运行模式（v2.5，lr 界面设置，localStorage 持久化）：
+     instant=渲染收尾 400ms 防抖自动跑（原行为）
+     wait=停止输入 N 秒后跑（默认 5，用户可调）
+     manual=不自动跑：执行点显示"▶ 待运行"，单点 ▶ 或左下角
+     "全部运行"按钮触发 */
+  var runPassTimer=null, runCache={}, runBusy=false;
+  var RUN_MODE_KEY='md-editor-run-mode';
+  /* v2.5.3 单向迁移：v2.5 裸 localStorage 时代的 run-mode 值从未上云——
+     服务端无此键而本地有时补上云（一次性，此后 lsSet 常规通道） */
+  try{
+    var _rmr=_uiRemoteGetAll();
+    var _rmHasRemote=_rmr&&Object.prototype.hasOwnProperty.call(_rmr,RUN_MODE_KEY);
+    var _rmLocal=localStorage.getItem(RUN_MODE_KEY);
+    if(!_rmHasRemote&&_rmLocal){ lsSet(RUN_MODE_KEY,_rmLocal); }
+  }catch(e){}
+  function runModeCfg(){
+    var c={mode:'instant',waitSec:5};
+    try{
+      var j=JSON.parse(localStorage.getItem(RUN_MODE_KEY)||'{}');
+      if(j&&j.mode)c.mode=j.mode;
+      var n=parseFloat(j&&j.waitSec);
+      if(!isNaN(n)&&n>=1&&n<=600)c.waitSec=n;
+    }catch(e){}
+    return c;
+  }
+  function saveRunModeCfg(c){
+    /* v2.5.3：走 lsSet 双通道（localStorage + 服务端 ui-settings 上云）。
+      v2.5 裸 localStorage 的教训：关程序重开 WebView2 本地丢失且无云端
+      副本 → 每次回默认"立即"。项目持久化惯例 = lsSet（排版配置跨重启
+      存活正是此通道；key 前缀 md-editor- 符合上云过滤），启动时
+      _uiRemoteGetAll 会把服务端值写回 localStorage，runModeCfg 读取
+      逻辑零改动 */
+    lsSet(RUN_MODE_KEY,JSON.stringify(c));
+    _updateRunAllBtn();
+  }
+  function clearRunCache(){ runCache={}; }
+  function scheduleRunPass(){
+    if(runPassTimer)clearTimeout(runPassTimer);
+    var cfg=runModeCfg();
+    if(cfg.mode==='manual'){
+      /* 手动模式：不调度。渲染出的新执行点标待运行态（已 done 的
+         保留结果）；左下角按钮亮起 */
+      markPendingRuns();
+      return;
+    }
+    var ms=cfg.mode==='wait'?cfg.waitSec*1000:400;
+    runPassTimer=setTimeout(runPass,ms);
+  }
+  function markPendingRuns(resetAll){
+    /* v2.5.1：resetAll=true（切换到手动模式时）重置**全部**执行点为
+       待运行（含已 done 的）——用户实测"切手动不一定显示 ▶"根因：
+       之前跑过的执行点 data-done 已设，选不中，既无 ▶ 也无重跑入口。
+       切手动 = 用户接管控制，全部待运行（结果缓存保留，点 ▶ 命中
+       缓存瞬间完成，无重复执行代价）。
+       resetAll 缺省（渲染收尾增量路径）：只标**新渲染的未完成**执行点
+       ——不动已 done 的（手动跑完的结果不能因编辑别处被重置） */
+    var rs=preview.querySelectorAll(resetAll?'.mde-run':'.mde-run:not([data-done])');
+    for(var i=0;i<rs.length;i++){
+      var mod=rs[i].getAttribute('data-run-mod');
+      var fn=rs[i].getAttribute('data-run-fn');
+      rs[i].removeAttribute('data-done');
+      rs[i].innerHTML='<span class="mde-run-pending">待运行 '+
+        escapeHtml(fn!=='run'?fn+' · ':'')+escapeHtml(mod)+
+        '</span><button class="mde-run-btn" title="运行此执行点">▶</button>';
+    }
+    _updateRunAllBtn();
+  }
+  function _updateRunAllBtn(){
+    var btn=document.getElementById('btnRunAll');
+    if(!btn)return;
+    /* v2.5.1：手动模式常驻（不只"有未完成"时）——全部已完成时用户
+       也要有重跑入口；非手动模式隐藏 */
+    btn.hidden=(runModeCfg().mode!=='manual');
+  }
+  function runPass(){
+    runPassTimer=null;
+    var dps=preview.querySelectorAll('.mde-dp');
+    if(!dps.length && !preview.querySelector('.mde-run:not([data-done])'))return;
+     /* 按别名分桶（v2.4.5）：''（公共池）喂给无 is 执行点；别名池只喂
+        给 is 同名执行点。同一 run 多处调用各喂各的，互不串数据 */
+    var buckets={};
+    function _dpInto(alias,body){
+      var b=buckets[alias];
+      if(!b)b=buckets[alias]={kv:{},raw:[],sig:''};
+      b.raw.push(body);
+      var eq=body.indexOf('==');
+      if(eq>=0){
+        var k=body.slice(0,eq).trim(),v=body.slice(eq+2).trim();
+        if(k)b.kv[k]=v;
+      }
+    }
+    for(var i=0;i<dps.length;i++){
+      _dpInto(dps[i].getAttribute('data-dp-alias')||'',
+              decodeURIComponent(dps[i].getAttribute('data-dp')||''));
+    }
+    for(var bk in buckets){
+      var b=buckets[bk];
+      b.sig=JSON.stringify({kv:b.kv,raw:b.raw});
+    }
+     var runs=preview.querySelectorAll('.mde-run:not([data-done])');
+     for(var j=0;j<runs.length;j++){
+       _execRunPoint(runs[j],buckets);
+     }
+   }
+   /* 单执行点执行（v2.5 抽出：runPass 循环与单点 ▶ 按钮共用）。
+      buckets 可选（单点调用时现收集）。串行防风暴：runBusy。 */
+   function _execRunPoint(el,buckets){
+       var mod=el.getAttribute('data-run-mod'),fn=el.getAttribute('data-run-fn');
+       var alias=el.getAttribute('data-run-alias')||'';
+       if(!buckets){
+         buckets={};
+         var dps=preview.querySelectorAll('.mde-dp');
+         for(var i=0;i<dps.length;i++){
+           var body=decodeURIComponent(dps[i].getAttribute('data-dp')||'');
+           var a=dps[i].getAttribute('data-dp-alias')||'';
+           var bkt=buckets[a];
+           if(!bkt)bkt=buckets[a]={kv:{},raw:[],sig:''};
+           bkt.raw.push(body);
+           var eq=body.indexOf('==');
+           if(eq>=0){
+             var k=body.slice(0,eq).trim(),v=body.slice(eq+2).trim();
+             if(k)bkt.kv[k]=v;
+           }
+         }
+         for(var bk in buckets){
+           buckets[bk].sig=JSON.stringify({kv:buckets[bk].kv,raw:buckets[bk].raw});
+         }
+       }
+       var bucket=buckets[alias]||{kv:{},raw:[],sig:'{"kv":{},"raw":[]}'};
+       var data={kv:bucket.kv,raw:bucket.raw};
+       var key=mod+'/'+fn+'#'+alias+'#'+bucket.sig;
+       if(runCache[key]!==undefined){
+         if(runCache[key]&&runCache[key].__fail){ _applyRunFail(el,runCache[key].__fail); }
+         else if(typeof runCache[key]==='string'){ _applyRunResult(el,runCache[key]); }
+         /* v2.5.1：缓存命中也须续链——"全部运行"点下后第一个执行点命中
+            缓存直接 return，链从未推进，按钮永远"运行中…"（用户实测
+            卡死根因）。递归深度 = 执行点数，同步链可控 */
+         if(runChainActive){ _chainNext(); }
+         return;
+       }
+       if(runBusy)return;   /* 串行防风暴：下一轮防抖再跑 */
+       runBusy=true;
+       fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},
+         body:JSON.stringify({mod:mod,fn:fn,data:data})})
+         .then(function(r){return r.json();})
+         .then(function(j){
+           runBusy=false;
+           if(j&&j.ok){
+             runCache[key]=j.result;
+             _applyRunResult(el,j.result);
+             /* 续跑下一个：全部运行链激活时走链；否则防抖续（schedule
+                在 manual 模式只标 pending——单点 ▶ 正是此语义） */
+             if(runChainActive){ _chainNext(); }
+             else{ scheduleRunPass(); }
+           }else{
+             /* 失败也缓存（{__fail}）：编辑期不反复重试；管理界面
+                保存/删除时 clearRunCache 全清恢复重试 */
+             runCache[key]={__fail:((j&&j.error)||'执行失败'),__missing:(j&&j.missing)||null};
+             _applyRunFail(el,runCache[key].__fail,runCache[key].__missing);
+             if(runChainActive){ _chainNext(); }
+           }
+         })
+         .catch(function(e){ runBusy=false;
+           runCache[key]={__fail:(e&&e.message)||'网络错误'};
+           _applyRunFail(el,runCache[key].__fail);
+           if(runChainActive){ _chainNext(); } });
+   }
+   function _applyRunResult(el,result){
+     el.innerHTML=parseInline(String(result));
+     el.setAttribute('data-done','1');
+     _updateRunAllBtn();
+   }
+   /* 失败态（v2.5）：跟随式红色错误块紧随执行点（title 悬停用户从未
+      发现，废除）；缺包时错误块含 pip 包名；▶ 重试按钮。导出剥离。 */
+   function _applyRunFail(el,reason,missing){
+     el.innerHTML='<span class="mde-run-err">⚠ '+
+       (missing?('缺少包 '+escapeHtml(missing.pip_name)+'：'):escapeHtml(String(reason||'执行失败').substring(0,160)))+
+       '</span><button class="mde-run-btn" title="重试">▶</button>';
+     el.setAttribute('data-done','err');
+     _updateRunAllBtn();
+   }
+
   function render(force){
     buildMirrorMap();   /* 镜像测量表只依赖编辑器内容与排版，任何内容变化必经此处 */
     var src=extractMath(getText());
@@ -1259,7 +1597,7 @@ function parseMarkdown(src){
     q.t=setTimeout(function step(){
       if(!renderQueue || renderQueue!==q) return;
       var bi=q.changed[q.idx];
-      if(bi===undefined){ renderQueue=null; tagAnchorLines(q.blocks,q.startLines); buildOutline(); return; }
+      if(bi===undefined){ renderQueue=null; tagAnchorLines(q.blocks,q.startLines); buildOutline(); scheduleRunPass(); return; }
       q.idx++;
       var div=q.existing[bi];
       var fresh=false;
@@ -1605,7 +1943,32 @@ function parseMarkdown(src){
 
   /* 导出统一入口：先弹原生"另存为"框让用户选路径/文件名，再按所选路径写盘。
      彻底去掉"后台静默落盘 + 浏览器下载"的模糊行为。*/
+  /* 导出关口（v2.5.2，用户定案 D）：凡存在未运行或运行失败（err）的
+     执行点一律拦截——"运行错误或失败静默导出"正是要防的坑（导出的
+     是定稿，fail-closed 原文几乎必为失误）。全部成功才放行；无执行
+     点的普通文档零影响。手动/自动模式同规则：失败的都拦。 */
+  function _lrExportGate(){
+    var rs=preview.querySelectorAll('.mde-run');
+    if(!rs.length)return true;
+    var pend=0,err=0;
+    for(var i=0;i<rs.length;i++){
+      var d=rs[i].getAttribute('data-done');
+      if(d==='1')continue;
+      if(d==='err')err++;
+      else pend++;
+    }
+    if(pend||err){
+      var parts=[];
+      if(pend)parts.push(pend+' 个执行点未运行');
+      if(err)parts.push(err+' 个执行点运行失败（红色错误信息就在执行点旁，▶ 可重试）');
+      showToast('无法导出：'+parts.join('、')+'。请先运行并确认全部执行点结果后再导出'
+        +(runModeCfg().mode==='manual'?'（状态栏「▶ 运行」一次跑全部）':'')+'。');
+      return false;
+    }
+    return true;
+  }
   function exportWithDialog(ext, endpoint, title){
+    if(!_lrExportGate())return;
     var base = '未命名文档';
     if (currentFile) {
       var parts = String(currentFile).replace(/\\/g,'/').split('/');
@@ -1672,6 +2035,21 @@ function parseMarkdown(src){
        克隆后即删；仅渲染预览不受影响 */
     var acts=clone.querySelectorAll('.vega-actions, .diagram details');
     for(var a=0;a<acts.length;a++){ if(acts[a].parentNode){acts[a].parentNode.removeChild(acts[a]);} }
+    /* low runner 导出口径：隐性数据点（display:none）必须删——docx 不认
+       display:none，拉平会把隐藏数据当正文显示；显性数据点 span 保留
+       （文本即 value）；执行点已替换（data-done）则 innerHTML 即结果。
+       v2.5 增补：▶ 按钮/跟随错误块/待运行占位是编辑态 UI，导出必剥；
+       err 态与未运行执行点导出原文（fail-closed，导出的是文档最终形态） */
+    var hiddens=clone.querySelectorAll('.mde-dp-hidden');
+    for(var h=0;h<hiddens.length;h++){ if(hiddens[h].parentNode){hiddens[h].parentNode.removeChild(hiddens[h]);} }
+    var uiels=clone.querySelectorAll('.mde-run-btn, .mde-run-err, .mde-run-pending');
+    for(var u=0;u<uiels.length;u++){ if(uiels[u].parentNode){uiels[u].parentNode.removeChild(uiels[u]);} }
+    var runc=clone.querySelectorAll('.mde-run');
+    for(var r2=0;r2<runc.length;r2++){
+      if(runc[r2].getAttribute('data-done')!=='1'){
+        runc[r2].textContent=decodeURIComponent(runc[r2].getAttribute('data-run-orig')||'');
+      }
+    }
     return _rasterAll(clone).then(function(){
       /* 宽度语义抄写：{N} 百分比（图片自身 style 或图表 .diagram 容器）→
          data-x-pct，inlineStylesInto 会把百分比换成 computed px，docx 侧的
@@ -1860,6 +2238,7 @@ function parseMarkdown(src){
      即可打印或存为 PDF。纸张/页码/目录在「排版」面板配置。 */
   document.getElementById('btnExportPaged').addEventListener('click',function(){
     uiBeacon('打印:1 进入');
+    if (!_lrExportGate()) return;   /* v2.5.2：执行点未全部成功，拦截（与 HTML/docx 同关口） */
     if (pagedBusy) { showToast('正在生成打印版，请稍候…'); return; }
     pagedBusy = true;
     var pv = document.getElementById('preview');
@@ -2445,6 +2824,283 @@ function parseMarkdown(src){
   document.getElementById('btnTypeset').addEventListener('click',tsOpen);
   document.getElementById('tsClose').addEventListener('click',function(){document.getElementById('tsOverlay').hidden=true;});
   document.getElementById('tsOverlay').addEventListener('click',function(e){if(e.target===this)this.hidden=true;});
+
+  /* ── low runner 管理界面（v2.4；v2.4.1 体验修：生成反馈/样式/覆盖提示）── */
+  var lrNames=[];   /* 当前库名集合（覆盖提示用） */
+  function lrOpen(){
+    document.getElementById('lrOverlay').hidden=false;
+    if(typeof lrModeRefresh==='function')lrModeRefresh();
+    lrRefresh();
+  }
+  function lrSaveBtn(){
+    /* 名字与库中现有条目同名 → 保存即覆盖（run 库允许随时改：点列表载入
+       → 改代码 → 保存即覆盖同名条目） */
+    var n=document.getElementById('lrName').value.trim();
+    var b=document.getElementById('lrSave');
+    b.textContent=(n&&lrNames.indexOf(n)>=0)?'覆盖保存':'保存入库';
+  }
+  function lrRefresh(){
+    fetch('/api/runs').then(function(r){return r.json();}).then(function(j){
+      var box=document.getElementById('lrList');
+      box.innerHTML='';
+      lrNames=[];
+      if(!j||!j.ok||!j.runs||!j.runs.length){
+        box.innerHTML='<div class="lr-empty">（空库）<br>右侧写代码，或下方说出需求让 AI 生成，查阅后保存。</div>';
+        lrSaveBtn();
+        return;
+      }
+      var cur=document.getElementById('lrName').value.trim();
+      j.runs.forEach(function(it){
+        lrNames.push(it.name);
+        var d=document.createElement('div');
+        d.className='lr-item'+(it.name===cur?' cur':'');
+        var s=document.createElement('span');
+        s.className='lr-nm';
+        s.textContent=it.name;
+        s.title=it.name+'.py · '+Math.round(it.size/1024*10)/10+'KB';
+        d.appendChild(s);
+        var del=document.createElement('button');
+        del.className='lr-del';
+        del.textContent='删';
+        del.title='删除 '+it.name+'（点两次确认）';
+        del.addEventListener('click',function(ev){
+          ev.stopPropagation();
+          /* 二次点击确认（v2.4.4）：confirm() 在 WebView2 内嵌窗口默认
+             禁用脚本对话框——弹窗不显示、返回假值，删除从未执行
+             （"确定后删不掉"的根因）。第一次点→红底"确认删"（3 秒内
+             再点才删，超时自动复原）；列表刷新即重建按钮，状态自然归零 */
+          if(!del.classList.contains('arming')){
+            del.classList.add('arming');
+            del.textContent='确认删';
+            setTimeout(function(){
+              if(del.parentNode){
+                del.classList.remove('arming');
+                del.textContent='删';
+              }
+            },3000);
+            return;
+          }
+          fetch('/api/runs?name='+encodeURIComponent(it.name),{method:'DELETE'})
+            .then(function(r){return r.json();})
+            .then(function(){
+              if(document.getElementById('lrName').value.trim()===it.name){
+                document.getElementById('lrName').value='';
+                document.getElementById('lrCode').value='';
+              }
+              clearRunCache(); lrRefresh(); _lrRerunAll();
+            });
+        });
+        d.appendChild(del);
+        d.addEventListener('click',function(){
+          fetch('/api/runs?name='+encodeURIComponent(it.name))
+            .then(function(r){return r.json();})
+            .then(function(k){
+              if(k&&k.ok){
+                document.getElementById('lrName').value=k.name;
+                document.getElementById('lrCode').value=k.code;
+                var st=document.getElementById('lrStat');
+                st.className='ok';
+                st.textContent='已载入 '+k.name+'——修改后「保存」即覆盖';
+                lrRefresh();
+              }else{ showToast('读取失败：'+((k&&k.error)||'')); }
+            });
+        });
+        box.appendChild(d);
+      });
+      lrSaveBtn();
+    }).catch(function(e){ showToast('run 库读取失败：'+e.message); });
+  }
+  function _lrRerunAll(){
+    var els=preview.querySelectorAll('.mde-run');
+    for(var i=0;i<els.length;i++){
+      els[i].removeAttribute('data-done');
+      els[i].textContent='…';
+    }
+    clearRunCache();
+    if(runModeCfg().mode==='manual'){ markPendingRuns(true); }
+    else{ scheduleRunPass(); }
+  }
+  document.getElementById('btnRun').addEventListener('click',lrOpen);
+  /* ── v2.5 运行模式 / 手动执行 ────────────────────────────── */
+  /* 执行点 ▶ 按钮（事件委托：渲染产物逐个绑太脆，preview 冒泡一次搞定；
+     手动模式"待运行"与失败态"重试"共用） */
+  preview.addEventListener('click',function(e){
+    var btn=e.target;
+    if(!btn||btn.nodeType!==1||!btn.classList||!btn.classList.contains('mde-run-btn'))return;
+    var el=btn.closest('.mde-run');
+    if(!el)return;
+    e.preventDefault();
+    e.stopPropagation();
+    el.removeAttribute('data-done');
+    el.textContent='…';
+    _execRunPoint(el,null);
+  });
+  /* 左下角"全部运行"（仅手动模式显示，用户指定位置：工具栏已拥挤）。
+     链式执行：runChainActive 标志下 _execRunPoint 完成后自动找下一个 */
+  var runChainActive=false;
+  document.getElementById('btnRunAll').addEventListener('click',function(){
+    var btn=this;
+    btn.disabled=true;
+    btn.textContent='运行中…';
+    var els=preview.querySelectorAll('.mde-run:not([data-done])');
+    for(var i=0;i<els.length;i++){
+      els[i].removeAttribute('data-done');
+      els[i].textContent='…';
+    }
+    if(!els.length){ btn.disabled=false; btn.textContent='▶ 运行'; _updateRunAllBtn(); return; }
+    runChainActive=true;
+    _execRunPoint(els[0],null);   /* 链式：完成后自动续（见 _applyRunResult/_applyRunFail） */
+  });
+  function _chainNext(){
+    if(!runChainActive)return false;
+    var pend=preview.querySelector('.mde-run:not([data-done])');
+    if(!pend){
+      runChainActive=false;
+      var btn=document.getElementById('btnRunAll');
+      if(btn){btn.disabled=false;btn.textContent='▶ 运行';}
+      _updateRunAllBtn();
+      return true;   /* 链结束 */
+    }
+    _execRunPoint(pend,null);
+    return true;
+  }
+  /* lr 界面模式设置（互斥三选 + N 秒输入；持久化 localStorage） */
+  function lrModeRefresh(){
+    var cfg=runModeCfg();
+    var mode=cfg.mode;
+    document.getElementById('lrModeInstant').classList.toggle('cur',mode==='instant');
+    document.getElementById('lrModeWait').classList.toggle('cur',mode==='wait');
+    document.getElementById('lrModeManual').classList.toggle('cur',mode==='manual');
+    var sec=document.getElementById('lrModeWaitSec');
+    sec.value=cfg.waitSec;
+    sec.disabled=(mode!=='wait');   /* 非等待模式禁用秒数框（嵌在按钮内无独立行） */
+  }
+  function lrModeSet(m){
+    var cfg=runModeCfg();
+    cfg.mode=m;
+    var n=parseFloat(document.getElementById('lrModeWaitSec').value);
+    if(!isNaN(n)&&n>=1&&n<=600)cfg.waitSec=n;
+    saveRunModeCfg(cfg);
+    lrModeRefresh();
+    /* 模式切换即生效：未完成执行点按新模式处理 */
+    if(m==='manual'){ markPendingRuns(true); }
+    else{ scheduleRunPass(); }
+  }
+  document.getElementById('lrModeInstant').addEventListener('click',function(){lrModeSet('instant');});
+  document.getElementById('lrModeWait').addEventListener('click',function(){lrModeSet('wait');});
+  document.getElementById('lrModeManual').addEventListener('click',function(){lrModeSet('manual');});
+  document.getElementById('lrModeWaitSec').addEventListener('input',function(){
+    var cfg=runModeCfg();
+    var n=parseFloat(this.value);
+    if(!isNaN(n)&&n>=1&&n<=600){cfg.waitSec=n;saveRunModeCfg(cfg);}
+  });
+  lrModeRefresh();
+  document.getElementById('lrClose').addEventListener('click',function(){document.getElementById('lrOverlay').hidden=true;});
+  document.getElementById('lrOverlay').addEventListener('click',function(e){if(e.target===this)this.hidden=true;});
+  document.getElementById('lrName').addEventListener('input',lrSaveBtn);
+  document.getElementById('lrNew').addEventListener('click',function(){
+    document.getElementById('lrName').value='';
+    document.getElementById('lrCode').value='';
+    var st=document.getElementById('lrStat');
+    st.className=''; st.textContent='';
+    lrRefresh();
+  });
+  document.getElementById('lrOpenDir').addEventListener('click',function(){
+    fetch('/api/open-dir',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({dir:'pylibs'})});
+  });
+  document.getElementById('lrSave').addEventListener('click',function(){
+    var name=document.getElementById('lrName').value.trim();
+    var code=document.getElementById('lrCode').value;
+    if(!name){ showToast('请先命名（@@ MDE import 的名字就是它）'); return; }
+    if(!code.trim()){ showToast('代码为空'); return; }
+    var over=lrNames.indexOf(name)>=0;
+    fetch('/api/runs',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name:name,code:code})})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if(j&&j.ok){
+          var st=document.getElementById('lrStat');
+          st.className='ok';
+          st.textContent=(over?'已覆盖 ':'已保存 ')+name+'（.py）';
+          showToast((over?'已覆盖':'已保存')+'：'+name);
+          lrShowDeps(j.deps||[]);
+          lrRefresh();
+          _lrRerunAll();
+        }else{ showToast('保存失败：'+((j&&j.error)||'')); }
+      }).catch(function(e){ showToast('保存失败：'+e.message); });
+  });
+  /* 依赖提醒（v2.5）：保存后服务端检测 import 的三方包在执行环境
+     （便携 py + pylibs）里的可用性——缺的红色 + 安装命令（便携包无
+     pip，用户自装：任何有 pip 的 Python 执行 --target 落 pylibs；
+     编译型包需 cp311 版本） */
+  function lrShowDeps(deps){
+    var box=document.getElementById('lrDeps');
+    if(!deps||!deps.length){ box.hidden=true; box.innerHTML=''; return; }
+    var miss=deps.filter(function(d){return !d.installed;});
+    var ok=deps.filter(function(d){return d.installed;});
+    var h='';
+    if(miss.length){
+      h+='<div class="dep-miss">缺少包：'+miss.map(function(d){
+        return escapeHtml(d.module)+(d.pip_name!==d.module?('（pip 名 '+escapeHtml(d.pip_name)+'）'):'');
+      }).join('、')+'——运行将失败，请先安装：</div>';
+      var seen={};
+      miss.forEach(function(d){
+        if(seen[d.cmd])return;
+        seen[d.cmd]=1;
+        h+='<code>'+escapeHtml(d.cmd)+'</code>';
+      });
+      h+='<div style="font-size:11px;color:var(--muted)">（用任一装有 pip 的 Python 执行；编译型包需 Python 3.11（cp311）版本）</div>';
+    }
+    if(ok.length){
+      h+='<div class="dep-ok">已就绪：'+ok.map(function(d){return escapeHtml(d.module);}).join('、')+'</div>';
+    }
+    box.innerHTML=h;
+    box.hidden=false;
+  }
+  document.getElementById('lrGen').addEventListener('click',function(){
+    var prompt=document.getElementById('lrPrompt').value.trim();
+    if(!prompt){ showToast('先在下方输入框说出需求'); return; }
+    /* 附当前文档数据点样例（LLM 据此写剥参逻辑） */
+    var dps=preview.querySelectorAll('.mde-dp');
+    var sample=[];
+    for(var i=0;i<dps.length&&i<8;i++){
+      sample.push(decodeURIComponent(dps[i].getAttribute('data-dp')||''));
+    }
+    var st=document.getElementById('lrStat');
+    var gen=document.getElementById('lrGen');
+    st.className='';
+    st.textContent='AI 生成中（约 10~60 秒，取决于后端），完成后自动填入代码框…';
+    gen.disabled=true;
+    gen.classList.add('busy');   /* 旋转动画：慢后端下"还活着"的明确反馈 */
+    fetch('/api/run-llm',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({prompt:prompt,sample:sample.join('\n')})})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        gen.disabled=false;
+        gen.classList.remove('busy');
+        if(j&&j.ok){
+          document.getElementById('lrCode').value=j.code;
+          if(j.name&&!document.getElementById('lrName').value.trim()){
+            document.getElementById('lrName').value=j.name;
+          }
+          lrSaveBtn();
+          st.className='ok';
+          st.textContent='AI 已生成——人工查阅后再「保存入库」'
+            +(document.getElementById('lrName').value.trim()?'':'（AI 未给名字，请手动命名）');
+        }else{
+          st.className='err';
+          st.textContent='AI 生成失败：'+((j&&j.error)||'未知错误');
+          showToast('AI 生成失败：'+((j&&j.error)||'未知错误')+'\n可在工具栏「AI」里检查后端配置。');
+        }
+      }).catch(function(e){
+        gen.disabled=false;
+        gen.classList.remove('busy');
+        st.className='err';
+        st.textContent='AI 生成失败：'+e.message;
+        showToast('AI 生成失败：'+e.message);
+      });
+  });
   /* ── 内嵌模式检测（pywebview 直连 py API；否则走 HTTP）───────────────── */
   var HAS_PY = false;
   window.addEventListener('pywebviewready', function(){

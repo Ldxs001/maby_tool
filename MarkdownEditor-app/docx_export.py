@@ -33,6 +33,18 @@ import latex2mathml.converter
 # ---------------------------------------------------------------------------
 M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 
+# 大运算符集（OMML nary 可承载：字形放大 + 极限位置）。∫∬∭∮∯∰ ∑∏∐
+# ⋀⋁ ⨂⨀⨁ ⨄ ⊕⊗ ∪∩ 等；latex2mathml 的 \iiint 产出 ∭（U+222D）单字符
+_NARY_OPS = set(
+    "\u222b\u222c\u222d\u222e\u222f\u2230"   # ∫ ∬ ∭ ∮ ∯ ∰
+    "\u2211\u220f\u2210"                     # ∑ ∏ ∐
+    "\u22c0\u22c1"                           # ⋀ ⋁
+    "\u2a02\u2a00\u2a01\u2a04"               # ⨂ ⨀ ⨁ ⨄
+    "\u2295\u2297"                           # ⊕ ⊗
+    "\u22c3\u22c2"                           # ∪ ∩
+    "\u2210"                                 # ∐
+)
+
 
 def _mk(tag, *children, **attrib):
     e = etree.Element("{%s}%s" % (M_NS, tag), nsmap={"m": M_NS})
@@ -67,7 +79,16 @@ def mathml_to_omml(mathml_str):
 
 
 def _tr(el):
-    """把一个 MathML 元素递归转成 OMML 元素。"""
+    """把一个 MathML 元素递归转成 OMML 元素。
+
+    v2.4.10 渲染修正（Word COM 导 PDF 实测定位）：
+    ① mrow/mstyle 等分组容器 → **无括号** m:d（begChr/endChr 空串）——
+      空的 dPr 是默认括号 ( )，此前给所有分组都画上括号（全公式多层
+      圆括号、连分式结构崩溃的根因）；真括号来自 \left( 的 mo 字符
+      本身与 m:fenced 分支
+    ② 大运算符（∑∏∫∭∮ 等）带上下标/limits → m:nary（Word 原生
+      大运算符：字形变大、极限位置正确）——此前是普通 sSubSup（角标
+      位置、普通字号）与 acc（\limits 的下限跑到上方）"""
     tag = etree.QName(el).localname
     kids = _children(el)
     txt = el.text or ""
@@ -77,16 +98,63 @@ def _tr(el):
         return _text_run(txt)
     if tag == "mspace":
         return _text_run(" ")
-    if tag == "mstyle" or tag == "mpadded" or tag == "mphantom":
-        # 透明/带间距容器：直接透传子节点
-        d = _mk("d", _mk("dPr"), _mk("e", *[_tr(k) for k in kids]))
-        return d
-    if tag == "mrow":
-        return _mk("d", _mk("dPr"), _mk("e", *[_tr(k) for k in kids]))
+    # 分组容器：无括号定界（begChr/endChr 空串 = Word 的"括号-无"）
+    if tag in ("mrow", "mstyle", "mpadded", "mphantom"):
+        return _mk("d",
+                   _mk("dPr", _mk("begChr", **{"val": ""}),
+                       _mk("endChr", **{"val": ""})),
+                   _mk("e", *[_tr(k) for k in kids]))
 
     # 分式
     if tag == "mfrac" and len(kids) >= 2:
         return _mk("f", _mk("num", _tr(kids[0])), _mk("den", _tr(kids[1])))
+
+    # 大运算符判定：base 是 mo 且字符在大运算符集
+    def _nary_chr(base):
+        if base is not None and etree.QName(base).localname == "mo":
+            t = (base.text or "").strip()
+            if t and t in _NARY_OPS:
+                return t
+        return None
+
+    # nary：\limits（munder/mover/munderover）→ 极限在正上/正下
+    if tag == "munder" and len(kids) >= 2 and _nary_chr(kids[0]):
+        return _mk("nary",
+                   _mk("naryPr", _mk("chr", **{"val": _nary_chr(kids[0])}),
+                       _mk("limLoc", **{"val": "undOvr"})),
+                   _mk("sub", _tr(kids[1])), _mk("e"))
+    if tag == "mover" and len(kids) >= 2 and _nary_chr(kids[0]):
+        return _mk("nary",
+                   _mk("naryPr", _mk("chr", **{"val": _nary_chr(kids[0])}),
+                       _mk("limLoc", **{"val": "undOvr"})),
+                   _mk("sup", _tr(kids[1])), _mk("e"))
+    if tag == "munderover" and len(kids) >= 3 and _nary_chr(kids[0]):
+        # e 留空：nary 的 chr 已承载运算符本体——再放 base 会画出双
+        # 运算符（实测 ∏_{j=1}^{m_i} ∏ 双画）
+        return _mk("nary",
+                   _mk("naryPr", _mk("chr", **{"val": _nary_chr(kids[0])}),
+                       _mk("limLoc", **{"val": "undOvr"})),
+                   _mk("sub", _tr(kids[1])),
+                   _mk("sup", _tr(kids[2])),
+                   _mk("e"))
+    # 普通上下标（_ ^）：base 是大运算符 → nary 角标式（行内式惯例）
+    if tag == "msub" and len(kids) >= 2 and _nary_chr(kids[0]):
+        return _mk("nary",
+                   _mk("naryPr", _mk("chr", **{"val": _nary_chr(kids[0])}),
+                       _mk("limLoc", **{"val": "subSup"})),
+                   _mk("sub", _tr(kids[1])), _mk("e"))
+    if tag == "msup" and len(kids) >= 2 and _nary_chr(kids[0]):
+        return _mk("nary",
+                   _mk("naryPr", _mk("chr", **{"val": _nary_chr(kids[0])}),
+                       _mk("limLoc", **{"val": "subSup"})),
+                   _mk("sup", _tr(kids[1])), _mk("e"))
+    if tag == "msubsup" and len(kids) >= 3 and _nary_chr(kids[0]):
+        return _mk("nary",
+                   _mk("naryPr", _mk("chr", **{"val": _nary_chr(kids[0])}),
+                       _mk("limLoc", **{"val": "subSup"})),
+                   _mk("sub", _tr(kids[1])),
+                   _mk("sup", _tr(kids[2])),
+                   _mk("e"))
 
     # 上下标
     if tag == "msub" and len(kids) >= 2:
@@ -97,14 +165,20 @@ def _tr(el):
         return _mk("sSubSup", _mk("e", _tr(kids[0])),
                    _mk("sub", _tr(kids[1])), _mk("sup", _tr(kids[2])))
 
-    # 根式
+    # 根式。OMML 结构铁律：m:deg 是 m:rad 的直接子元素（radPr,deg,e
+    # 三者平级，radPr 里只允许 degHide）——v2.4.9 前把 deg 塞进 radPr
+    # 内属 schema 违规，Word 严格校验直接报"文件损坏"（用户实测
+    # \sqrt[3]{...} 全文档唯一触发：该分支自写下从未被真实用例覆盖，
+    # 消融锁定 radPr(deg) 即凶手，剥 radPr/deg 均 OK、剥 rPr/degHide
+    # 均 FAIL）
     if tag == "msqrt" and kids:
         return _mk("rad",
                    _mk("radPr", _mk("degHide", **{"val": "on"})),
                    _mk("e", _tr(kids[0])))
     if tag == "mroot" and len(kids) >= 2:
         return _mk("rad",
-                   _mk("radPr", _mk("deg", _tr(kids[1]))),
+                   _mk("radPr", _mk("degHide", **{"val": "off"})),
+                   _mk("deg", _tr(kids[1])),
                    _mk("e", _tr(kids[0])))
 
     # 上下附加符号（acc 仅向上，munder 降级同样处理）
@@ -114,16 +188,6 @@ def _tr(el):
                    _mk("accPr", _mk("chr", **{"val": acc})),
                    _mk("e", _tr(kids[0])),
                    _mk("sub", _text_run(acc)))
-
-    # 求和 / 积分 / 连乘 等大运算符（munderover -> nary）
-    if tag == "munderover" and len(kids) >= 3:
-        op = (kids[0].text or "").strip()
-        return _mk("nary",
-                   _mk("naryPr", _mk("chr", **{"val": op}),
-                       _mk("limLoc", **{"val": "subSup"})),
-                   _mk("sub", _tr(kids[1])),
-                   _mk("sup", _tr(kids[2])),
-                   _mk("e", _tr(kids[0])))
 
     # 矩阵 / 行列式
     if tag == "mtable":
@@ -466,12 +530,19 @@ def _apply_run_style(run, style_node):
         run.font.italic = True
     if "underline" in sd.get("text-decoration", ""):
         run.font.underline = True
-    ff = sd.get("font-family", "")
-    if ff:
-        # 取第一个字体族，去掉引号
-        fam = re.split(r"[,;]", ff)[0].strip().strip('"').strip("'")
-        if fam:
-            run.font.name = fam
+    fam = _font_family(sd.get("font-family", ""))
+    if fam:
+        run.font.name = fam
+        # CJK：font.name 只写 ascii/hAnsi 槽位，中文走 eastAsia——
+        # 不补则汉字回落 Word 主题默认字体（微软雅黑/黑体全失效，
+        # python-docx 经典坑）。CSS 系统标识符（-apple-system 等）已被
+        # _font_family 滤除，不会写进任何字体槽
+        try:
+            rpr = run._r.get_or_add_rPr()
+            rfonts = rpr.get_or_add_rFonts()
+            rfonts.set(qn("w:eastAsia"), fam)
+        except Exception:
+            pass
 
 
 # 块级子元素：_fill_inline 不拉平（由 _walk 结构分支处理）。
@@ -495,11 +566,37 @@ def _fill_inline(node, para, doc, md_path):
         elif ctag == "svg":
             para.add_run("[图表]")
         elif child.get("data-tex") is not None:
-            _append_omml(para, child.get("data-tex"))
+            _append_omml(para, child.get("data-tex"), child)
         else:
             _fill_inline(child, para, doc, md_path)
         if child.tail:
-            _add_run(para, child.tail, child)
+            # tail 在父容器里，样式用父容器的——用 child 会把前一个
+            # 行内元素的样式（红/粗）出血到尾随文字（实测 <span>红</span>
+            # 后的" 普通"被染红）
+            _add_run(para, child.tail, node)
+
+
+_CSS_NON_FONTS = {
+    "apple-system", "blinkmacsystemfont", "system-ui", "sans-serif",
+    "serif", "monospace", "cursive", "fantasy", "system",
+}
+
+
+def _font_family(ff):
+    """CSS 字体栈 → 第一个真实字体名。过滤 WebKit 系统标识符与泛型族
+    （-apple-system 不是字体名——写进 rFonts 时 Word 渲染回落且
+    v2.4.7 曾把它带入 OMML run 触发"文件损坏"，见 _style_omml 注释）。
+    无真实名返回 None（调用方不写字体槽）。"""
+    if not ff:
+        return None
+    for part in re.split(r"[,;]", ff):
+        fam = part.strip().strip('"').strip("'").strip()
+        if not fam:
+            continue
+        if fam.lstrip("-").lower() in _CSS_NON_FONTS:
+            continue
+        return fam
+    return None
 
 
 def _add_run(para, text, style_node):
@@ -586,10 +683,49 @@ def _add_image(para, img, md_path, doc=None):
         para.add_run("[图片:%s]" % os.path.basename(path))
 
 
-def _append_omml(para, tex):
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def _style_omml(omml, style_node):
+    """排版字号应用到公式全部 run（面板"公式字号"，此前从未传进来）。
+    OMML run 样式走 w:rPr，Word 规则：m:r 内 rPr 须在 m:t 之前；
+    sz 单位半磅。
+
+    v2.4.10 渲染修正（Word COM 导 PDF 实测）：**只写字号、不写字体**——
+    OMML 的数学字形（∫∑∏∭）只存在于 Cambria Math，写任何 rFonts
+    （哪怕 Segoe UI）都会覆盖 Word 的数学默认字体 → 大运算符渲染为
+    豆腐块。字号改变时 Word 仍用 Cambria Math 按比例缩放。"""
+    if style_node is None or not style_node.get("style"):
+        return
+    sd = _style_dict(style_node.get("style", ""))
+    fs = _pt(sd.get("font-size"))
+    if not fs:
+        return
+    for r in omml.iter("{%s}r" % M_NS):
+        rpr = etree.Element("{%s}rPr" % _W_NS)
+        sz = etree.SubElement(rpr, "{%s}sz" % _W_NS)
+        sz.set("{%s}val" % _W_NS, str(int(round(fs * 2))))
+        szcs = etree.SubElement(rpr, "{%s}szCs" % _W_NS)
+        szcs.set("{%s}val" % _W_NS, str(int(round(fs * 2))))
+        r.insert(0, rpr)
+
+
+def _append_omml(para, tex, style_node=None):
     try:
-        mathml = latex2mathml.converter.convert(tex)
+        mathml = None
+        try:
+            mathml = latex2mathml.converter.convert(tex)
+        except Exception:
+            # \!（负细空距）让 latex2mathml 直接抛异常（实测三重积分+
+            # substack 组合整条退化）；零宽符号 OMML 本就不需要——剥离
+            # 重试，仍失败才按纯文本退化
+            cleaned = tex.replace("\\!", "")
+            if cleaned != tex:
+                mathml = latex2mathml.converter.convert(cleaned)
+            else:
+                raise
         omml = mathml_to_omml(mathml)
+        _style_omml(omml, style_node)
         para._p.append(omml)
     except Exception:
         # 公式解析失败：退化为纯文本，保证文档不崩
@@ -711,14 +847,15 @@ def _walk(node, doc, md_path, ctx):
     cls = node.get("class", "") or ""
     tex = node.get("data-tex")
 
-    # 公式
+    # 公式（样式节点 = 公式元素自身：inlineStylesInto 的字号/字体快照
+    # 随 data-tex 一起传给 OMML run）
     if tex is not None:
         if "md-math-block" in cls.split():
             p = doc.add_paragraph()
-            _append_omml(p, tex)
+            _append_omml(p, tex, node)
         else:
             p = ctx.get("para") or doc.add_paragraph()
-            _append_omml(p, tex)
+            _append_omml(p, tex, node)
         return
 
     # 标题

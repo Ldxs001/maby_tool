@@ -21,3 +21,6 @@ MarkdownEditor-app/_video_syntax/narr.m4a
 MarkdownEditor-app/_video_syntax/bgm.m4a
 MarkdownEditor-app/_video_syntax/tts/
 MarkdownEditor-app/_video_syntax/*.log
+
+# ── 安装包备份（Release 资产，不入库）──────────
+_release_assets/

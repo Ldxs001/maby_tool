@@ -21,6 +21,19 @@ import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "docs", "MDEditor 使用指南.md")
+# v2.5.2 后用户文档正文含裸 MDE 执行点（其中 process_words 不存在→
+# 失败态→导出关口正确拦截）。本测试回归"导出产物"功能本身，用剔除
+# 执行点行的临时副本测（用户文档零改动；速查表/章节示例带反引号
+# 被行内代码保护，不在剔除范围）
+import re as _re
+_src_txt = open(SRC, encoding="utf-8").read()
+_clean = "\n".join(
+    ln for ln in _src_txt.splitlines()
+    if not _re.search(r'@@ MDE (import|from)\b', ln)
+    or ln.lstrip().startswith("|") or "`" in ln)
+SRC_TEST = os.path.join(HERE, "docs", "_tmp_real_export.md")
+open(SRC_TEST, "w", encoding="utf-8").write(_clean)
+SRC = SRC_TEST
 PORT = 18766
 NO_WINDOW = 0x08000000
 
@@ -267,6 +280,8 @@ finally:
     except Exception:
         srv.kill()
     shutil.rmtree(tmpdir, ignore_errors=True)
+    if os.path.exists(SRC_TEST):
+        os.remove(SRC_TEST)
 
 print("\n%s" % ("ALL PASS" if not fails else "FAILED: %s" % fails))
 sys.exit(1 if fails else 0)

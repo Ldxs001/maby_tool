@@ -117,6 +117,50 @@ def test_docx_export():
     check("docx 嵌入图片", len(media) >= 1, "media=%s" % media)
 
 
+def test_docx_mroot_rad_structure():
+    """v2.4.9：带度数根式（\\sqrt[3]）的 OMML 结构——m:deg 必须是
+    m:rad 的直接子元素（radPr/deg/e 平级）。历史缺陷：deg 被塞进
+    radPr 内属 schema 违规，Word 报"文件损坏"（该分支自 v2.1 写下
+    从未被真实用例覆盖，用户文档首次出现 \\sqrt[3] 才暴露）。
+    同时覆盖 \\! 剥离重试（v2.4.7）。"""
+    BS = chr(92)
+    texes = [BS + "sqrt[3]{x}",
+             BS + "sqrt[5]{1+" + BS + "sqrt[4]{x}}",
+             "f" + BS + "!" + BS + "left(x" + BS + "right)"]
+    html = '<div class="markdown-body">'
+    for t in texes:
+        html += '<div data-tex="%s"></div>' % t
+    html += '</div>'
+    data = docx_export.build_docx(None, html)
+    xml = zipfile.ZipFile(io.BytesIO(data)).read(
+        "word/document.xml").decode("utf-8")
+    M = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+    from lxml import etree as _et
+    root = _et.fromstring(zipfile.ZipFile(io.BytesIO(data)).read(
+        "word/document.xml"))
+    rads = root.findall(".//{%s}rad" % M)
+    degs = root.findall(".//{%s}deg" % M)
+    check("mroot 根式生成 rad 元素", len(rads) >= 3, "rad=%d" % len(rads))
+    check("deg 平级于 rad（radPr/deg/e 三层结构）", len(degs) >= 3,
+          "deg=%d" % len(degs))
+    bad = 0
+    for rp in root.findall(".//{%s}radPr" % M):
+        for c in rp:
+            if isinstance(c.tag, str) and _et.QName(c).localname != "degHide":
+                bad += 1
+    check("radPr 内无 deg（schema 合规）", bad == 0, "bad=%d" % bad)
+    for rad in rads:
+        kids = [_et.QName(c).localname for c in rad
+                if isinstance(c.tag, str)]
+        if kids and kids[0] == "radPr":
+            # deg 在 e 之前
+            if "deg" in kids and kids.index("deg") > kids.index("e"):
+                bad += 1
+    check("deg 在 e 之前（rad 子元素顺序）", bad == 0)
+    check("\\! 公式经剥离重试仍出 OMML",
+          xml.count("<m:oMath>") == 3, "oMath=%d" % xml.count("<m:oMath>"))
+
+
 def test_docx_pblk_export():
     """v1.11.5 场景：前端 inlineStylesInto 之后的真实结构——
     #preview 克隆为裸 div（id/class 已剥），pblk 为裸 div，图表为栅格化
@@ -231,6 +275,7 @@ def main():
     test_docx_export()
     test_docx_pblk_export()
     test_docx_img_width_rules()
+    test_docx_mroot_rad_structure()
     test_regression_import()
     n_pass = sum(1 for _, ok in RESULTS if ok)
     n_all = len(RESULTS)

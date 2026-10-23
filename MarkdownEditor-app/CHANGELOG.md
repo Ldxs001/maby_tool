@@ -11,6 +11,117 @@
 
 ---
 
+## v2.5.3（2026-10-23）
+
+**修复**
+
+- **run 运行模式关程序重开丢失（每次回默认"立即"）**：v2.5 的模式设置写的是**裸 localStorage**——此前验证只测了同浏览器会话的 reload，从未测过关程序重开（WebView2 重开后本地无此键、也无云端副本 → 回默认）。项目持久化惯例是 `lsSet` 双通道（localStorage + 300ms 防抖上云 `/api/ui-settings` 落 settings.json，启动时 `_uiRemoteGetAll` 写回 localStorage）——排版配置跨重启存活正是靠它。修法：`saveRunModeCfg` 改走 `lsSet`（key `md-editor-run-mode` 恰在既有上云过滤规则内）；另补**单向迁移**：v2.5 裸 localStorage 时代的旧值从未上云，启动时检测服务端无此键而本地有时补上云（一次性，此后走常规通道）。验证——新增 `_test_lr_persist.py` 5/5 PASS：A 切手动后服务端 settings.json 落 `md-editor-run-mode={"mode":"manual"}`；B 全新浏览器上下文（localStorage 空 = 关程序重开）启动后模式恢复 manual + 面板 UI 选中 + 状态栏按钮显示；C 迁移路径（服务端无键 + 本地旧值 wait/9s）启动后补上云；测试尾部恢复 instant 无配置污染。`_test_lr_modes.py` 22/22、`_test_low_runner.py` 回归 PASS。MD_SERVER_VERSION 80。
+
+**变更**
+
+- **low runner 默认 run 示例随安装包分发**：`calc_operations.py`（四则运算）与 `count_words_in_text.py`（词频统计）两个 run 模块入包——新增仓库级种子目录 `runs/`（字节级正身，可审计），`installer/_build_installer.py` staging 时装入 `runtime/runs/` 并加断言（缺一即 FAIL）；`md_server` 启动 `makedirs` 不清既有文件，升级覆盖语义=示例重置，自建 run 不受影响。验证——smoke 15/15 PASS（v2.5.3，1030 文件）；正式包 payload 内两文件与种子逐字节一致断言 PASS。
+- **更新日志文风整改**：v2.4.0–v2.5.2 各段清除人称叙事（约 45 处"定案/实测/两问"类转述）与禁用词（"顺带/坑"），改写为现象/根因/修法/验证纯陈述，事实要素未动；禁用词表扫描清零验证 PASS。
+
+---
+
+## v2.5.2（2026-10-23）
+
+**新增**
+
+- **导出关口：执行点未全部成功一律拦截**（HTML/打印/docx 三出口统一）：手动模式未运行、或任何模式下存在运行失败（err）的执行点时，导出/打印按钮直接拦截并 toast 说明——"无法导出：N 个执行点未运行 / N 个执行点运行失败（红色错误信息就在执行点旁，▶ 可重试）。请先运行并确认全部执行点结果后再导出（手动模式附状态栏「▶ 运行」指引）"。设计取舍（四方案取 D，否决 C"询问运行并导出"的理由：**运行错误或失败会被静默导出**——导出是定稿时刻，fail-closed 原文几乎必为失误）；全部成功才放行；无执行点的普通文档零影响。`_lrExportGate()` 挂在 `exportWithDialog`（docx/html 共用入口）与打印按钮 handler 开头；导出克隆的剥离兜底（按钮/错误块/待运行态不进产物）保留作深度防御。验证——`_test_lr_modes.py` 扩至 22/22 PASS：未运行拦截（零导出请求/零文件/带指引 toast）、有失败仍拦截（防静默导出错误）、删掉坏执行点行后全部成功放行（1 次导出请求）+ 产物无编辑态 UI；`_test_low_runner.py`、`_test_lr_alias.py`、`_test_real_export.py`、`_test_export_ui.py`、`_test_docx_indent_ui.py`、`_test_paper_layout.py`、`_test_img_features.py`、`_test_list_ui.py` 八套回归全 PASS（无执行点文档 gate 零影响实证）。另实测确认运行模式 localStorage 持久化：页面重载后 manual+7 秒完整恢复且面板 UI 还原。MD_SERVER_VERSION 79。
+
+---
+
+## v2.5.1（2026-10-23）
+
+**修复**
+
+- **手动模式四处缺陷**：① **"全部运行"卡死在"运行中…"**——根因：`_execRunPoint` 的**缓存命中分支直接 return 不续链**——实测场景"立即模式跑过（结果在缓存）→ 切手动 → 点全部运行 → 第一个执行点缓存命中 → 链从未推进 → 按钮永远运行中"（正则实测无问题，mod/fn/alias 全对；`from X import fn is 别名` 解析正常）。修法：缓存命中与 catch 分支均补 `if(runChainActive){ _chainNext(); }`（同步递归，深度=执行点数可控）。② **切手动后执行点不显示 ▶**——`markPendingRuns` 只选 `:not([data-done])`，之前跑过的执行点（成功/失败都算 done）选不中，既无 ▶ 也无重跑入口。修法：`markPendingRuns(resetAll)` 双态——切换到手动模式时 resetAll=true **重置全部执行点为待运行**（执行权归手动；结果缓存保留，点 ▶ 命中缓存瞬间完成无重复执行代价）；渲染收尾的增量路径仍只标新渲染的未完成执行点（**手动跑完的结果不能因编辑别处被重置**——全量重置会引入此副作用，双态正是为此）。③ **"全部运行"悬浮按钮融入界面**——从 body 下的 fixed 悬浮改为**状态栏（footer #status）内联按钮**。④ **按钮常驻**——手动模式即显示（原为"有未执行点才显示"，全部完成时失去重跑入口）。验证——`_test_lr_modes.py` 扩至 19/19 PASS，新增真实场景复现三断言：立即模式跑完全部后切手动→已 done 执行点重置待运行且 ▶ 重现、全部运行（缓存命中链）完成后按钮恢复可用不卡死、按钮位于 `#status` 内；`_test_low_runner.py`、`_test_lr_alias.py`、`_test_real_export.py`、`_test_list_ui.py` 回归 PASS。MD_SERVER_VERSION 78。
+
+---
+
+## v2.5.0（2026-10-23）
+
+**新增**
+
+- **low runner 三运行模式 + 手动执行 + 跟随错误块 + 缺包提醒**：① **运行模式**（run 界面顶部三选一互斥，localStorage 持久化，即改即生效）——**立即**（渲染收尾 0.4s 防抖自动跑，原行为）/ **等待 N 秒**（停止输入 N 秒后跑，N 填写默认 5，`scheduleRunPass` 按模式取防抖值）/ **手动**（不自动跑：执行点渲染为「待运行 ×× ▶」，`markPendingRuns`）；② **手动执行**——执行点旁 ▶ 按钮单点运行（`_execRunPoint` 抽出复用，事件委托 preview 冒泡）；**全部运行按钮放界面左下角**（工具栏已拥挤；仅手动模式且有未执行点时显示，链式逐个跑 `runChainActive`）；失败执行点显示 ▶ 重试；③ **跟随式错误块**——失败执行点紧跟红色错误信息（`⚠ run 不存在：××` / `⚠ 缺少包 numpy`），**废除 title 悬停**；④ **缺包检测与提醒**——`/api/runs` 保存后服务端静态检测 import 的三方包在执行环境（便携 py + pylibs）可用性（`_lr_check_deps`：子进程 find_spec + sys.stdlib_module_names 过滤标准库），run 界面代码区上方列出缺失包（红色）+ 安装命令（`pip install --target "...pylibs" 包名`，import 名≠pip 名经映射表 PIL→Pillow 等；便携包无 pip，自行安装，编译型包注明 cp311）；`/api/run` 失败响应带 `missing` 结构（错误串解析 `No module named`）。**导出剥离**：▶ 按钮/错误块/待运行占位是编辑态 UI，导出克隆必删；未运行/失败执行点导出原文（fail-closed）。验证——新增 `_test_lr_modes.py` 全链路 15/15 PASS：等待模式 2s 内不执行/2s 后执行（真实计时）、手动模式 3s 不自动跑+待运行态+▶ 按钮+左下角按钮、单点 ▶ 只跑该点（第二点保持待运行）、全部运行链式完成、失败跟随错误块（红色+无 title）、lr 界面模式选中读 localStorage/切等待秒数框启用/持久化、保存后依赖提醒（缺 numpy 红色+--target 命令）、/api/run missing 结构、导出剥离+fail-closed；`_test_low_runner.py`、`_test_lr_alias.py`、`_test_real_export.py`、`_test_export_ui.py`、`_test_list_ui.py` 回归 PASS。使用指南同步（管理界面/手动运行与错误显示章节）。MD_SERVER_VERSION 77。
+
+---
+
+## v2.4.10（2026-10-23）
+
+**修复**
+
+- **导出 docx 公式渲染四处缺陷（对照 HTML/KaTeX 渲染实测）**：docx 公式渲染异常（Word 能打开后暴露的渲染质量问题；定位手段——Word COM 导 PDF + pdftoppm 转图 + 图像分析，全链路本地闭环）。① **大运算符豆腐块**（∫∬∭∮∑∏ 显示为方块）——v2.4.7 的 `_style_omml` 给公式 run 写 `rFonts=Segoe UI`，覆盖了 Word 的数学正字法默认字体 Cambria Math——**数学字形只存在于 Cambria Math**，写任何字体名都导致大运算符缺字形。修法：`_style_omml` 只写字号（sz/szCs）、永不写 rFonts——字号改变时 Word 仍以 Cambria Math 缩放。② **全公式多层圆括号包裹 + 连分式结构崩溃**——`_tr` 的 mrow/mstyle/mpadded/mphantom 分组容器产出 `_mk("d", _mk("dPr"), ...)`：**空的 dPr 是默认括号 ( )**——MathML 的 mrow 只是分组语义（latex2mathml 大量产 mrow），全被画上括号。修法：分组容器产出显式 `begChr=""/endChr=""`（Word 的"括号-无"形态）；真括号由 `\left(` 的 mo 字符自身表达。③ **大运算符/limits 结构降级**——msubsup(∑…) 走普通 sSubSup（角标位置、普通字号）、`\iiint\limits_\Omega` 的 munder 走 acc（下限跑到**上方**）。修法：新增 `_NARY_OPS` 大运算符集与 nary 升级——munder/mover/munderover（\limits 语义）→ `m:nary` limLoc=undOvr（极限在正上/正下、字形放大）；msub/msup/msubsup（普通 _ ^）→ nary limLoc=subSup（角标式，行内惯例）。④ **nary 双画运算符**（`∏_{j=1}^{m_i} ∏` 双连乘）——munderover/msubsup 分支把 base 运算符又放进 nary 的 e（chr 已承载运算符本体）。修法：e 留空；删除与 nary 新分支重复的老 munderover 兜底块。验证——Word COM 导 PDF + 图像分析两轮：修复前逐条报告豆腐块/多层括号/连分式崩溃/根式指数错位；修复后**大运算符全部正常大号、∭ 下限 Ω 在正下方、∑∏ 极限在正上下、括号只剩数学必要括号、连分式/嵌套根式结构层次清晰、双运算符消除**，全篇 clean 达 Word 公式排版水平（剩余差异仅为 Cambria Math vs TeX 风格与微分 d 斜体的风格性差别）；`_test_docx_export.py` 40/40、`_test_real_export.py`、`_test_export_ui.py`、`_test_docx_indent_ui.py`、`_test_img_features.py` 全回归 PASS。MD_SERVER_VERSION 76。
+
+---
+
+## v2.4.9（2026-10-23）
+
+**修复**
+
+- **导出 docx Word 报"文件损坏"（真凶：mroot 根式的 m:deg 错放 radPr 内）**：v2.4.8 消除了 OMML 内 `-apple-system` 与 eastAsia 两嫌疑后实测仍损坏——本地以 PowerShell + Word.Application COM 构建决定性校验器（LibreOffice 容错能开、Word 严格拒绝，本机复现同报错），三层消融锁定：成分级（剥全部 oMath → 296 段 OPEN-OK，表格/图片/编号/sectPr 全无辜）→ 条目级（10 条公式逐条独留，唯第 7 条「嵌套根式 `\sqrt{1+...} = \sqrt[3]{...}`」OPEN-FAIL，LO 重写时恰将此条静默丢弃）→ 结构级（剥 radPr / 剥 deg 均 OK，剥 w:rPr / 剥 degHide 均 FAIL）。根因——`mathml_to_omml` 的 mroot 分支把 `m:deg`（度数）塞进了 `m:radPr` 内：OMML 规范 **m:deg 是 m:rad 的直接子元素（radPr, deg, e 三者平级，radPr 只允许 degHide）**，schema 违规致 Word 直接报损坏。此分支自 v2.1 写下从未被真实用例覆盖——真实文档首次出现 `\sqrt[3]`/`\sqrt[4]`/`\sqrt[5]`（全在第 7 条）才暴露。修法——mroot 产出 `_mk("rad", radPr(degHide off), deg(度数), e(体))` 平级结构。验证——Word COM 端到端：全公式集（9 条含原凶手条）重新导出 OPEN-OK（9 段）；`_test_docx_export.py` 新增 `test_docx_mroot_rad_structure`（rad=3、deg 平级、radPr 内无 deg、deg 在 e 前、`\!` 剥离重试 OMML）共 40/40 PASS；`_test_real_export.py`、`_test_export_ui.py`、`_test_docx_indent_ui.py`、`_test_img_features.py` 全回归 PASS。教训入库：Word COM 是本机最强 docx 校验器（DisplayAlerts=0 + ReadOnly Open + 异常捕获）；"LO 能开 Word 不能"的 schema 违规可用逐成分/逐条目/逐结构三层消融配合 COM 精确锁死。MD_SERVER_VERSION 75。
+
+---
+
+## v2.4.8（2026-10-23）
+
+**修复**
+
+- **导出 docx Word 报"文件损坏"**（v2.4.7 引入；LibreOffice 可正常打开——Word 对 OMML 内 rPr 校验严格于正文）：现象——含公式 docx 在 Word 中报文件损坏无法打开。定位链——v2.4.7 前公式 run 是裸的（无 rPr），Word 开过无恙；v2.4.7 为传字号/字体给每个公式 run 加了 `w:rPr`，且实测文件中 **441 个公式 run 的字体槽写入了 `-apple-system`**（前端 body 默认字体栈 `-apple-system,BlinkMacSystemFont,"Segoe UI",…` 的栈首项——CSS 系统标识符，不是字体名）+ OMML 内写 `w:eastAsia` 槽位（LibreOffice 规范化重写时恰好丢弃 eastAsia、字体替换为 Cambria Math——Word/LO 世界的 OMML 惯例形态即 ascii/hAnsi 双槽）。修法——新增 `_font_family()`（CSS 字体栈 → 第一个真实字体名，过滤 WebKit 系统标识符与泛型族，无真实名返回 None）；`_style_omml` 字体过过滤 + rFonts 只写 ascii/hAnsi 两槽位（对齐 Word 惯例，OMML 不写 eastAsia）；正文 `_apply_run_style` 同过过滤（`-apple-system` 写进正文 rFonts 自 v2.1.1 就有、历史证明不致损坏但渲染语义一直错误——字体槽里塞 CSS 标识符，Word 找不到该"字体"回落主题默认，正文与公式的字号字体传递修正不受影响）。排障插曲：测试 html 的 style 属性内嵌双引号（`"Segoe UI"` 未按真实载荷 escapeHtml 成 `&quot;`）被 lxml 属性截断，造成两轮假复现（style 只剩 `font-family:-apple-system,`，恰好掩盖 sz 缺失）——构造前端载荷测试必须模拟 escapeHtml 后形态。验证——真实载荷形态（`&quot;` 转义栈）单元实测：OMML rPr = `Segoe UI` 双槽 + sz/szCs=28 精确、`-apple-system` 全文零残留、正文 eastAsia 正常三槽；LibreOffice 端到端转换真实文件成功；`_test_docx_export.py` 35/35、`_test_real_export.py`、`_test_export_ui.py`、`_test_docx_indent_ui.py`、`_test_img_features.py` 全回归 PASS。诚实声明：本地无 Word 无法对单一成分终裁（-apple-system 与 eastAsia-in-OMML 两嫌疑已一并消除），重新导出验证；若仍损坏做消融定位。MD_SERVER_VERSION 74。
+
+---
+
+## v2.4.7（2026-10-23）
+
+**修复**
+
+- **导出 docx 四处公式/样式缺陷**：① **含 `\!` 的公式整条退化为 LaTeX 原文**——目标文档新增的重积分/连分式等 9 条公式实测 8 条正确转 OMML，唯 `f\!\left(x,y,z\right)`（负细空距 + 左定界符组合）让 latex2mathml 直接抛异常，`_append_omml` 兜底把整条按纯文本塞进 docx。修法：转换失败时剥离 `\!`（零宽符号 OMML 本就不需要）重试，仍失败才退化——实测 9/9 全部 OMML、无原文残留。② **中文字体从未生效**——`_apply_run_style` 的 `font.name` 只写 Word 的 ascii/hAnsi 槽位，中文走 eastAsia 槽位（python-docx 经典 CJK 行为）：面板设置的微软雅黑/黑体对汉字全部无效、回落 Word 主题默认。修法：`run._r.get_or_add_rPr().get_or_add_rFonts()` 补写 `w:eastAsia`（实测 SimHei 落进 eastAsia）。③ **公式字号/字体从不传递**——`_walk` 与 `_fill_inline` 的公式分支调 `_append_omml` 从不带样式节点（`ts_css` 参数进 `build_docx` 签名也从未被使用，死参数），面板"公式字号"对 docx 从未生效。修法：新增 `_style_omml`——公式元素的 inlineStylesInto 快照（px 字号/字体族）应用到 OMML 全部 run（`w:rPr` 按 Word 规则插在 `m:t` 前，sz 半磅，rFonts 三槽位含 eastAsia）；两处调用点传元素自身。④ **行内尾随文字样式出血**——`_fill_inline` 的 `child.tail` 用 `child`（前一个行内元素）当样式源，`<span style="红/粗">红字</span> 普通` 的" 普通"被染红加粗。修法：tail 在父容器里，样式用父容器节点（实测尾随文字无色无粗、红字保持红粗）。验证——单元级 9 条公式（真实文档原公式集）9/9 OMML 零退化、公式 run 带 rPr（sz=28=14pt、eastAsia 雅黑）、正文黑体进 eastAsia、tail 不出血且红字样式保持；`_test_docx_export.py` 35/35、`_test_real_export.py`、`_test_export_ui.py`、`_test_docx_indent_ui.py`、`_test_img_features.py`、`_test_lr_alias.py` 全回归 PASS（好的部分零触碰）。MD_SERVER_VERSION 73。
+ight)`（负细空距 + 左定界符组合）让 latex2mathml 直接抛异常，`_append_omml` 兜底把整条按纯文本塞进 docx。修法：转换失败时剥离 `\!`（零宽符号 OMML 本就不需要）重试，仍失败才退化——实测 9/9 全部 OMML、无原文残留。② **中文字体从未生效**——`_apply_run_style` 的 `font.name` 只写 Word 的 ascii/hAnsi 槽位，中文走 eastAsia 槽位（python-docx 经典 CJK 行为）：面板设置的微软雅黑/黑体对汉字全部无效、回落 Word 主题默认。修法：`run._r.get_or_add_rPr().get_or_add_rFonts()` 补写 `w:eastAsia`（实测 SimHei 落进 eastAsia）。③ **公式字号/字体从不传递**——`_walk` 与 `_fill_inline` 的公式分支调 `_append_omml` 从不带样式节点（`ts_css` 参数进 `build_docx` 签名也从未被使用，死参数），面板"公式字号"对 docx 从未生效。修法：新增 `_style_omml`——公式元素的 inlineStylesInto 快照（px 字号/字体族）应用到 OMML 全部 run（`w:rPr` 按 Word 规则插在 `m:t` 前，sz 半磅，rFonts 三槽位含 eastAsia）；两处调用点传元素自身。④ **行内尾随文字样式出血**——`_fill_inline` 的 `child.tail` 用 `child`（前一个行内元素）当样式源，`<span style="红/粗">红字</span> 普通` 的" 普通"被染红加粗。修法：tail 在父容器里，样式用父容器节点（实测尾随文字无色无粗、红字保持红粗）。验证——单元级 9 条公式（真实文档原公式集）9/9 OMML 零退化、公式 run 带 rPr（sz=28=14pt、eastAsia 雅黑）、正文黑体进 eastAsia、tail 不出血且红字样式保持；`_test_docx_export.py` 35/35、`_test_real_export.py`、`_test_export_ui.py`、`_test_docx_indent_ui.py`、`_test_img_features.py`、`_test_lr_alias.py` 全回归 PASS（好的部分零触碰）。MD_SERVER_VERSION 73。
+
+---
+## v2.4.6（2026-10-23）
+
+**修复**
+
+- **LLM 生成 run 的 D 类错误：语义角色误判**（count_words 案例）：现象——文档数据点 `a == ['nihao','外国人']`（词表）+ `b == 今天遇到一个外国人…`（被查文本），需求"从某段查询某词次数，词可轮询"，生成代码却拿 **kv 的键名 a/b 当关键词**统计、拿 **raw[0]**（数据点原文行"a == [...]"）当被查文本——键名不承载语义、raw 不是正文，角色完全错位。提示词（`_LR_LLM_SYS`）补**第 4 条【角色映射纪律】**：① kv 键只是名字（a/b/中文），绝不拿键名当数据用；② 不同键扮演不同角色时按**值的内容形态 + 需求**推断——JSON 列表形 = 多值参数（词表/轮询项），连续长文本 = 被处理对象；③ 代码顶部注释声明角色映射（如 `# 角色映射：a=关键词列表, b=被查文本`），人工查阅一眼核对；④ 严禁拿 raw[0] 当被处理文本；⑤ **严禁硬编码键名**取文本（写死 kv['text']——实际键名任意）：形态推断 + 排除法（列表形值=词表后，其余长文本值即被处理对象），动态遍历取值。连带三处细化：**列表字面量解析改 ast.literal_eval**（文档数据用单引号 `['nihao','外国人']`，json.loads 只认双引号必失败；ast 对单双引号 Python 字面量都认且安全，需 import ast）；**中文文本陷阱**（中文没有空格分词——词频统计用 text.count(词) 子串计数，不要 split() 分词再比对，实测 split 后整句成一个词永远匹配不上）；类型纪律明确"解析失败按原字符串处理，不要抛异常、不要直接返回错误放弃"。验证——真实 LLM 五轮迭代（原始需求+原数据点样例）：基线（改前）语义完全错位；加 D 类后角色映射正确但单引号解析炸；改 ast 后全对（`nihao 出现 0 次，外国人 出现 1 次`）；第四轮出现无 run 变体+硬编码 'text'（LLM 随机波动）→ 补防硬编码条款；第五轮语义正确。结论：D 类纪律显著提升正确率（角色映射稳定正确），LLM 随机波动（漏 import/漏 run 偶发）由设计内"生成→人工查阅→保存"流程兜底。MD_SERVER_VERSION 72。
+
+---
+## v2.4.5（2026-10-23）
+
+**新增**
+
+- **low runner 数据池别名（is）**：同一 run 多处调用各喂各的数据。**执行点**：`@@ MDE import calc is zzz` / `@@ MDE from calc import add is xxx`——别名规则统一（import 不搞默认别名特殊化：它同样可能多处调用，定案口径："没有别名都是公共池，正规都应该有别名"）；**数据点**：`@@ MDE_甲{b == 4}` / `@@ MDE__甲{...}` 别名池（隐性同规则），`@@ MDE_{}` / `@@ MDE__{}` 公共池。**分桶收集**（runPass）：数据点按 `data-dp-alias` 分桶，执行点按 `data-run-alias` 取对应桶喂 run——run 协议零变化（收到的仍是 {kv, raw}，只是内容按别名过滤，既有 run 代码不用改）；缓存 key = mod/fn + 别名 + 桶指纹（不同桶各自缓存）。跨行数据点别名同规则（块级收集正则同步）。**值的形态不预设**（确认为举例非需求）：值是字符串原文——`["词1","词2"]` 之类结构原样传递，代码 `json.loads` 自行解析，框架不特化。语法口径：别名合法字符与 run 名同（含中文）；`is` 后无名/别名非法字符 fail-closed 整体按普通文本。验证——新增 `_test_lr_alias.py` 全链路 7/7 PASS：同一 run 三处调用（is 甲=110（x10+隐性 w100）/ is 乙=20（from import 形式）/ 无 is=1（公共池 z））精确分桶互不串数据、显性别名数据点照常显示值、隐性照常不渲染、无页面错误；node 级解析 8 用例（公共池空别名/别名属性/import is/from is/两种无 is/跨行别名/隐性跨行别名/值含方括号原文传递）；`_test_low_runner.py`、`_test_real_export.py`、`_test_list_ui.py` 回归 PASS。使用指南数据点表格扩别名行 + 执行点章节重写别名规则 + 速查表更新。MD_SERVER_VERSION 71。
+
+---
+## v2.4.4（2026-10-23）
+
+**修复**
+
+- **run 库删除完全失效（两层 bug 叠加）**：现象——点击「删」弹确认框，确定后删不掉。根因两层——① `confirm()` 在 WebView2 内嵌窗口默认禁用脚本对话框：弹窗不显示、返回假值，删除逻辑从未执行（外置浏览器正常、内嵌窗口失效，故此前未暴露）；② 交互改二次点击确认后首度真发 DELETE 请求，暴露第二层：**DELETE 路由 404**——`/api/runs` 的 DELETE 分支写在 `do_POST` 里，而 BaseHTTPRequestHandler 按 method 分发，DELETE 请求找 `do_DELETE`（未定义）→ 404 HTML 错误页——该路由自 v2.4.0 写下起从未被任何路径执行过（删除按钮一直被 confirm 挡在前面），两层互为掩体。修法——① 删除交互改为**二次点击确认**：第一次点按钮变红显示「确认删」（3 秒超时自动复原，防误触残留），第二次点执行删除；confirm() 整体移除；② 新增 `do_DELETE` handler（含名称合法性校验，与 do_GET/do_POST 同构），do_POST 内死分支清除。验证——playwright 4/4 PASS：一次点击进入确认态且文件未删（红底「确认删」）、二次点击文件真删、列表项消失、无页面错误；`_test_low_runner.py` 全链路回归 PASS。MD_SERVER_VERSION 70。
+
+---
+## v2.4.3（2026-10-23）
+
+**修复（方向性纠偏）**
+
+- **low runner LLM 提示词三处原则性错误**：实测"四则运算"生成代码暴露三处，全部落实——① **三方库是正规能力被提示词劝退**（v2.4.2 写"三方包默认不可用…尽量给纯标准库替代"，与既有设计矛盾：执行环境 PYTHONPATH 已挂 runtime/pylibs、管理界面有依赖目录按钮、薄胶水路径本就以 numpy/pandas 为常规场景）——改为【三方库直接用】条款：numpy/pandas/matplotlib 视为常规可用、勿降级为标准库拼凑，其他三方包直接写并在顶部注释安装包名，ModuleNotFoundError 时按注释 pip --target 安装即可；② **场景特化**（提示词例子全是数值运算，文本粘合/词频统计场景无引导、类型纪律逼着文本也走 int/float 转换）——改场景中性：开头明确"任意数据加工按需求本身理解场景"，类型纪律分叉（数值运算先转换、文本加工保持字符串直接操作、勿做数字转换），多操作分函数的例子数值文本各半（sum_result / join_text / count_word）；③ **从文档执行点反推生成（方向颠倒）**——v2.4.2 曾把当前文档既有执行点注入提示词让 LLM 按其生成函数名，工作流心智模型定为：**run 库是源头**（管理界面起名保存→文档之后照库引用），文档里写的执行点可能是旧调用/别的 run，不能作为生成依据——usage 注入整体撤销。另：汇总版 run 的要求从"再附一个"硬化为"**必须**附上（不得空实现）"——实测 LLM 曾生成 `def run(data): return ''` 摆烂；作用域纪律补 Counter 在 collections（词频场景高频）。**前端配套（v2.4.2 遗留）**：run 失败原因挂执行点 title（悬停可见），缓存失败条目携带 `__fail` 原因——排障不再只看到 fail-closed 原文。**坏 run 修复**：`计算四则运算结果.py`（旧版 product 未定义 + 无顶层函数 + run 返回 dict repr）用新提示词重新生成并人工修正 run 汇总后覆盖——四个顶层函数（add/subtract/multiply/divide，int 转换+异常防御+中文错误）+ run 汇总拼接，实测 `@@ MDE import` → "加法 7，减法 -1，乘法 12，除法 0.75"、`from import add` → "加法 7"、`divide` → "除法 0.75"（文档引用按库里实际函数名书写）。验证——真实 LLM 三场景：文本场景（词频+合并）生成 count_apple_occurrences/merge_texts 顶层函数、无数字转换、单独调用返回"共出现 2 次"；numpy 场景直接 import 未降级；四则场景四函数+run 顶层齐全（run 空实现由人工查阅环节修正，即设计内"生成→查阅→保存"流程）；提示词断言 9/9（三方库直接用/装包指引/文本例子/文本不转数字/三类纪律/run-name）。MD_SERVER_VERSION 69。
+
+---
+## v2.4.1（2026-10-22）
+
+**修复/优化**
+
+- **low runner 管理界面三项体验修**：① **AI 生成的等待反馈不足**（现象描述"没有填入到代码编辑区也没有给名字"——实测链路完好：LLM 后端慢至 15s 时代码与建议名均已正确填入，问题是等待期只有一行小字"AI 生成中…"、按钮无变化，慢后端下形同死机）——状态栏改为"AI 生成中（约 10~60 秒，取决于后端），完成后自动填入代码框…"，AI 生成按钮加旋转加载动画（busy class：文字隐藏 + spinner），完成态着色（ok=主题蓝 / err=红）并提示"AI 未给名字，请手动命名"（建议名缺失时）；② **弹层样式与本体统一**（原为硬编码 #23272f 深色，不随主题、与排版面板非同族）——全部改走主题变量（--panel/--border/--bg/--code-bg/--text/--muted/--accent/--accent-soft/--shadow），新建/依赖目录/AI 生成按钮统一 .lr-btn 类（code-bg 底 + 主题边框 + 6px 圆角 + hover 边框高亮），保存按钮 .lr-btn.primary（accent 蓝底），侧栏列表项改 accent-soft 高亮 + 左缘 accent 指示条 + 删钮 hover 红，名称/代码/需求输入框统一 code-bg/bg 底 + focus 边框 accent——暗亮双主题实测计算样式与排版面板背景完全一致；③ **保存覆盖明确化**（run 库本就允许修改：点列表载入 → 改代码 → 保存即覆盖）——保存按钮随名称输入实时切换"保存入库/覆盖保存"，载入条目时状态栏提示"已载入 ××——修改后「保存」即覆盖"，保存成功区分"已保存/已覆盖"。验证——playwright 7 项体验断言全 PASS（同名按钮变"覆盖保存"/新名"保存入库"、生成中 busy+disabled+提示文案、真实 LLM 生成完成 code=239 字符填入+建议名+ok 着色、载入提示、无页面错误）；`_test_low_runner.py` 全链路回归 PASS；暗亮双主题计算样式断言（panel 背景 = ts 面板完全一致、按钮/代码框均主题变量）。MD_SERVER_VERSION 68。
+
+---
+## v2.4.0（2026-10-22）
+
+**新增**
+
+- **low runner：文档内参数值的自动化计算**。写作中声明数据点、调用 Python run 加工全文数据——计算/合并/筛选/统计/画图，不做系统级功能。**数据点**：`@@ MDE_{苹果 == 3}` 显性（显示 `==` 后的值）与 `@@ MDE__{…}` 隐性（不渲染、纯供数）；可嵌句中、可跨行（块级收集到 `}`）；`==` 为框架唯一分隔符（第一个切分进 kv），其他约定代码用 raw 自剥；无下划线/未闭合 fail-closed 字面显示。**执行点**：`@@ MDE import dark`（runs/dark.py 的 run(data)）与 `@@ MDE from utils import add`（一文件多函数）；渲染收尾自动 run pass——全文档收集数据点（位置无关）、逐执行点调 `/api/run`、结果按行内 markdown 渲染替换（`![](文件名)` 作图约定：服务端把 run_cache 相对路径重写为 /img 代理）；失败/超时 fail-closed 显示原文；会话内结果缓存（数据指纹为键，含失败缓存 null 防编辑期重试不存在的 run；库保存/删除清缓存重跑）。**服务端**：`/api/run`（便携 python 子进程，`-c` 驱动 importlib 动态导入、stdin 喂 {kv,raw} JSON、cwd=runtime/run_cache、PYTHONIOENCODING=utf-8、PYTHONPATH=runtime/pylibs、超时 10s、stdout 1MB、名称防路径穿越）；`/api/runs` 库管理（GET 列表/单条、POST 保存、DELETE——GET 在 do_GET、写操作在 do_POST，v1 曾整体误插 do_POST 致列表 404）；`/api/run-llm`（复用 llm_client：固定协议系统提示——def run(data) 签名、仅标准库、返回 str、matplotlib 存当前目录返回 ![]()、首行 # run-name: 建议名、附当前文档数据点样例）；`/api/open-dir`（依赖目录直达）。**管理界面**（工具栏「run」按钮弹层）：左侧库列表（加载/删除）+ 右侧命名/代码框 + 底部 AI 需求框（生成→人工查阅→保存入库）；三方包走「pip --target runtime/pylibs + 薄胶水」路径（编辑器只管通道不管装包，集成边界）。**导出**：隐性数据点导出克隆必删（docx 不认 display:none 会拉平显示）；执行点已替换则结果随导出。排障：lrOverlay 漏 `[hidden]{display:none !important}` 专属规则——ID 选择器 display:flex 盖过 UA 的 hidden 样式，全屏遮罩挡住工具栏致所有导出按钮点击超时（各 overlay 均有此规则，新增弹层必带）。验证——新增 `_test_low_runner.py` 全链路 12/12 PASS（自建自清测试 run）：数据点显性显示 3/2、隐性 span display:none 且内容为空、import 中文 run 名替换"5 个水果"、from 多函数合并 raw（含隐性数据点进 raw 的设计内行为）、fail-closed 原文、缓存数据不变零重调、管理界面列表加载与保存入库；node 级 parser 11 用例（显隐性/跨行/from/裸数据/未闭合/代码段保护/中文名/行内语法共存）；服务端 `_lr_run` 单测 9 项（求和/from 双函数/异常消息/不存在/路径穿越拒绝/超时 10.0s 精确/图路径重写存在的转 /img 缺失原样）；全回归 PASS（`_test_real_export.py`、`_test_export_ui.py`、`_test_list_ui.py`、`_test_img_features.py`、`_test_docx_indent_ui.py`、`_test_paper_layout.py`、`_test_indent_align.py`、`_test_indent_block.py`、`_test_docx_export.py` 35/35）。使用指南新增「low runner」章节 + 速查表 2 行。MD_SERVER_VERSION 67。
+
+---
 ## v2.3.0（2026-10-22）
 
 **新增**
@@ -22,7 +133,7 @@
 
 **修复**
 
-- **docx 列表编号退回 Word 默认悬挂布局（编号偏左 + 大间隔）**：现象——顶层无 `<<<` 的有序列表在列表整体缩进档下，预期 `□□1.□有序列表项一`（编号站在档位、后跟一个空格），实际 `1.□□□有序列表项一`（编号被拉到左侧、编号与文字大间隔）——Word 默认列表的样子。根因——python-docx 模板 ListNumber/ListBullet 的 abstractNum lvl0 自带悬挂布局三件套：`<w:ind w:left="360" w:hanging="360"/>`（悬挂底座）+ `<w:tabs><w:tab w:val="num" w:pos="360"/></w:tabs>`（制表位）+ 无 `w:suff`（默认编号后是制表符而非空格）；v2.2.4 的段落级防御 `firstLine=0` 脆弱——Word 保存规范化会**剥掉 0 值属性**（`w:firstLine="0"` 被丢弃），防御失效后段落只写 left、hanging 从编号定义继承，编号悬到 left−360、tab 跳 stop，视觉即用户所见。修法（正攻编号定义本身）——新增 `_prep_list_abstract`（`build_docx` 开头调用）：对 ListNumber 与 ListBullet 的 abstractNum lvl0 三件事——① 加 `<w:suff w:val="space"/>`：编号后一个空格紧贴文字（与预览 `list-style-position:inside` 完全同构）；② 删 lvl0 `w:ind`：去掉悬挂底座，编号起点 = 段落 left（段落全权定位，不再依赖 firstLine=0 防御，Word 剥不剥 0 值属性都无影响）；③ 删 lvl0 `w:tabs`：去掉悬挂布局的制表位干扰。本导出文档所有 li 段落均显式写 left_indent，改共享定义安全；hollow 空心圈克隆发生在 prep 之后自动继承干净定义；顺带抽出公共 `_style_abstract_num`（样式→编号定义查找），`_new_ol_num`/`_bullet_num` 复用去重。验证——单元级：顶层 ol（列表档 37.33px）输出编号定义 lvl0 `suff=space` 且无 ind/tabs 残留、段落 `w:left="560" w:firstLine="0"`（编号站在 560 档位 + 空格 + 文字，几何即 `□□1.□文字`）；`_test_docx_indent_ui.py` 新增"编号定义 inside 化"断言共 15/15 PASS；`_test_docx_export.py` 35/35、`_test_real_export.py`、`_test_export_ui.py`、`_test_paper_layout.py`、`_test_indent_align.py`、`_test_list_ui.py` 全 PASS。MD_SERVER_VERSION 65。
+- **docx 列表编号退回 Word 默认悬挂布局（编号偏左 + 大间隔）**：现象——顶层无 `<<<` 的有序列表在列表整体缩进档下，预期 `□□1.□有序列表项一`（编号站在档位、后跟一个空格），实际 `1.□□□有序列表项一`（编号被拉到左侧、编号与文字大间隔）——Word 默认列表的样子。根因——python-docx 模板 ListNumber/ListBullet 的 abstractNum lvl0 自带悬挂布局三件套：`<w:ind w:left="360" w:hanging="360"/>`（悬挂底座）+ `<w:tabs><w:tab w:val="num" w:pos="360"/></w:tabs>`（制表位）+ 无 `w:suff`（默认编号后是制表符而非空格）；v2.2.4 的段落级防御 `firstLine=0` 脆弱——Word 保存规范化会**剥掉 0 值属性**（`w:firstLine="0"` 被丢弃），防御失效后段落只写 left、hanging 从编号定义继承，编号悬到 left−360、tab 跳 stop，视觉即 Word 默认列表形态。修法（正攻编号定义本身）——新增 `_prep_list_abstract`（`build_docx` 开头调用）：对 ListNumber 与 ListBullet 的 abstractNum lvl0 三件事——① 加 `<w:suff w:val="space"/>`：编号后一个空格紧贴文字（与预览 `list-style-position:inside` 完全同构）；② 删 lvl0 `w:ind`：去掉悬挂底座，编号起点 = 段落 left（段落全权定位，不再依赖 firstLine=0 防御，Word 剥不剥 0 值属性都无影响）；③ 删 lvl0 `w:tabs`：去掉悬挂布局的制表位干扰。本导出文档所有 li 段落均显式写 left_indent，改共享定义安全；hollow 空心圈克隆发生在 prep 之后自动继承干净定义；抽出公共 `_style_abstract_num`（样式→编号定义查找），`_new_ol_num`/`_bullet_num` 复用去重。验证——单元级：顶层 ol（列表档 37.33px）输出编号定义 lvl0 `suff=space` 且无 ind/tabs 残留、段落 `w:left="560" w:firstLine="0"`（编号站在 560 档位 + 空格 + 文字，几何即 `□□1.□文字`）；`_test_docx_indent_ui.py` 新增"编号定义 inside 化"断言共 15/15 PASS；`_test_docx_export.py` 35/35、`_test_real_export.py`、`_test_export_ui.py`、`_test_paper_layout.py`、`_test_indent_align.py`、`_test_list_ui.py` 全 PASS。MD_SERVER_VERSION 65。
 
 ---
 ## v2.2.6（2026-10-22）
@@ -50,14 +161,14 @@
 
 **修复**
 
-- **docx 有序列表编号经 Word 保存后全局连号（接力/独立计数丢失）**：现象——导出的 docx 打开查看正常（各列表 1./2. 独立、接力列表显示 2.），但被 Word 打开并保存后再看，全文档 List Number 连续编号：有序列表项一=1、项二=2、`<<<` 演示段第一项=3、第二项=4，`<<<` 继承缩进同时脱节。根因——v2.2.2 的独立编号实现采用"克隆 abstractNum + 各自设 lvl0 w:start"——非标准做法：Word 保存时做编号规范化，把结构相同（仅 start 不同）的 abstractNum **合并为一个**并重接所有 numId（实测用户文件三个 numId 归一指向同一 abstractNum 且 start=1），Word 按 abstractNum 共享序列计数即全局连号。修法——改用 Word 原生"重新开始编号"机制：所有 ol 共享 List Number 的同一 abstractNum（格式定义），每个 ol 建独立 `w:num` 指向它并写 `<w:lvlOverride w:ilvl="0"><w:startOverride w:val="N"/>`（startOverride 必写含 1——num 不带 override 时 Word 视为"继续序列"并回主序列）；Word 按 num 实例分组计数、startOverride 定起始值，此结构即 Word 自身生成重启列表所用，打开/再保存语义不丢。验证——`_test_docx_indent_ui.py` 断言重写并 12/12 PASS（两个 ol 绑不同 numId、共享同一 abstractNum、so1=1/so2=2 精确）；单元级验证三 ol 输出 numId=10/11/12 全指 abs=7 且 startOverride=1/2/1；`_test_docx_export.py` 35/35、`_test_real_export.py`、`_test_export_ui.py`、`_test_paper_layout.py`、`_test_indent_align.py` 全 PASS；三个 UI 测试的 kill_stale 补 `_md_run.py` 匹配（shim 进程命令行不含 md_server.py，杀不到导致测试连旧代码服务——本轮排障曾再次被它误导）。MD_SERVER_VERSION 62。
+- **docx 有序列表编号经 Word 保存后全局连号（接力/独立计数丢失）**：现象——导出的 docx 打开查看正常（各列表 1./2. 独立、接力列表显示 2.），但被 Word 打开并保存后再看，全文档 List Number 连续编号：有序列表项一=1、项二=2、`<<<` 演示段第一项=3、第二项=4，`<<<` 继承缩进同时脱节。根因——v2.2.2 的独立编号实现采用"克隆 abstractNum + 各自设 lvl0 w:start"——非标准做法：Word 保存时做编号规范化，把结构相同（仅 start 不同）的 abstractNum **合并为一个**并重接所有 numId（实测真实文件三个 numId 归一指向同一 abstractNum 且 start=1），Word 按 abstractNum 共享序列计数即全局连号。修法——改用 Word 原生"重新开始编号"机制：所有 ol 共享 List Number 的同一 abstractNum（格式定义），每个 ol 建独立 `w:num` 指向它并写 `<w:lvlOverride w:ilvl="0"><w:startOverride w:val="N"/>`（startOverride 必写含 1——num 不带 override 时 Word 视为"继续序列"并回主序列）；Word 按 num 实例分组计数、startOverride 定起始值，此结构即 Word 自身生成重启列表所用，打开/再保存语义不丢。验证——`_test_docx_indent_ui.py` 断言重写并 12/12 PASS（两个 ol 绑不同 numId、共享同一 abstractNum、so1=1/so2=2 精确）；单元级验证三 ol 输出 numId=10/11/12 全指 abs=7 且 startOverride=1/2/1；`_test_docx_export.py` 35/35、`_test_real_export.py`、`_test_export_ui.py`、`_test_paper_layout.py`、`_test_indent_align.py` 全 PASS；三个 UI 测试的 kill_stale 补 `_md_run.py` 匹配（shim 进程命令行不含 md_server.py，杀不到导致测试连旧代码服务——本轮排障曾再次被它误导）。MD_SERVER_VERSION 62。
 
 ---
 ## v2.2.2（2026-10-22）
 
 **修复**
 
-- **导出 docx 缩进/对齐/有序列表编号四重问题（含嵌套列表文本双份）**：现象——① 导出的 Word 文档没有任何缩进（正文首行缩进、列表整体缩进、引用缩进、`<<<` 包围块阶梯全丢）；② 排版面板设置的对齐不生效；③ 有序列表编号不对：跨列表连续编号、接力起始值丢失（预览正确显示 `2.` 的列表在 docx 重计为 `1.`）；④ 嵌套列表文本双份——父列表项段落文本被拼接上嵌套子项全文（真实文档实测"单行回车不断序单行回车不断序"合一段 + 子项段落再一份）。根因四层——① 前端 `inlineStylesInto`（样式内联进克隆树供 docx 序列化）单遍按文档序"边量边剥"：处理父元素时先剥其 class/id，`#preview p`/`.markdown-body p` 等后代选择器即刻失配，子元素量出的全是无规则默认值（text-indent 0px 被过滤、字号回退 15px）；且 `getComputedStyle` 返回 **live 对象**，即使先量后存，第二遍剥掉祖先后再读"快照"也已回退默认——ts-style 排版规则从未真正进入导出链路（v2.1.1 构造测试用直接内联 style 的 body 掩盖了此缺陷）；② 服务端 `docx_export` 从不消费 text-indent/margin-left：v2.2.1 的 px 档位数据已在 bodyHtml 里但无人读取；③ 所有 List Number 段落共享样式绑定的同一 numId（Word 按 numId 分组计数）→ 跨列表连续编号且 `<ol start>` 丢失；另 CSSOM 序列化会把与 shorthand 一致的 margin-left 合并进 `margin:10.5px 0px 10.5px 37.33px`，解析侧需从 shorthand 提取；④ `_fill_inline` 对 li 的全部后代递归拉平（含嵌套 ul/ol 的文本），随后 `_walk` 又把嵌套列表完整处理一遍——嵌套内容双份。修法——① 前端改**两遍快照法**：第一遍全树遍历时即时把 computed 值提取为字符串数组（live 对象读值即定格），第二遍统一写入 style+剥 class/id；② 服务端 `_walk` 全分支消费 px 缩进：p 分支 text-indent→`first_line_indent`（悬挂组合 padding-left+负 text-indent→`left_indent`+负首行）、ol/ul 分支 margin-left（含 shorthand 提取）→li `left_indent`、blockquote margin-left→`left_indent`（无档回落 0.3in）、`.ind-blk` div margin-left 进 ctx 块级缩进栈逐层叠加（嵌套列表/引用内段落统一消费）、代码块叠加；③ `_new_ol_num`：每个 ol 克隆 List Number 的 abstractNum 为独立定义并设 lvl0 `w:start` 为起始值（`<ol start="2">` 接力语义），段落 numPr 绑定新 numId；④ `_fill_inline` 增加 `_SKIP_INLINE_TAGS`（ul/ol/table/blockquote/pre/div）块级子元素跳过，不拉平由结构分支处理。验证——新增 `_test_docx_indent_ui.py`（playwright 端到端：真实排版面板设置 14pt/首行缩进2/列表缩进2/引用缩进2/居中 + 接力列表 + `<<<` + 引用；quote 档显式设置——依赖 ui-state 恢复会被诊断脚本残留状态重置）10/10 PASS：段落 `w:firstLine="560"`（37.33px×0.75=28pt）、`w:jc="center"` 生效（left/right/justify 走同一 `_align` 路径）、两个 ol 绑定不同 numId 且接力 ol 的 abstract lvl0 `w:start="2"`、列表 li `w:left="560"`、块内列表=块边界+档、引用 560；真实文档"docs/MDEditor 使用指南.md"导出逐段 dump 验证嵌套列表父 450/子 900 各归各位无拼接；`_test_docx_export.py` 35/35、`_test_real_export.py`、`_test_export_ui.py`、`_test_paper_layout.py`、`_test_indent_align.py`、`_test_img_export.py` 全 PASS。MD_SERVER_VERSION 61（服务端导出模块行为变更，依换代机制重启生效；嵌套双份修复后曾漏 bump——版本停在 60 致自愈换代未触发、用户服务内存仍旧代码，表现为"有序列表项一=1、项二=2、第一项=3、第二项=4"的样式级全局连续编号与继承缩进脱节；bump 61 后随重启恢复。真实文档磁盘代码实测演示段输出正确：正文模式 left=450（继承前段正文档）、第一项/第二项 num=12 start=1 → Word 显示 1./2.、列表 900=块边界+档、再进一层 1350 三层阶梯）。
+- **导出 docx 缩进/对齐/有序列表编号四重问题（含嵌套列表文本双份）**：现象——① 导出的 Word 文档没有任何缩进（正文首行缩进、列表整体缩进、引用缩进、`<<<` 包围块阶梯全丢）；② 排版面板设置的对齐不生效；③ 有序列表编号不对：跨列表连续编号、接力起始值丢失（预览正确显示 `2.` 的列表在 docx 重计为 `1.`）；④ 嵌套列表文本双份——父列表项段落文本被拼接上嵌套子项全文（真实文档实测"单行回车不断序单行回车不断序"合一段 + 子项段落再一份）。根因四层——① 前端 `inlineStylesInto`（样式内联进克隆树供 docx 序列化）单遍按文档序"边量边剥"：处理父元素时先剥其 class/id，`#preview p`/`.markdown-body p` 等后代选择器即刻失配，子元素量出的全是无规则默认值（text-indent 0px 被过滤、字号回退 15px）；且 `getComputedStyle` 返回 **live 对象**，即使先量后存，第二遍剥掉祖先后再读"快照"也已回退默认——ts-style 排版规则从未真正进入导出链路（v2.1.1 构造测试用直接内联 style 的 body 掩盖了此缺陷）；② 服务端 `docx_export` 从不消费 text-indent/margin-left：v2.2.1 的 px 档位数据已在 bodyHtml 里但无人读取；③ 所有 List Number 段落共享样式绑定的同一 numId（Word 按 numId 分组计数）→ 跨列表连续编号且 `<ol start>` 丢失；另 CSSOM 序列化会把与 shorthand 一致的 margin-left 合并进 `margin:10.5px 0px 10.5px 37.33px`，解析侧需从 shorthand 提取；④ `_fill_inline` 对 li 的全部后代递归拉平（含嵌套 ul/ol 的文本），随后 `_walk` 又把嵌套列表完整处理一遍——嵌套内容双份。修法——① 前端改**两遍快照法**：第一遍全树遍历时即时把 computed 值提取为字符串数组（live 对象读值即定格），第二遍统一写入 style+剥 class/id；② 服务端 `_walk` 全分支消费 px 缩进：p 分支 text-indent→`first_line_indent`（悬挂组合 padding-left+负 text-indent→`left_indent`+负首行）、ol/ul 分支 margin-left（含 shorthand 提取）→li `left_indent`、blockquote margin-left→`left_indent`（无档回落 0.3in）、`.ind-blk` div margin-left 进 ctx 块级缩进栈逐层叠加（嵌套列表/引用内段落统一消费）、代码块叠加；③ `_new_ol_num`：每个 ol 克隆 List Number 的 abstractNum 为独立定义并设 lvl0 `w:start` 为起始值（`<ol start="2">` 接力语义），段落 numPr 绑定新 numId；④ `_fill_inline` 增加 `_SKIP_INLINE_TAGS`（ul/ol/table/blockquote/pre/div）块级子元素跳过，不拉平由结构分支处理。验证——新增 `_test_docx_indent_ui.py`（playwright 端到端：真实排版面板设置 14pt/首行缩进2/列表缩进2/引用缩进2/居中 + 接力列表 + `<<<` + 引用；quote 档显式设置——依赖 ui-state 恢复会被诊断脚本残留状态重置）10/10 PASS：段落 `w:firstLine="560"`（37.33px×0.75=28pt）、`w:jc="center"` 生效（left/right/justify 走同一 `_align` 路径）、两个 ol 绑定不同 numId 且接力 ol 的 abstract lvl0 `w:start="2"`、列表 li `w:left="560"`、块内列表=块边界+档、引用 560；真实文档"docs/MDEditor 使用指南.md"导出逐段 dump 验证嵌套列表父 450/子 900 各归各位无拼接；`_test_docx_export.py` 35/35、`_test_real_export.py`、`_test_export_ui.py`、`_test_paper_layout.py`、`_test_indent_align.py`、`_test_img_export.py` 全 PASS。MD_SERVER_VERSION 61（服务端导出模块行为变更，依换代机制重启生效；嵌套双份修复后曾漏 bump——版本停在 60 致自愈换代未触发、运行中服务内存仍旧代码，表现为"有序列表项一=1、项二=2、第一项=3、第二项=4"的样式级全局连续编号与继承缩进脱节；bump 61 后随重启恢复。真实文档磁盘代码实测演示段输出正确：正文模式 left=450（继承前段正文档）、第一项/第二项 num=12 start=1 → Word 显示 1./2.、列表 900=块边界+档、再进一层 1350 三层阶梯）。
 
 ---
 
@@ -83,7 +194,7 @@
 
 **修复**
 
-- **导出 HTML/打印里代码作图显示为黑点（图片加载失败）**：现象——导出的独立 HTML 用浏览器打开，部分图表位置只显示破裂图片图标（黑点）；打印版同样。根因——`build_standalone_html` 的相对路径重写正则 `src="(?!https?:|file:|/|#)..."` 未排除 `data:` 协议，图表栅格化图的 `data:image/png;base64,...` src 被当相对路径拼上文档目录前缀，产出 `file:///docs/data:image/png;base64,...` 垃圾 src（同一 src 里的 base64 冒号等字符使其彻底不可解析）；内嵌 base64 图片同理遭殃。修法——排除清单加入 `data:`。打印版（`build_paged_html`）图片 src 保持 `/img` 代理原样：打印版由系统浏览器打开的是服务端 http URL（`/static/document.paged.html`），http 页面按浏览器安全策略禁止加载 `file:///` 本地资源（曾误改为 file:/// 重写致真实图片全挂——图表因 data: 内嵌幸存，恰好造成"只有真实图挂"的假象）；`/img` 代理同源 http 可用，用户打印/存 PDF 时浏览器渲染完成的最终产物自带图片像素，页面无需离线可开。验证——新增 `_test_real_export.py`（用户真实文档"docs/MDEditor 使用指南.md"：相对路径图片 ×3、`{40}` 参数图、mermaid×2/dot/wavedrom/vega 图表 ×5、带空格目录名）16/16 PASS：浏览器打开导出 HTML 实测 5 图表全部正常加载显示、普通图片 file:/// 路径真实存在；打印版以服务端 http URL 打开实测 3 张真实图片经 `/img` 代理全部加载成功。
+- **导出 HTML/打印里代码作图显示为黑点（图片加载失败）**：现象——导出的独立 HTML 用浏览器打开，部分图表位置只显示破裂图片图标（黑点）；打印版同样。根因——`build_standalone_html` 的相对路径重写正则 `src="(?!https?:|file:|/|#)..."` 未排除 `data:` 协议，图表栅格化图的 `data:image/png;base64,...` src 被当相对路径拼上文档目录前缀，产出 `file:///docs/data:image/png;base64,...` 垃圾 src（同一 src 里的 base64 冒号等字符使其彻底不可解析）；内嵌 base64 图片同理遭殃。修法——排除清单加入 `data:`。打印版（`build_paged_html`）图片 src 保持 `/img` 代理原样：打印版由系统浏览器打开的是服务端 http URL（`/static/document.paged.html`），http 页面按浏览器安全策略禁止加载 `file:///` 本地资源（曾误改为 file:/// 重写致真实图片全挂——图表因 data: 内嵌幸存，恰好造成"只有真实图挂"的假象）；`/img` 代理同源 http 可用，打印/存 PDF 时浏览器渲染完成的最终产物自带图片像素，页面无需离线可开。验证——新增 `_test_real_export.py`（真实文档"docs/MDEditor 使用指南.md"：相对路径图片 ×3、`{40}` 参数图、mermaid×2/dot/wavedrom/vega 图表 ×5、带空格目录名）16/16 PASS：浏览器打开导出 HTML 实测 5 图表全部正常加载显示、普通图片 file:/// 路径真实存在；打印版以服务端 http URL 打开实测 3 张真实图片经 `/img` 代理全部加载成功。
 - **docx 图表栅格化失败回落为 `[图表]` 文本占位**：现象——docx 里 wavedrom 与 vega 图表缺失，出现 `[图表]` 文本占位（另 vega 图后跟 3 处 `[图表]`）。根因有二：① `_rasterOne` 栅格化成功后用 `diagEl.insertBefore(im,svg)` 插回，假设 svg 的父节点就是 `.diagram` 容器——mermaid/dot 确实如此，但 wavedrom 的 svg 套在 `div#wd-N` 里、vega 的套在 `.chart-wrapper` 里，跨层级 `insertBefore` 抛 `NotFoundError` 被 catch 吞掉，静默回落原 SVG；② vega-embed 自带 actions 工具栏（`details>summary` 折叠块，summary 含箭头图标 svg，实测该 details 无 class），其小图标 svg 混入导出产物，docx 侧按 svg 分支输出 `[图表]` 占位、HTML 侧残留无样式图标。修法——① 插回改为按 svg 真实父节点操作（`svg.parentNode.insertBefore/removeChild`），不假设层级；栅格化失败路径补 console.warn（此次排障靠它 3 分钟定位）；② 导出克隆时删除 `.vega-actions` 与图表容器内全部 `details`（仅克隆树，渲染预览不受影响）。验证——`_test_real_export.py` docx 侧 `inline_shapes=8`（3 普通图 + 5 图表全量嵌入，含 240px→2.50in、vega 198px→2.06in）、无 `[图表]`/`[图片:]` 占位、`{40}`→2.40in=版心×0.4；`_test_docx_export.py` 35/35、`_test_export_ui.py` 全 PASS、`_test_img_export.py`、`_test_list_ui.py` 回归 PASS。MD_SERVER_VERSION 58。
 
 ---
@@ -119,7 +230,7 @@
 
 - **列表/引用「整体缩进」应用即丢（守卫白名单缺 block）**：现象——面板选「整体缩进」点应用，重开面板回到「无」（字符数保留），缩进始终设置不上。根因——tsApply 收集守卫 `m!=='none'&&m!=='first'&&m!=='hang'` 沿用旧版白名单，`block` 不在名单内被兜底吃成 `none`；内存 tsCfg 同步被污染，存储层随之写丢。修法——白名单补 `block`（p 的下拉无 block 选项、quote/li 无 first/hang 选项，放宽无副作用）。验证——新增 `_test_ind_apply.py`（真实服务 + playwright 面板操作）：应用后 localStorage `indent.li/quote.mode==='block'`、重开面板下拉与字符数回读一致、预览 ol 计算样式 `margin-left=2em/padding-left=0/inside`、`window.__IND_EM__` 桥接值 2/2，12/12 PASS。
 
-- **UI 状态服务端持久化（WebView2 localStorage 从未落盘根治）**：现象——排版设置点应用后关闭整个窗口重开，全部恢复默认（实测实锤）。根因——取证 `runtime/userdata` 的 Local Storage leveldb：MANIFEST 与日志文件自安装日起零增长、`md-editor-typeset-v3` 键在磁盘上不存在——WebView2 内嵌窗口下 localStorage 只活在内存，pywebview 关窗进程终止使 Chromium 异步刷盘从未发生，此前一切 localStorage 状态（排版/防丢稿草稿/主题/分屏/跟随/最近文件）实际均未持久化。修法——按 SSOT 原则把 UI 状态单一来源迁至 `runtime/ui-settings.json`：md_server 新增 `GET/POST /api/ui-settings`（全量读 / 增量合并写，值一律字符串原样存取，原子写 tmp+replace，线程锁防多窗口竞态，`MD_SERVER_VERSION` 54→55 触发自愈换代）；前端启动时同步 XHR 全量拉取逐键回放进 localStorage（后续既有代码照旧读 LS，零侵入），服务端为空而 LS 有值（老用户首启）整包种子上云；所有 localStorage 写入收敛到 `lsSet/lsRemove` 包装（300ms 节流合并 POST，同步 XHR 仅启动一次）。验证——`_test_persist.py` 改造（独立端口 18767，绝不复用 18766 防误杀用户实例）：应用后服务端文件出现全部键值、全新 context（LS 空=模拟关窗）重开后恢复引导回放、面板四项回填一致、重启后 ol 渲染样式保持，12/12 PASS；`_test_indent_block.py` 10/10、`_test_list_parse.py` 20/20、`_test_ind_apply.py`、`_test_img_width.py` 6/6、`_test_escape.py` 11/11 回归 PASS。
+- **UI 状态服务端持久化（WebView2 localStorage 从未落盘根治）**：现象——排版设置点应用后关闭整个窗口重开，全部恢复默认（实测实锤）。根因——取证 `runtime/userdata` 的 Local Storage leveldb：MANIFEST 与日志文件自安装日起零增长、`md-editor-typeset-v3` 键在磁盘上不存在——WebView2 内嵌窗口下 localStorage 只活在内存，pywebview 关窗进程终止使 Chromium 异步刷盘从未发生，此前一切 localStorage 状态（排版/防丢稿草稿/主题/分屏/跟随/最近文件）实际均未持久化。修法——按 SSOT 原则把 UI 状态单一来源迁至 `runtime/ui-settings.json`：md_server 新增 `GET/POST /api/ui-settings`（全量读 / 增量合并写，值一律字符串原样存取，原子写 tmp+replace，线程锁防多窗口竞态，`MD_SERVER_VERSION` 54→55 触发自愈换代）；前端启动时同步 XHR 全量拉取逐键回放进 localStorage（后续既有代码照旧读 LS，零侵入），服务端为空而 LS 有值（老用户首启）整包种子上云；所有 localStorage 写入收敛到 `lsSet/lsRemove` 包装（300ms 节流合并 POST，同步 XHR 仅启动一次）。验证——`_test_persist.py` 改造（独立端口 18767，绝不复用 18766 防误杀运行中实例）：应用后服务端文件出现全部键值、全新 context（LS 空=模拟关窗）重开后恢复引导回放、面板四项回填一致、重启后 ol 渲染样式保持，12/12 PASS；`_test_indent_block.py` 10/10、`_test_list_parse.py` 20/20、`_test_ind_apply.py`、`_test_img_width.py` 6/6、`_test_escape.py` 11/11 回归 PASS。
 
 - **改排版后 `<<<` 包围块不重渲（块哈希短路吞掉非源文本变更）**：现象——排版面板改缩进档点应用，包围块 margin 不更新，需在编辑区敲回车/删除才生效。根因——`render()` 按 `data-h`（源文本哈希）短路逐块跳过，而缩进包围块的 `margin-left` 是解析期内联写入的，排版变化不改变源文本哈希，所有块全被跳过；CSS 规则类排版（字体/对齐/文本缩进）即时生效而内联 margin 类（包围块）永远滞后。修法——`render(force)`：force 时跳过哈希短路全量重渲，`tsApply` 调 `render(true)`。验证——`_test_persist.py` 断言：不碰编辑器，排版 `p` 档字符 2→3 应用后 `.ind-blk` 内联 margin 即时 2em→3em PASS。
 
@@ -187,7 +298,7 @@
 
 **修复**
 
-- **有序列表编号改为"接力"语义（v1.11.2 语义修正）**：现象——软回车混排 `1.`/`-`/`-` 后再输入 `1.` 或 `2.`，v1.11.2 按输入数字渲染（输入 `1.` 显示 1.），用户期望显示 2.（接续区域内有序项计数）。根因——v1.11.2 采用 CommonMark 语义（`<ol start=N>` 尊重输入数字），与本项目"显示编号由编辑器统一管理"的定位不符；另用户截图反馈的"混排仍连续编号"系编辑器页面未刷新（页面 JS 为修复前版本，服务端 HTML 每请求读盘、无缓存，刷新即新）。修法——`parseList` 增加 `seq` 参数（编号区域内已出现的有序项数，由块循环跨列表维护）：显示编号 = 区域内第 N 个有序项，**输入数字仅是语法标记不参与显示**；无序项不占编号；空行/标题/引用/表格/代码块/水平线/段落均打断区域并清零重计；嵌套子列表为独立编号区域（seq 从 0 起）。验证：`_test_list_parse.py` 18/18 PASS（含用户四例：混排切分、空行分隔、空行后 `2.` 显示 1.、软回车后 `1.`/`2.` 均显示 2. 3.、多段交替接力、输入数字无视、嵌套有序独立、标题打断重置）；新增 `_test_list_ui.py`（playwright 真实浏览器）3/3 PASS——逐行软回车敲入实测 preview DOM 为 `ol / ul / ol[start=2]`、空行后 `2.` 重置为 1.、无页面错误；表格 8/8、smd 33/33、keepalive、routes 回归全 PASS。
+- **有序列表编号改为"接力"语义（v1.11.2 语义修正）**：现象——软回车混排 `1.`/`-`/`-` 后再输入 `1.` 或 `2.`，v1.11.2 按输入数字渲染（输入 `1.` 显示 1.），预期显示 2.（接续区域内有序项计数）。根因——v1.11.2 采用 CommonMark 语义（`<ol start=N>` 尊重输入数字），与本项目"显示编号由编辑器统一管理"的定位不符；另排查确认："混排仍连续编号"系编辑器页面未刷新（页面 JS 为修复前版本，服务端 HTML 每请求读盘、无缓存，刷新即新）。修法——`parseList` 增加 `seq` 参数（编号区域内已出现的有序项数，由块循环跨列表维护）：显示编号 = 区域内第 N 个有序项，**输入数字仅是语法标记不参与显示**；无序项不占编号；空行/标题/引用/表格/代码块/水平线/段落均打断区域并清零重计；嵌套子列表为独立编号区域（seq 从 0 起）。验证：`_test_list_parse.py` 18/18 PASS（含四例：混排切分、空行分隔、空行后 `2.` 显示 1.、软回车后 `1.`/`2.` 均显示 2. 3.、多段交替接力、输入数字无视、嵌套有序独立、标题打断重置）；新增 `_test_list_ui.py`（playwright 真实浏览器）3/3 PASS——逐行软回车敲入实测 preview DOM 为 `ol / ul / ol[start=2]`、空行后 `2.` 重置为 1.、无页面错误；表格 8/8、smd 33/33、keepalive、routes 回归全 PASS。
 
 ---
 
@@ -211,7 +322,7 @@
 
 **变更**
 
-- **启动提速（服务就绪 1.5~2.5s → 0.4~0.8s，四项优化 + 一项根因修复）**：现象——双击 `.md` 到页面可编辑体感 3~5s。根因（实测定位）——① 便携 Python 为 embeddable 发行版（`._pth` 不注入脚本目录），服务以主脚本模式 `python md_server.py` 启动，主脚本永不命中 `__pycache__` 的 .pyc，每次冷启动现场编译 85KB 源码耗时 ~1.05s；② 本机对未监听端口为 drop 非 RST，`md_launch.server_version` 探测超时 1.5s / `md_app.service_alive` 超时 2s，服务就绪前发出的探测请求被挂满超时才失败，就绪感知被额外拖慢 1~2s；③ `close_splash` 主线程同步等待启动画面淡出（0.9s）；④ `wait_version` 轮询粒度 0.25s、`/open` 开浏览器固定延迟 0.25s；⑤ `katex.min.js`（270KB）同步加载阻塞 HTML 解析。修法——① 新增 `_md_run.py` 启动 shim（手工注入脚本目录后 `import md_server` 走 .pyc 缓存再 `main()`，`python md_server.py` 直跑路径保留不变），`md_launch.start_server` 与 `md_app.ensure_service` 均改走 shim；② 探测超时统一收紧到 0.3s；③ `close_splash` 的兜底终止移入后台线程，淡出动画不再阻塞开浏览器；④ `wait_version` 改 `time.time()` 计时 + 0.05s 粒度（顺带消除原 `t += 0.25` 计数与 sleep 不同步的隐患），`/open` Timer 0.25→0.05s；⑤ `katex.min.js` 加 `defer`（前端本有「katex 未到则轮询补渲染」兜底，语义不变）。配套：`kill_stale_services`（md_launch）与 `md_stop.cmd` 的进程匹配规则同步兼容 `md_server.py` 与 `_md_run.py` 两种命令行，自愈换代与手动停止不受启动方式影响；`MD_SERVER_VERSION` 50→51。验证：`_test_startup_perf.py` 12/12 PASS——shim 冷启动（无 pyc）1.1s 可就绪并生成 .pyc、warm 启动中位 0.77s、launcher 真实链路（`start_server`→`wait_version`）三轮 0.38/0.72/0.36s、直跑 `md_server.py` 路径不破坏、进程命令行同时命中 launcher 换代杀进程规则与 md_stop.cmd 过滤规则、页面携带 defer 属性的 katex 引用；回归 keepalive 11/11、routes、RAG 19/19、RAG UI 13/13、LLM UI 17/17 全 PASS。
+- **启动提速（服务就绪 1.5~2.5s → 0.4~0.8s，四项优化 + 一项根因修复）**：现象——双击 `.md` 到页面可编辑体感 3~5s。根因（实测定位）——① 便携 Python 为 embeddable 发行版（`._pth` 不注入脚本目录），服务以主脚本模式 `python md_server.py` 启动，主脚本永不命中 `__pycache__` 的 .pyc，每次冷启动现场编译 85KB 源码耗时 ~1.05s；② 本机对未监听端口为 drop 非 RST，`md_launch.server_version` 探测超时 1.5s / `md_app.service_alive` 超时 2s，服务就绪前发出的探测请求被挂满超时才失败，就绪感知被额外拖慢 1~2s；③ `close_splash` 主线程同步等待启动画面淡出（0.9s）；④ `wait_version` 轮询粒度 0.25s、`/open` 开浏览器固定延迟 0.25s；⑤ `katex.min.js`（270KB）同步加载阻塞 HTML 解析。修法——① 新增 `_md_run.py` 启动 shim（手工注入脚本目录后 `import md_server` 走 .pyc 缓存再 `main()`，`python md_server.py` 直跑路径保留不变），`md_launch.start_server` 与 `md_app.ensure_service` 均改走 shim；② 探测超时统一收紧到 0.3s；③ `close_splash` 的兜底终止移入后台线程，淡出动画不再阻塞开浏览器；④ `wait_version` 改 `time.time()` 计时 + 0.05s 粒度（消除原 `t += 0.25` 计数与 sleep 不同步的隐患），`/open` Timer 0.25→0.05s；⑤ `katex.min.js` 加 `defer`（前端本有「katex 未到则轮询补渲染」兜底，语义不变）。配套：`kill_stale_services`（md_launch）与 `md_stop.cmd` 的进程匹配规则同步兼容 `md_server.py` 与 `_md_run.py` 两种命令行，自愈换代与手动停止不受启动方式影响；`MD_SERVER_VERSION` 50→51。验证：`_test_startup_perf.py` 12/12 PASS——shim 冷启动（无 pyc）1.1s 可就绪并生成 .pyc、warm 启动中位 0.77s、launcher 真实链路（`start_server`→`wait_version`）三轮 0.38/0.72/0.36s、直跑 `md_server.py` 路径不破坏、进程命令行同时命中 launcher 换代杀进程规则与 md_stop.cmd 过滤规则、页面携带 defer 属性的 katex 引用；回归 keepalive 11/11、routes、RAG 19/19、RAG UI 13/13、LLM UI 17/17 全 PASS。
 
 ---
 
@@ -219,12 +330,12 @@
 
 **变更**
 
-- **RAG 默认路径改为空**：现象——`rag-assistant` 路径默认值写死为开发机绝对路径，分发给任何其他用户都是无效配置。根因——默认值应表达"未配置"而非"某台机器的布局"。修法——`RAG_DEFAULTS.path` 默认空字符串，前端输入框保留示例路径 placeholder，空路径时启动按钮报「路径无效或不存在」指引填写。验证：`_test_rag.py` 回归 PASS（默认值断言、空路径拒绝）。
+- **RAG 默认路径改为空**：现象——`rag-assistant` 路径默认值写死为开发机绝对路径，分发到任何其他机器都是无效配置。根因——默认值应表达"未配置"而非"某台机器的布局"。修法——`RAG_DEFAULTS.path` 默认空字符串，前端输入框保留示例路径 placeholder，空路径时启动按钮报「路径无效或不存在」指引填写。验证：`_test_rag.py` 回归 PASS（默认值断言、空路径拒绝）。
 
 **新增**
 
 - **LLM OpenAI 兼容后端（外部 API）**：现象——润色/智能备注只能走 LM Studio / Ollama 本地推理，无法调用 OpenAI、DeepSeek、硅基流动等云端 OpenAI 兼容 API。修法——`llm_client.py` 加 `openai` 后端：默认 `https://api.openai.com/v1`，base_url 填根地址自动补 `/v1`（两种填法都通）；`api_key` 字段（Bearer 头），无 key / 未选模型在调用前明确报错而非发出必败请求；模型列表走 `GET /v1/models`。`md_server.py` 配置归一白名单加 `openai`、api_key 字符串归一；润色/解释路由的"需先选模型"检查扩展到 openai 后端。前端 backend 下拉加「OpenAI 兼容（外部 API）」、API Key 输入行（openai 时显示）、地址 placeholder 与默认值随 backend 切换。验证：`_test_llm_websearch.py` 34/34 PASS（URL 拼接含 /v1 自动补与防重复、auth 头、无 key/无模型前置校验、lmstudio/ollama 回归、归一白名单、配置往返、路由校验）；`_test_llm_ui.py` 17/17 PASS（key 行显隐、placeholder 联动、无 key 时模型拉取被拦且提示明确、保存落盘与重开回读）。
-- **联网查询（润色 / AI 解释可选网络资料注入）**：现象——润色/解释仅凭模型自身知识，无法参考时效性网络信息。修法——新增 `web_search.py`（配置驱动，模式取自 rag-assistant 的 search.py，按本项目零依赖约束全部用标准库 urllib 重写）：5 个搜索源 DuckDuckGo（免费无 key）/ Tavily / Google Custom Search / Bing / 自定义 API（URL 用 `{q}` `{key}` 占位），返回统一 `{results:[{title,url,snippet}],success,error}`，key 用户自填；`md_server.py` 在 llm 配置内加 `web_search` 子段（enabled/backend/各 key/custom_url/max_results 1~10，脏数据归一回默认），润色与 AI 解释路由在开关开启时先检索选中文本（截断 200 字）、结果拼【网络资料】段进 system prompt 再交 LLM；搜索失败或无结果**静默降级**为纯模型路径并在响应带 `web_search: "degraded"` 标志，前端 toast 提示「联网搜索失败，已用纯模型结果」，成功注入 toast「已结合联网资料润色/解释」；RAG 按钮路径不受任何影响，两上下文源完全独立。前端 AI 设置面板加联网区块：开关、搜索源下拉、按搜索源动态显隐的 key/URL 输入行、结果条数。验证：`_test_llm_websearch.py`（各搜索源缺配置时的明确报错、归一限幅、降级标志 off/degraded、openai 后端回归）；真实链路验证——本机网络访问 DuckDuckGo 超时的环境下，开启联网的润色请求 29.5s 返回 `ok=true web_search=degraded` + 正常润色文本，降级路径不阻断写作流；`py_compile` 与 inline JS `node --check` 全过；keepalive 11/11、RAG 19/19、RAG UI 13/13 回归 PASS。
+- **联网查询（润色 / AI 解释可选网络资料注入）**：现象——润色/解释仅凭模型自身知识，无法参考时效性网络信息。修法——新增 `web_search.py`（配置驱动，模式取自 rag-assistant 的 search.py，按本项目零依赖约束全部用标准库 urllib 重写）：5 个搜索源 DuckDuckGo（免费无 key）/ Tavily / Google Custom Search / Bing / 自定义 API（URL 用 `{q}` `{key}` 占位），返回统一 `{results:[{title,url,snippet}],success,error}`，key 填写；`md_server.py` 在 llm 配置内加 `web_search` 子段（enabled/backend/各 key/custom_url/max_results 1~10，脏数据归一回默认），润色与 AI 解释路由在开关开启时先检索选中文本（截断 200 字）、结果拼【网络资料】段进 system prompt 再交 LLM；搜索失败或无结果**静默降级**为纯模型路径并在响应带 `web_search: "degraded"` 标志，前端 toast 提示「联网搜索失败，已用纯模型结果」，成功注入 toast「已结合联网资料润色/解释」；RAG 按钮路径不受任何影响，两上下文源完全独立。前端 AI 设置面板加联网区块：开关、搜索源下拉、按搜索源动态显隐的 key/URL 输入行、结果条数。验证：`_test_llm_websearch.py`（各搜索源缺配置时的明确报错、归一限幅、降级标志 off/degraded、openai 后端回归）；真实链路验证——本机网络访问 DuckDuckGo 超时的环境下，开启联网的润色请求 29.5s 返回 `ok=true web_search=degraded` + 正常润色文本，降级路径不阻断写作流；`py_compile` 与 inline JS `node --check` 全过；keepalive 11/11、RAG 19/19、RAG UI 13/13 回归 PASS。
 
 ---
 
@@ -358,12 +469,12 @@
 - **「打开」按钮过滤修复（内嵌与浏览器模式同时生效）**：现象——「打开」弹框无 `.smd` 类型（仅 .md/.txt/所有文件）。根因——两版 `md_server.py` 的 `/api/open-file` 路由调用 `_pick_file_subprocess`，但该函数定义缺失（历史清理误删），每次点击即 `NameError`→500→前端兜底 WebView2 内置文件框（无类型过滤）。修法——补回 `_pick_file_subprocess(initdir)`：子进程执行 `_pickfile.py`（GetOpenFileNameW，过滤器第一组即 `Markdown (*.md;*.smd)`），`hwndOwner=GetForegroundWindow()` 置前，路径经临时文件回传；`MD_SERVER_VERSION` 44→45 / 52→53 触发版本自愈换代。验证：两版 `py_compile` 通过；嵌入式 Python 实测 `import md_server` 后函数存在、签名为 `(initdir='')`。
 - **安全与关联**：解包前逐条校验 ZIP entry 名，拒绝绝对路径/盘符/`..` 穿越（实测构造恶意包被拒）；`install.cmd` 注册 `.smd` 关联（`MDViewer.smd` ProgID + shim 转发，纯 ASCII 断言 PASS）；原生打开框过滤器加 `*.smd`；浏览器兜底入口（拿不到完整路径）对 `.smd` 明确提示拒绝而非读成乱码。
 - **跨容器资产双向换算**：现象——普通 `.md` 另存 `.smd`、`.smd` 改名另存 `.md` 时，磁盘契约 `<文档名>.assets/` 与包内契约 `assets/` 互不对认，图片必然断链。修法——服务端新增 `_rewrite_assets_ref` 助手（左边界断言防误伤）：打包时把 `<文档名>.assets/` 引用统一改写为 `assets/` 后进包；导出时反向改写并把图片落盘到目标目录；资产源三级解析（`base/assets` → 源文档同目录 `<文档名>.assets` → 手写图收编）。验证：单测 T10/T11 + 真实服务 E2E（另存→改名导出→图片数量一致）。
-- **手写图保存时收编进容器**：现象——用户手写绝对路径引用（如 `C:/user/x.png`），`.smd` 打包时原样进包，包不自包含，换机碎图。修法——`md_assets.materialize_into` 核心抽取（落盘目录与引用前缀参数化），`.smd` 打包与增量保存前统一物化：真实存在的本地图收编进容器、引用改写为容器契约；不存在的原样保留破图可见（fail-closed）；网络图维持外链不收编。验证：T12 + E2E F2/F3。
+- **手写图保存时收编进容器**：现象——文档手写绝对路径引用（如 `C:/user/x.png`），`.smd` 打包时原样进包，包不自包含，换机碎图。修法——`md_assets.materialize_into` 核心抽取（落盘目录与引用前缀参数化），`.smd` 打包与增量保存前统一物化：真实存在的本地图收编进容器、引用改写为容器契约；不存在的原样保留破图可见（fail-closed）；网络图维持外链不收编。验证：T12 + E2E F2/F3。
 - **保存回传正文同步编辑区**：现象——服务端收编/契约改写后编辑区仍显示旧引用，所见非所存。修法——`/api/file` 与 `/api/save-as` 响应回传新正文，前端 `applySavedContent` 三处共享（Ctrl+S／自动保存／另存为）。验证：E2E F1/U1/U4。
 
 **修复**
 
-- **另存 `.smd` 资产断链**：现象——普通 `.md` 另存 `.smd` 后包内零图片（用户实测复现）。根因——前端 `base=null`（普通文档会话无解包目录），后端资产源断链。修法——payload 携带 `src`（源文档路径），后端按三级解析回退到源文档同目录资产。验证：E2E E1/E2。
+- **另存 `.smd` 资产断链**：现象——普通 `.md` 另存 `.smd` 后包内零图片。根因——前端 `base=null`（普通文档会话无解包目录），后端资产源断链。修法——payload 携带 `src`（源文档路径），后端按三级解析回退到源文档同目录资产。验证：E2E E1/E2。
 - **`.md` 重复收编膨胀**：现象——每按一次保存 `.assets` 多一张 `_1`/`_2` 重复图。根因——编辑区不同步导致每次保存重跑物化，同名冲突走 `_unique` 加号。修法——响应回传正文同步编辑区 + 物化内容寻址复用（sha1 同字节文件直接复用文件名，编辑区未同步的重复保存幂等零膨胀）。验证：T13 + E2E F1a/F1b。
 - **包内正文换行符漂移**：现象——包内 `doc.md` 与响应正文字节不一致。根因——文本模式写盘 LF→CRLF，`save_from_dir` 按原始字节进包，且 `needs_compact` 尺寸比对误判死空间。修法——`doc.md` 写盘统一 `newline=""`。验证：E2E F3b。
 - **内嵌窗口桥平行实现收编（桥薄化）**：现象——`md_app.pyw` 桥自写磁盘旧逻辑（`save_as`/`paste_image` 等六方法）：`.smd` 另存被强加 `.md` 后缀、粘贴图写到 `.smd` 旁挂错误目录、新契约全部漏网。根因——桥为历史平行实现，保存规则双处维护必然分叉。修法——桥瘦身为 `pick_save_path`（只弹原生对话框选路径），六条保存入口（Ctrl+S／自动保存／另存为×2／粘贴图×2）统一走服务端三条路由；死方法删除。验证：桥方法表断言 + E2E U1-U4。
@@ -654,7 +765,7 @@
 
 **新增**
 
-- **`MarkdownEditor.cs` → `MarkdownEditor.exe` shim**：现象——`.md` 右键/打开方式列表显示 "Python"（Win11 选择器对无 FriendlyTypeName 的 ProgID 显示 command 里 exe 的 FileDescription；command 直连 pythonw.exe 则 FriendlyTypeName 也治不了，ASSOCSTR_FRIENDLYAPPNAME 解析链实证）。修法——install.cmd 自动用系统自带 csc（Framework64 v4.0.30319）编译 shim（AssemblyDescription="Markdown Editor"），功能为转发 .md 路径给便携 pythonw；右键 verb/双击关联/兜底 ProgID 三处 command 全部改指 shim，并注册 `Applications\MarkdownEditor.exe`。用户实测选择器显示 "Markdown Editor"。
+- **`MarkdownEditor.cs` → `MarkdownEditor.exe` shim**：现象——`.md` 右键/打开方式列表显示 "Python"（Win11 选择器对无 FriendlyTypeName 的 ProgID 显示 command 里 exe 的 FileDescription；command 直连 pythonw.exe 则 FriendlyTypeName 也治不了，ASSOCSTR_FRIENDLYAPPNAME 解析链实证）。修法——install.cmd 自动用系统自带 csc（Framework64 v4.0.30319）编译 shim（AssemblyDescription="Markdown Editor"），功能为转发 .md 路径给便携 pythonw；右键 verb/双击关联/兜底 ProgID 三处 command 全部改指 shim，并注册 `Applications\MarkdownEditor.exe`。实测选择器显示 "Markdown Editor"。
 - **程序化图标 `gen_icon.py`**：PIL 纯程序化生成 `md-editor.ico`（256~16 七尺寸）——点阵拼 "MD"、青→紫→粉色相渐变圆角色块、深色圆角底，零字体零素材。接入三处 `DefaultIcon` + csc `/win32icon` 内嵌。
 
 ---
