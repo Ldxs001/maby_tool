@@ -22,5 +22,13 @@ MarkdownEditor-app/_video_syntax/bgm.m4a
 MarkdownEditor-app/_video_syntax/tts/
 MarkdownEditor-app/_video_syntax/*.log
 
+# ── 同上(_video_lowrunner) ──
+MarkdownEditor-app/_video_lowrunner/raw10/
+MarkdownEditor-app/_video_lowrunner/video_only.mp4
+MarkdownEditor-app/_video_lowrunner/narr.m4a
+MarkdownEditor-app/_video_lowrunner/bgm.m4a
+MarkdownEditor-app/_video_lowrunner/tts/
+MarkdownEditor-app/_video_lowrunner/*.log
+
 # ── 安装包备份（Release 资产，不入库）──────────
 _release_assets/

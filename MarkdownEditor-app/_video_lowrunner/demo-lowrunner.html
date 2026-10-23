@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>MDEditor low runner Demo</title>
+<style>
+  @font-face{font-family:'Noto Sans SC';src:url('fonts/noto-sc-400.woff2') format('woff2');font-weight:400;}
+  @font-face{font-family:'Noto Sans SC';src:url('fonts/noto-sc-700.woff2') format('woff2');font-weight:700;}
+  @font-face{font-family:'JB Mono';src:url('fonts/jb400.woff2') format('woff2');font-weight:400;}
+  @font-face{font-family:'JB Mono';src:url('fonts/jb700.woff2') format('woff2');font-weight:700;}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{width:1600px;height:900px;overflow:hidden;background:#12151c;font-family:'Noto Sans SC',sans-serif;color:#e8eaed;}
+  #stage{position:relative;width:1600px;height:900px;}
+  .scene{position:absolute;inset:0;display:none;background:linear-gradient(135deg,#141824 0%,#1b2030 60%,#232a3e 100%);}
+  .scene.on{display:flex;align-items:center;justify-content:center;}
+  .win{width:1320px;height:740px;background:#161a22;border-radius:16px;overflow:hidden;
+       box-shadow:0 30px 90px rgba(0,0,0,.6), 0 0 0 1px #333c4e;display:flex;flex-direction:column;flex:0 0 auto;}
+  #cap{position:absolute;left:0;right:0;bottom:0;height:74px;background:rgba(10,12,16,.88);display:flex;align-items:center;justify-content:center;z-index:50;}
+  #cap span{font-size:30px;color:#fff;letter-spacing:1px;}
+  .cap-hl{color:#7fdca0;}
+
+  /* 标题卡 */
+  #s0{flex-direction:column;align-items:center;justify-content:center;}
+  #s0 h1{font-size:118px;letter-spacing:4px;background:linear-gradient(90deg,#7fdca0,#7fa7ff);-webkit-background-clip:text;background-clip:text;color:transparent;}
+  #s0 .sub{margin-top:26px;font-size:34px;color:#9aa3b5;letter-spacing:3px;}
+  #s0 .tags{margin-top:52px;display:flex;gap:18px;flex-wrap:wrap;justify-content:center;max-width:1240px;}
+  #s0 .tag{padding:12px 28px;border:1px solid #3a4358;border-radius:30px;font-size:23px;color:#c6cddb;}
+
+  /* 编辑器窗口 chrome */
+  #bar{height:56px;background:#1a1e27;display:flex;align-items:center;padding:0 22px;gap:10px;border-bottom:1px solid #2a2f3c;flex:0 0 auto;}
+  #bar .brand{font-weight:700;font-size:24px;color:#7fa7ff;letter-spacing:2px;margin-right:20px;}
+  .tb{padding:8px 18px;border:1px solid #333c4e;border-radius:8px;font-size:18px;color:#c6cddb;background:#232936;}
+  .tb.run{border-color:#3f8f63;color:#7fdca0;}
+  .split{flex:1;display:flex;min-height:0;}
+  .ed,.pv{flex:1;display:flex;flex-direction:column;min-width:0;}
+  .ed{border-right:1px solid #2a2f3c;}
+  .pane-h{height:38px;background:#20242e;display:flex;align-items:center;padding:0 18px;font-size:15px;color:#8a93a6;border-bottom:1px solid #2a2f3c;flex:0 0 auto;}
+  .edtxt{flex:1;overflow:hidden;padding:18px 26px;font-family:'JB Mono',monospace;font-size:17px;line-height:1.8;color:#d8dee9;white-space:pre-wrap;background:#161a22;}
+  .pvbody{flex:1;overflow:hidden;padding:18px 30px;background:#fdfcfa;color:#333;}
+  .cur8{display:inline-block;width:10px;height:24px;background:#7fdca0;vertical-align:-4px;animation:bl 0.8s infinite;}
+  @keyframes bl{50%{opacity:0}}
+  .fade{opacity:0;transform:translateY(8px);transition:all .45s;}
+  .fade.in{opacity:1;transform:none;}
+
+  /* 预览通用（亮色纸面） */
+  .pvbody h2{font-size:24px;color:#2c3e60;margin:4px 0 12px;}
+  .pvbody p{font-size:18px;line-height:1.85;margin:9px 0;color:#3a3a3a;}
+  .pvbody code{background:#eef1f6;padding:3px 9px;border-radius:6px;font-family:'JB Mono',monospace;font-size:16px;color:#0f7a3d;}
+  .pvbody .tbl{border-collapse:collapse;margin:10px 0;font-size:18px;}
+  .pvbody .tbl th,.pvbody .tbl td{border:1px solid #ccc;padding:8px 22px;}
+  .pvbody .tbl th{background:#eef2fb;color:#2c3e60;}
+
+  /* s1 工作流 */
+  #s1 .flow{display:flex;align-items:stretch;gap:0;margin:40px auto 0;width:1180px;}
+  #s1 .step{flex:1;background:#1c2230;border:1px solid #333c4e;border-radius:14px;padding:24px 20px;text-align:center;}
+  #s1 .step b{display:block;font-size:23px;color:#7fdca0;margin-bottom:10px;}
+  #s1 .step span{font-size:16.5px;color:#aab2c4;line-height:1.65;display:block;}
+  #s1 .ar{align-self:center;padding:0 12px;font-size:34px;color:#5b8f6f;flex:0 0 auto;}
+  #s1 .note{margin:34px auto 0;width:1180px;font-size:20px;color:#8a93a6;text-align:center;}
+  #s1 .note em{color:#c6cddb;font-style:normal;}
+
+  /* 数据点 / 执行点行卡 */
+  .drow{display:flex;align-items:center;gap:14px;margin:11px 0;}
+  .drow .dg{font-family:'JB Mono',monospace;font-size:16.5px;background:#f2f4f8;border:1px solid #dde3ec;border-radius:8px;padding:7px 12px;color:#333;white-space:nowrap;}
+  .drow .who{font-size:16px;color:#667;padding:4px 12px;border-radius:14px;background:#eaf3ec;color:#256b41;flex:0 0 auto;}
+  .drow .who.hid{background:#f4f0fa;color:#6b4fa0;}
+  .drow .who.raw{background:#fdf3e4;color:#8a5a16;}
+  .drow .val{font-size:19px;color:#b3305e;font-weight:700;}
+  .drow .dim{color:#999;}
+  .legend{display:flex;gap:14px;margin-top:16px;flex-wrap:wrap;}
+  .legend span{font-size:15.5px;padding:6px 14px;border-radius:16px;border:1px solid #d8dee6;color:#556;}
+  .erow{margin:12px 0;padding:13px 18px;border:1px solid #dde3ec;border-left:5px solid #3f8f63;border-radius:8px;background:#f7faf8;}
+  .erow .eg{font-family:'JB Mono',monospace;font-size:16.5px;color:#0f7a3d;margin-bottom:7px;}
+  .erow .ex{font-size:16.5px;color:#445;line-height:1.7;}
+  .erow.alt{border-left-color:#8a63c9;background:#faf8fd;}
+  .erow.alt .eg{color:#6b4fa0;}
+
+  /* s4 协议代码卡 */
+  .codecard{background:#11141b;border-radius:12px;overflow:hidden;border:1px solid #2a2f3c;width:880px;}
+  .codecard .cl{background:#1d2230;color:#8aa0c8;font-size:15px;font-family:'JB Mono',monospace;padding:7px 16px;border-bottom:1px solid #2a2f3c;}
+  .codecard pre{margin:0;padding:18px 24px;font-family:'JB Mono',monospace;font-size:18px;line-height:2.0;color:#d8dee9;white-space:pre-wrap;}
+  .codecard .k{color:#c48aff;} .codecard .f{color:#7fdca0;} .codecard .s{color:#7fdca0;} .codecard .c{color:#7a8496;}
+  .protonote{display:flex;gap:16px;margin-top:22px;}
+  .protonote .pn{background:#1c2230;border:1px solid #333c4e;border-radius:12px;padding:14px 20px;font-size:17px;color:#aab2c4;}
+  .protonote .pn b{color:#7fdca0;font-family:'JB Mono',monospace;font-weight:400;}
+
+  /* s5/s6 结果高亮 */
+  .res{font-size:21px;color:#2c3e60;margin:16px 0 8px;}
+  .res b{color:#b3305e;font-size:26px;}
+  .autobadge{display:inline-block;margin-top:12px;padding:7px 16px;border-radius:16px;background:#e8f6ec;color:#256b41;font-size:15.5px;}
+
+  /* s7 管理界面 mock */
+  #s7 .win{align-items:center;justify-content:center;}
+  #runmgr{width:1120px;background:#1c2230;border:1px solid #333c4e;border-radius:14px;padding:22px 28px;box-shadow:0 24px 70px rgba(0,0,0,.55);}
+  #runmgr .modes{display:flex;gap:12px;align-items:center;margin-bottom:16px;}
+  #runmgr .modes .mlabel{font-size:17px;color:#8a93a6;margin-right:6px;}
+  #runmgr .modes .m{padding:8px 20px;border:1px solid #3a4358;border-radius:9px;font-size:17px;color:#c6cddb;background:#232936;}
+  #runmgr .modes .m.sel{border-color:#3f8f63;color:#7fdca0;background:#1d2b23;}
+  #runmgr .cols{display:flex;gap:18px;}
+  #runmgr .lib{width:300px;background:#161a22;border:1px solid #2a2f3c;border-radius:10px;padding:12px;}
+  #runmgr .lib .lt{font-size:14px;color:#8a93a6;margin-bottom:9px;}
+  #runmgr .lib .it{padding:9px 13px;border-radius:8px;font-family:'JB Mono',monospace;font-size:15px;color:#c6cddb;margin-bottom:6px;background:#20242e;}
+  #runmgr .lib .it.def{border:1px solid #3f8f63;color:#7fdca0;}
+  #runmgr .lib .it.dim2{color:#6b7484;}
+  #runmgr .lib .dnote{font-size:13.5px;color:#7a8496;margin-top:9px;line-height:1.6;}
+  #runmgr .rside{flex:1;background:#161a22;border:1px solid #2a2f3c;border-radius:10px;padding:12px 16px;}
+  #runmgr .rside .nm{font-family:'JB Mono',monospace;font-size:15px;color:#7fdca0;background:#11141b;border:1px solid #2a2f3c;border-radius:8px;padding:7px 12px;margin-bottom:9px;}
+  #runmgr .rside pre{font-family:'JB Mono',monospace;font-size:14.5px;line-height:1.75;color:#d8dee9;white-space:pre-wrap;}
+  #runmgr .rside .k{color:#c48aff;}
+  #runmgr .foot{display:flex;gap:12px;align-items:center;margin-top:16px;}
+  #runmgr .aibtn{padding:9px 22px;border:1px solid #4a6cf7;border-radius:9px;font-size:17px;color:#9db9f5;background:#1d2334;}
+  #runmgr .dep{font-size:15px;color:#8a93a6;}
+  #runmgr .dep b{color:#e8717a;font-weight:400;}
+
+  /* s8 AI 生成 */
+  #s8 .aiflow{width:1120px;margin:0 auto;}
+  #s8 .need{background:#1c2230;border:1px solid #4a6cf7;border-radius:12px;padding:16px 22px;font-size:20px;color:#c6cddb;}
+  #s8 .need b{color:#9db9f5;font-weight:400;font-size:15.5px;display:block;margin-bottom:6px;}
+  #s8 .gen{margin-top:20px;}
+  #s8 .arrow{font-size:30px;color:#5b7fc4;text-align:center;margin:10px 0;}
+  #s8 .review{margin-top:18px;text-align:center;font-size:18px;color:#8a93a6;}
+  #s8 .review em{color:#7fdca0;font-style:normal;}
+
+  /* s9 手动与错误 */
+  .pending{display:inline-flex;align-items:center;gap:12px;background:#f2f4f8;border:1px solid #c9d2e0;border-radius:10px;padding:10px 18px;font-size:18px;color:#345;font-family:'JB Mono',monospace;}
+  .pending .pl{color:#3a7d4f;font-weight:700;}
+  .errblk{display:inline-flex;align-items:center;gap:12px;background:#fdf0f0;border:1px solid #e5b5b5;border-left:5px solid #d64545;border-radius:8px;padding:10px 16px;font-size:17px;color:#a33;margin:10px 0;}
+  .errblk .pl{color:#d64545;font-weight:700;}
+  .runall{position:absolute;left:26px;bottom:20px;display:inline-flex;align-items:center;gap:10px;background:#1d2b23;border:1px solid #3f8f63;border-radius:10px;padding:9px 20px;font-size:17px;color:#7fdca0;}
+  .s9note{font-size:16px;color:#667;margin-top:14px;line-height:1.8;}
+  .s9note code{background:#eef1f6;padding:2px 8px;border-radius:5px;font-family:'JB Mono',monospace;font-size:15px;color:#0f7a3d;}
+
+  /* s10 防护 */
+  #s10 .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;width:1180px;margin:0 auto;}
+  #s10 .cell{background:#1c2230;border:1px solid #333c4e;border-radius:14px;padding:22px 22px;text-align:center;min-width:0;}
+  #s10 .cell b{display:block;font-size:22px;color:#7fdca0;margin-bottom:9px;font-family:'JB Mono',monospace;font-weight:700;}
+  #s10 .cell:first-child b,#s10 .cell:nth-child(2) b{font-family:'Noto Sans SC',sans-serif;}
+  #s10 .cell span{font-size:16px;color:#aab2c4;line-height:1.65;display:block;}
+
+  /* 收尾 */
+  #s11{flex-direction:column;align-items:center;justify-content:center;}
+  #s11 .big{font-size:64px;color:#fff;margin-bottom:18px;letter-spacing:2px;}
+  #s11 .slogan{font-size:30px;color:#c6cddb;letter-spacing:2px;margin-bottom:34px;}
+  #s11 .row{display:flex;gap:24px;}
+  #s11 .card{width:290px;background:#1c2230;border:1px solid #333c4e;border-radius:14px;padding:22px 24px;text-align:center;}
+  #s11 .card b{font-size:20px;color:#7fdca0;display:block;margin-bottom:8px;}
+  #s11 .card span{font-size:15.5px;color:#aab2c4;line-height:1.6;}
+  #s11 .foot{margin-top:24px;font-size:22px;color:#8a93a6;}
+
+  /* 场景显隐（必须位于 #sN 原规则之后） */
+  #s0,#s1,#s2,#s3,#s4,#s5,#s6,#s7,#s8,#s9,#s10,#s11{display:none;}
+  #s0.on,#s11.on{display:flex;}
+  #s1.on,#s2.on,#s3.on,#s4.on,#s5.on,#s6.on,#s8.on,#s9.on,#s10.on{display:flex;flex-direction:column;}
+  #s7.on{display:flex;}
+  .pop{animation:pop .5s ease;}
+  @keyframes pop{from{opacity:0;transform:scale(.96);}to{opacity:1;transform:none;}}
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- 0 标题卡 -->
+  <div class="scene" id="s0">
+    <h1>low runner</h1>
+    <div class="sub">MDEditor · 文档内数据自动化计算</div>
+    <div class="tags">
+      <div class="tag">数据点声明</div><div class="tag">执行点调用</div><div class="tag">run 协议</div>
+      <div class="tag">三运行模式</div><div class="tag">AI 生成</div><div class="tag">fail-closed</div><div class="tag">默认示例随包</div>
+    </div>
+  </div>
+
+  <!-- 1 工作流总览 -->
+  <div class="scene" id="s1">
+    <div class="win" style="align-items:center;">
+      <div style="margin-top:110px;font-size:34px;color:#e8eaed;letter-spacing:2px;">一条流水线，全程在文档里</div>
+      <div class="flow">
+        <div class="step"><b>① 声明数据点</b><span>写作中随手写<br>显性显示 · 隐性供数</span></div>
+        <div class="ar">→</div>
+        <div class="step"><b>② 按别名分桶</b><span>公共池 / 别名池<br>谁的数据谁明确</span></div>
+        <div class="ar">→</div>
+        <div class="step"><b>③ 调 Python run</b><span>run 库或 AI 生成<br>便携解释器执行</span></div>
+        <div class="ar">→</div>
+        <div class="step"><b>④ 结果替换</b><span>返回字符串<br>写回执行点位置</span></div>
+      </div>
+      <div class="note">计算、合并、筛选、统计、画图——<em>数据自动化加工留在文档内</em>，不做系统级功能</div>
+    </div>
+  </div>
+
+  <!-- 2 数据点语法 -->
+  <div class="scene" id="s2">
+    <div class="win"><div id="bar">
+      <div class="brand">MDEditor</div>
+      <div class="tb">保存</div><div class="tb">打开</div><div class="tb">run</div><div class="tb">排版</div><div class="tb">.html</div><div class="tb">.docx</div>
+    </div>
+    <div class="split">
+      <div class="ed"><div class="pane-h">编辑器（Markdown 源文）</div><div class="edtxt" id="ed2"></div></div>
+      <div class="pv"><div class="pane-h">实时预览</div><div class="pvbody" id="pv2"></div></div>
+    </div></div>
+  </div>
+
+  <!-- 3 执行点语法 -->
+  <div class="scene" id="s3">
+    <div class="win"><div id="bar">
+      <div class="brand">MDEditor</div>
+      <div class="tb">保存</div><div class="tb">打开</div><div class="tb">run</div><div class="tb">排版</div><div class="tb">.html</div><div class="tb">.docx</div>
+    </div>
+    <div class="split">
+      <div class="ed"><div class="pane-h">编辑器（Markdown 源文）</div><div class="edtxt" id="ed3"></div></div>
+      <div class="pv"><div class="pane-h">实时预览</div><div class="pvbody" id="pv3"></div></div>
+    </div></div>
+  </div>
+
+  <!-- 4 run 代码协议 -->
+  <div class="scene" id="s4">
+    <div class="win" style="align-items:center;">
+      <div style="margin-top:76px;font-size:32px;color:#e8eaed;letter-spacing:2px;margin-bottom:26px;">run 代码协议：一个函数就够</div>
+      <div class="codecard"><div class="cl">runs / 任意名字.py</div><pre><span class="k">def</span> <span class="f">run</span>(data):
+    data[<span class="s">"kv"</span>]   <span class="c"># {"苹果": "3", "梨": "2"} —— 按 == 剥离好的键值</span>
+    data[<span class="s">"raw"</span>]  <span class="c"># ["苹果 == 3", ...]           —— 原文兜底</span>
+    <span class="k">return</span> <span class="s">"5 个水果"</span>  <span class="c"># 返回 str，替换执行点</span></pre></div>
+      <div class="protonote">
+        <div class="pn">函数名固定 <b>run</b></div>
+        <div class="pn">from 形式用<b style="color:#7fdca0;font-weight:400;">目标函数名</b></div>
+        <div class="pn">值就是<b style="color:#7fdca0;font-weight:400;">字符串原文</b></div>
+        <div class="pn">支持<b style="color:#7fdca0;font-weight:400;">中文函数名</b></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5 四则运算端到端 -->
+  <div class="scene" id="s5">
+    <div class="win"><div id="bar">
+      <div class="brand">MDEditor</div>
+      <div class="tb">保存</div><div class="tb">打开</div><div class="tb run">run</div><div class="tb">排版</div><div class="tb">.html</div><div class="tb">.docx</div>
+    </div>
+    <div class="split">
+      <div class="ed"><div class="pane-h">编辑器（Markdown 源文）</div><div class="edtxt" id="ed5"></div></div>
+      <div class="pv"><div class="pane-h">实时预览</div><div class="pvbody" id="pv5"></div></div>
+    </div></div>
+  </div>
+
+  <!-- 6 词频统计端到端 -->
+  <div class="scene" id="s6">
+    <div class="win"><div id="bar">
+      <div class="brand">MDEditor</div>
+      <div class="tb">保存</div><div class="tb">打开</div><div class="tb run">run</div><div class="tb">排版</div><div class="tb">.html</div><div class="tb">.docx</div>
+    </div>
+    <div class="split">
+      <div class="ed"><div class="pane-h">编辑器（Markdown 源文）</div><div class="edtxt" id="ed6"></div></div>
+      <div class="pv"><div class="pane-h">实时预览</div><div class="pvbody" id="pv6"></div></div>
+    </div></div>
+  </div>
+
+  <!-- 7 管理界面 -->
+  <div class="scene" id="s7">
+    <div class="win">
+      <div id="runmgr">
+        <div class="modes">
+          <span class="mlabel">运行模式</span>
+          <span class="m sel">立即</span>
+          <span class="m">等待 N 秒</span>
+          <span class="m">手动</span>
+          <span style="margin-left:auto;font-size:15px;color:#7a8496;">三选一互斥 · 即改即生效</span>
+        </div>
+        <div class="cols">
+          <div class="lib">
+            <div class="lt">run 库（所有文档共用）</div>
+            <div class="it def">calc_operations</div>
+            <div class="it def">count_words_in_text</div>
+            <div class="it dim2">（自建 run 显示在此）</div>
+            <div class="dnote">绿框 = 默认示例，随安装包自带<br>分发 = 拷 runtime/runs 目录</div>
+          </div>
+          <div class="rside">
+            <div class="nm">命名：calc_operations</div>
+            <pre><span class="k">def</span> run(data):
+    nums = [int(v) for k, v in data[<span style="color:#7fdca0;">'kv'</span>].items() if v.isdigit()]
+    <span class="k">return</span> f<span style="color:#7fdca0;">' {sum(nums)}'</span></pre>
+          </div>
+        </div>
+        <div class="foot">
+          <div class="aibtn">✦ AI 生成</div>
+          <div class="dep">保存即入库 · 自动依赖检测：缺包<b>红色列出</b>并给出安装命令</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 8 AI 生成 -->
+  <div class="scene" id="s8">
+    <div class="win" style="align-items:center;">
+      <div class="aiflow" style="margin-top:64px;">
+        <div class="need"><b>说出需求</b>求数据点里所有数字之和</div>
+        <div class="arrow">↓ AI 按协议生成</div>
+        <div class="codecard" style="width:100%;"><div class="cl">建议名称：sum_numbers</div><pre><span class="k">def</span> <span class="f">run</span>(data):
+    total = sum(int(v) <span class="k">for</span> v <span class="k">in</span> data[<span class="s">"kv"</span>].values() <span class="k">if</span> v.isdigit())
+    <span class="k">return</span> <span class="s">f"合计 {total}"</span></pre></div>
+        <div class="review"><em>人工查阅后再保存入库</em> —— 三方包用现成轮子，AI 只写读 kv → 调库 → str 化的薄胶水</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 9 手动运行与错误显示 -->
+  <div class="scene" id="s9">
+    <div class="win"><div id="bar">
+      <div class="brand">MDEditor</div>
+      <div class="tb">保存</div><div class="tb">打开</div><div class="tb run">run</div><div class="tb">排版</div><div class="tb">.html</div><div class="tb">.docx</div>
+    </div>
+    <div class="split">
+      <div class="pv" style="flex:1;border-right:none;"><div class="pane-h">实时预览（手动模式）</div>
+        <div class="pvbody" style="position:relative;">
+          <p style="font-size:19px;">总共有水果 <span class="pending">待运行 calc_operations <span class="pl">▶</span></span> 个</p>
+          <p style="font-size:19px;margin-top:22px;">失败时紧跟错误与重试：</p>
+          <div class="errblk">⚠ 缺少包 numpy <span class="pl">▶</span></div>
+          <div class="s9note">修好 run 库或装好包，点 <code>▶</code> 即重跑；任何模式下失败都显示原文（fail-closed，便于发现笔误）<br>导出 HTML / docx / 打印：<b style="color:#a33;">剥离全部按钮与错误块</b>，未运行的执行点导出原文</div>
+          <div class="runall">▶ 运行</div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- 10 防护与依赖 -->
+  <div class="scene" id="s10">
+    <div class="win" style="align-items:center;">
+      <div style="margin-top:80px;font-size:32px;color:#e8eaed;letter-spacing:2px;margin-bottom:34px;">执行防护与环境</div>
+      <div class="grid">
+        <div class="cell"><b>超时 10 秒</b><span>单次执行硬上限<br>不挂死文档</span></div>
+        <div class="cell"><b>输出 1MB 上限</b><span>超出截断<br>防失控刷屏</span></div>
+        <div class="cell"><b>便携 Python</b><span>自带解释器<br>仅标准库零配置</span></div>
+        <div class="cell"><b>matplotlib 作图</b><span>存 run_cache 返回文件名<br>自动按图片渲染</span></div>
+        <div class="cell"><b>三方包自装</b><span>pip --target 到依赖目录<br>「依赖目录」按钮直达</span></div>
+        <div class="cell"><b>中文命名</b><span>函数名 / 文件名都可用<br>from 统计 import 合计</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 11 收尾 -->
+  <div class="scene" id="s11">
+    <div class="big">low runner</div>
+    <div class="slogan">数据写在文档里，计算留在文档里</div>
+    <div class="row">
+      <div class="card"><b>三运行模式</b><span>立即 / 等待 N 秒 / 手动<br>即改即生效</span></div>
+      <div class="card"><b>AI 生成</b><span>说出需求生成代码<br>人工查阅后入库</span></div>
+      <div class="card"><b>fail-closed</b><span>失败显示原文<br>导出剥离按钮与错误</span></div>
+      <div class="card"><b>默认示例</b><span>两个 run 模块<br>随安装包自带</span></div>
+    </div>
+    <div class="foot">MDEditor · 全程本地运行</div>
+  </div>
+
+  <div id="cap"><span id="captxt"></span></div>
+</div>
+
+<script>
+function $(s){ return document.querySelector(s); }
+function cap(html){ document.getElementById('captxt').innerHTML = html; }
+function escapeHtml(s){
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* 通用：编辑器逐字键入 + 预览块渐入 */
+function edScene(edId, pvId, src, blocks, perTick){
+  const ed = document.getElementById(edId), pv = document.getElementById(pvId);
+  ed.innerHTML = ''; pv.innerHTML = '';
+  const cur = document.createElement('span'); cur.className = 'cur8';
+  let i = 0;
+  const t = setInterval(() => {
+    i += perTick;
+    if (i >= src.length){
+      i = src.length; clearInterval(t); cur.remove();
+      blocks.forEach((b, idx) => {
+        setTimeout(() => {
+          const d = document.createElement('div'); d.className = 'fade'; d.innerHTML = b;
+          pv.appendChild(d);
+          requestAnimationFrame(() => requestAnimationFrame(() => d.classList.add('in')));
+        }, idx * 240);
+      });
+    }
+    ed.innerHTML = escapeHtml(src.slice(0, i)).replace(/\n/g, '<br>');
+    ed.appendChild(cur);
+  }, 100);
+}
+
+function show(id){ document.querySelectorAll('.scene').forEach(s=>s.classList.remove('on')); $(id).classList.add('on'); }
+
+/* 各场景源文与预览块（事实逐字取自使用指南 low runner 章节与 runs/ 示例源码） */
+const S2_SRC = "@@ MDE_{苹果 == 3}\n@@ MDE__{备注 == 内部口径}\n@@ MDE_甲{b == 4}\n@@ MDE__甲{s == 隐性参数}\n@@ MDE_{任意原文}";
+const S2_PV = [
+  '<div class="drow"><span class="dg">@@ MDE_{苹果 == 3}</span><span class="val">3</span><span class="who">显性 · 公共池</span></div>',
+  '<div class="drow"><span class="dg">@@ MDE__{备注 == 内部口径}</span><span class="dim">不渲染</span><span class="who hid">隐性 · 公共池</span></div>',
+  '<div class="drow"><span class="dg">@@ MDE_甲{b == 4}</span><span class="val">4</span><span class="who hid">显性 · 别名池（只喂 is 甲）</span></div>',
+  '<div class="drow"><span class="dg">@@ MDE__甲{s == 隐性参数}</span><span class="dim">不渲染</span><span class="who hid">隐性 · 别名池</span></div>',
+  '<div class="drow"><span class="dg">@@ MDE_{任意原文}</span><span class="val" style="color:#333;font-weight:400;">任意原文</span><span class="who raw">裸数据 · 只进 raw</span></div>',
+  '<div class="legend"><span>数据点可嵌在句中</span><span>== 是框架唯一分隔符</span><span>值就是字符串原文</span></div>'
+];
+
+const S3_SRC = "@@ MDE import dark\n@@ MDE import dark is zzz\n@@ MDE from utils import add is xxx";
+const S3_PV = [
+  '<div class="erow"><div class="eg">@@ MDE import dark</div><div class="ex">执行 runs/dark.py 的 run(data)，吃<b>公共池</b>数据</div></div>',
+  '<div class="erow alt"><div class="eg">@@ MDE import dark is zzz</div><div class="ex">同一 run，只吃 @@ MDE_zzz{} / @@ MDE__zzz{} 的<b>别名池</b>数据</div></div>',
+  '<div class="erow alt"><div class="eg">@@ MDE from utils import add is xxx</div><div class="ex">执行 utils.py 的 add(data)，只吃 is xxx 池</div></div>',
+  '<div class="legend"><span>无 is 一律公共池 · 谁的数据谁明确</span><span>run 失败/不存在：显示原文（fail-closed）</span></div>'
+];
+
+const S5_SRC = "| 名称 | 数量 |\n|:-|:-|\n| 苹果 | @@ MDE_kkk{A == 3} |\n| 梨 | @@ MDE_kkk{B == 4} |\n\n总共有水果 @@ MDE from calc_operations import add is kkk 个";
+const S5_PV = [
+  '<table class="tbl"><tr><th>名称</th><th>数量</th></tr><tr><td>苹果</td><td>3</td></tr><tr><td>梨</td><td>4</td></tr></table>',
+  '<div class="res">总共有水果 <b>7</b> 个</div>',
+  '<div class="autobadge">渲染完成后自动执行 · 按别名 is kkk 分桶收集 · 结果替换执行点</div>'
+];
+
+const S6_SRC = "@@ MDE__bbb{word1 == ['你好','外国人']}\n\n@@ MDE_bbb{text == 清晨的集市上，他遇到一个外国人，两人结伴同行了一路。分别时对方说你好，他也笑着回应你好，还约定了下次相见的日子。}\n\n@@ MDE from count_words_in_text import process_words is bbb";
+const S6_PV = [
+  '<p>隐性数据点供词表与长文（不渲染），执行点按 is bbb 分桶：</p>',
+  '<div class="res" style="font-size:20px;">关键词"你好"出现 <b>2</b> 次　关键词"外国人"出现 <b>1</b> 次</div>',
+  '<div class="autobadge">词表轮询统计 · 长文本自动识别 · 结果写回执行点</div>'
+];
+
+/* ── 场景时间线（毫秒；已按 tts_meta.json 实测时长 [8.08,9.32,11.63,10.74,11.28,11.45,10.2,13.14,8.51,12.69,11.27,4.97] 前缀和回填） ── */
+const TL = [
+  [0,      () => { show('#s0'); cap('MDEditor <span class="cap-hl">low runner</span> · 文档内数据自动化计算'); }],
+  [8080,   () => { show('#s1'); cap('工作流：<span class="cap-hl">数据点 → 分桶 → Python run → 结果替换</span>'); }],
+  [17400,  () => { show('#s2'); cap('数据点：<span class="cap-hl">显性 / 隐性 / 别名池 / 裸数据</span>，可嵌在句中'); edScene('ed2','pv2',S2_SRC,S2_PV,3); }],
+  [29030,  () => { show('#s3'); cap('执行点：<span class="cap-hl">import [is 别名] / from import</span>，一行调用'); edScene('ed3','pv3',S3_SRC,S3_PV,2); }],
+  [39770,  () => { show('#s4'); cap('run 协议：<span class="cap-hl">def run(data)</span> · kv 键值 / raw 原文 / 返回 str'); }],
+  [51050,  () => { show('#s5'); cap('默认示例：<span class="cap-hl">calc_operations</span> · 表格数据自动求和'); edScene('ed5','pv5',S5_SRC,S5_PV,3); }],
+  [62500,  () => { show('#s6'); cap('默认示例：<span class="cap-hl">count_words_in_text</span> · 词频轮询统计'); edScene('ed6','pv6',S6_SRC,S6_PV,4); }],
+  [72700,  () => { show('#s7'); cap('管理界面：<span class="cap-hl">三运行模式</span> · run 库共用 · 依赖检测'); $('#runmgr').classList.add('pop'); }],
+  [85840,  () => { show('#s8'); cap('<span class="cap-hl">AI 生成</span>：说出需求 → 按协议生成 → 人工查阅入库'); }],
+  [94350,  () => { show('#s9'); cap('手动模式：<span class="cap-hl">待运行 ▶</span> · 红色错误 + 重试 · 导出 fail-closed'); }],
+  [107040, () => { show('#s10'); cap('防护：<span class="cap-hl">超时 10 秒 / 输出 1MB</span> · 便携 Python · matplotlib 作图'); }],
+  [118310, () => { show('#s11'); cap('MDEditor low runner · <span class="cap-hl">数据写在文档里，计算留在文档里</span>'); }],
+  [123280, () => { window.__DONE__ = true; }]
+];
+
+if (window.__DRIVE__) { window.__start = function(){ TL.forEach(([t, fn]) => setTimeout(fn, t)); }; }
+else { TL.forEach(([t, fn]) => setTimeout(fn, t)); }
+window.__DUR__ = 123280;
+</script>
+</body>
+</html>
