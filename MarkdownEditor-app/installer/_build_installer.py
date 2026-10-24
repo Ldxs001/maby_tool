@@ -30,9 +30,16 @@ DIST_DIRS = ["python", "katex", "pagedjs", "LICENSES",
              "mermaid", "viz", "wavedrom", "vega", "docxdeps"]
 DIST_DOCS_FILES = ["MDEditor 使用指南.md", "版权与开源组件声明.md"]
 DIST_DOCS_DIRS = ["MDEditor 使用指南.assets"]
-# low runner 默认 run 示例（种子：仓库级 runs/ → 安装后 runtime/runs/，
-# md_server 启动 makedirs 不会清掉既有文件，装完 low runner 即有这两个可用 run）
-DIST_RUNS = ["calc_operations.py", "count_words_in_text.py"]
+# low runner run 库（种子：运行树 runtime/runs/ → 安装后 runtime/runs/，
+# md_server 启动 makedirs 不会清掉既有文件）。
+# 全量打包：run 库是示例与文档的实指对象，缺一个就断链（使用指南、规范、
+# CHANGELOG 里都直接点名 these 文件），因此这里不写死清单，直接扫目录取全部 .py。
+# 只取 *.py：__pycache__ 等运行态产物不进包。
+_RUNS_SRC = os.path.join(SRC, "runtime", "runs")
+DIST_RUNS = sorted(f for f in os.listdir(_RUNS_SRC)
+                   if f.endswith(".py") and os.path.isfile(os.path.join(_RUNS_SRC, f)))
+if not DIST_RUNS:
+    raise SystemExit("FAIL no run library files found in %s" % _RUNS_SRC)
 DIST_FILES = ["md_launch.pyw", "_md_run.py", "md_server.py", "markdown-editor.html",
               "md-editor.ico", "uninstall-md.ico", "llm_client.py", "web_search.py",
               "rag_client.py", "_smd.py", "md_assets.py", "_splash.py",
@@ -61,23 +68,53 @@ def find_csc():
 
 
 def make_staging(ver):
-    shutil.rmtree(STAGING, ignore_errors=True)
-    os.makedirs(STAGING)
+    # 覆盖式重建：不整目录 rmtree —— 70MB / 1200 个文件的批量删除既慢，也容易被
+    # 环境的安全策略整批拦截（构建中间产物本就该可覆盖）。写完按「应到文件集合」
+    # 清残留，保证包内不会混进上一轮的文件。
+    os.makedirs(STAGING, exist_ok=True)
     for d in DIST_DIRS:
-        shutil.copytree(os.path.join(SRC, d), os.path.join(STAGING, d))
+        shutil.copytree(os.path.join(SRC, d), os.path.join(STAGING, d), dirs_exist_ok=True)
     docs = os.path.join(STAGING, "docs")
-    os.makedirs(docs)
+    os.makedirs(docs, exist_ok=True)
     for f in DIST_DOCS_FILES:
         shutil.copy2(os.path.join(SRC, "docs", f), os.path.join(docs, f))
     for d in DIST_DOCS_DIRS:
-        shutil.copytree(os.path.join(SRC, "docs", d), os.path.join(docs, d))
+        shutil.copytree(os.path.join(SRC, "docs", d), os.path.join(docs, d), dirs_exist_ok=True)
     for f in DIST_FILES:
         shutil.copy2(os.path.join(SRC, f), os.path.join(STAGING, f))
-    # low runner 默认 run 种子（runs/ → runtime/runs/）
+    # low runner run 库种子（runtime/runs/ → 安装后 runtime/runs/，全量 .py）
     rdst = os.path.join(STAGING, "runtime", "runs")
     os.makedirs(rdst, exist_ok=True)
     for f in DIST_RUNS:
-        shutil.copy2(os.path.join(SRC, "runs", f), os.path.join(rdst, f))
+        shutil.copy2(os.path.join(_RUNS_SRC, f), os.path.join(rdst, f))
+
+    # 残留清理：算出本轮应在的文件集合，删掉 staging 里多出来的（通常为 0 个）
+    expect = set()
+    for d in DIST_DIRS:
+        base = os.path.join(SRC, d)
+        for root, _dirs, fs in os.walk(base):
+            for fn in fs:
+                expect.add(os.path.relpath(os.path.join(root, fn), SRC).replace(os.sep, "/"))
+    for f in DIST_DOCS_FILES:
+        expect.add("docs/" + f)
+    for d in DIST_DOCS_DIRS:
+        for root, _dirs, fs in os.walk(os.path.join(SRC, "docs", d)):
+            for fn in fs:
+                rel = os.path.relpath(os.path.join(root, fn), os.path.join(SRC, "docs"))
+                expect.add("docs/" + rel.replace(os.sep, "/"))
+    for f in DIST_FILES:
+        expect.add(f)
+    for f in DIST_RUNS:
+        expect.add("runtime/runs/" + f)
+    stale = []
+    for root, _dirs, fs in os.walk(STAGING):
+        for fn in fs:
+            rel = os.path.relpath(os.path.join(root, fn), STAGING).replace(os.sep, "/")
+            if rel not in expect:
+                stale.append(rel)
+    for rel in stale:
+        os.remove(os.path.join(STAGING, rel.replace("/", os.sep)))
+
     # docx 导出功能件断言（缺一即 FAIL：md_server 运行时 import，安装包内缺了就是坏功能）
     _docx_must = [
         os.path.join(STAGING, "docx_export.py"),
@@ -88,12 +125,16 @@ def make_staging(ver):
         os.path.join(STAGING, "docxdeps", "latex2mathml"),
         os.path.join(STAGING, "docxdeps", "LICENSES", "README.md"),
     ]
-    # low runner 种子断言（缺一即 FAIL：默认工具/示例随包分发）
+    # low runner 种子断言（缺一即 FAIL：示例 run 随包分发，缺了就断链）
     _runs_must = [os.path.join(rdst, f) for f in DIST_RUNS]
-    missing = [p for p in _docx_must + _runs_must if not os.path.exists(p)]
-    if missing:
-        raise SystemExit("FAIL staging missing docx export files: %s" % missing)
+    _miss_docx = [p for p in _docx_must if not os.path.exists(p)]
+    _miss_runs = [p for p in _runs_must if not os.path.exists(p)]
+    if _miss_docx:
+        raise SystemExit("FAIL staging missing docx export files: %s" % _miss_docx)
+    if _miss_runs:
+        raise SystemExit("FAIL staging missing run library files: %s" % _miss_runs)
     n = sum(len(fs) for _, _, fs in os.walk(STAGING))
+    print("staging: %d files, %d stale removed" % (n, len(stale)))
     return n
 
 
@@ -146,6 +187,11 @@ def compile_installer(ver, out_name):
 def run_smoke(exe):
     if os.path.exists(SMOKE_REPORT):
         os.remove(SMOKE_REPORT)
+    # payload 内 run 库清单（独立于 C# smoke 报告：直接查包，最贴近用户拿到的东西）
+    with zipfile.ZipFile(os.path.join(OUT, "payload.zip")) as z:
+        _zip_runs = sorted(n.rsplit("/", 1)[-1] for n in z.namelist()
+                           if n.startswith("runtime/runs/") and n.endswith(".py"))
+    _runs_ok = _zip_runs == DIST_RUNS
     subprocess.run([exe, "--smoke"], timeout=600, capture_output=True)
     for _ in range(40):
         if os.path.exists(SMOKE_REPORT):
@@ -191,6 +237,8 @@ def run_smoke(exe):
          rep.get("vega_embed_vendor_size", "?")),
         ("version parsed", rep.get("version", "?") != "?", rep.get("version", "?")),
         ("webview2 detected (this machine)", rep.get("webview2") == "1", ""),
+        ("run library complete in payload (%d files)" % len(DIST_RUNS), _runs_ok,
+         ",".join(_zip_runs)),
     ]
     fails = [name for name, ok, _ in checks if not ok]
     for name, ok, extra in checks:

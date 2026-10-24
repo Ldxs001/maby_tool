@@ -8,7 +8,12 @@ document.paged.html
 # 注意：必须锚定到本目录根（前导 /），否则会误伤
 # python/Lib/site-packages/pythonnet/runtime/ 下 pythonnet 的原生桥接 DLL，
 # 导致内嵌窗口因缺失 Python.Runtime.dll 而无法启动。
-/runtime/
+# 运行缓存：整目录忽略，但 run 库要入库（唯一位于 runtime/runs/，示例随包分发）
+/runtime/*
+!/runtime/runs/
+!/runtime/runs/**
+# 反选会连 __pycache__ 一起放行，必须再排掉（规则自上而下，后覆盖前）
+/runtime/runs/__pycache__/
 
 # 开发临时产物
 _tmp_*

@@ -103,7 +103,7 @@ def run(data):          # 函数名固定 run（from 形式则用目标函数名
 - 顶部**运行模式**（三选一互斥，即改即生效）：**立即**（渲染后 0.4 秒自动跑）/ **等待 N 秒**（停止输入 N 秒后跑，N 自己填，默认 5）/ **手动**（不自动跑）；
 - 左侧 run 库列表（编辑器级统一管理，**所有文档共用**；分发 = 拷 `runtime/runs` 目录）；
 - 右侧命名框 + 代码框；保存即入库（名字即 `@@ MDE import` 的名字）；**保存后自动做依赖检测**——引用的三方包在执行环境缺哪个，红色列出并给出安装命令（`pip install --target "...runtime/pylibs" 包名`；编译型包需 cp311 版本）；
-- 绿框的两个默认示例（`calc_operations` / `count_words_in_text`）随安装包自带。
+- 随包自带五个示例（`stats` / `wordcount` / `mergecontent` / `auto_cite` / `tablecalc`，装后位于 `runtime/runs/`）；升级覆盖语义 = 示例重置，自建 run 不受影响。
 
 ## AI 生成
 
