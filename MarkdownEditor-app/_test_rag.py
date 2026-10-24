@@ -119,7 +119,8 @@ if online:
     if not md_server._probe_rag()["online"]:
         print("(probe unstable, skip already-online check)")
     else:
-        st, j = call("/api/rag/start", "POST", {"path": r"C:\Users\sm001\WorkBuddy\rag-assistant"})
+        st, j = call("/api/rag/start", "POST",
+                    {"path": os.environ.get("MD_RAG_PATH", r"C:\path\to\rag-assistant")})
         check("rag/start already online -> rejected",
               st == 200 and j.get("ok") is False and "已在运行" in j.get("error", ""), str(j)[:160])
 else:

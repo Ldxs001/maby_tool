@@ -40,21 +40,192 @@ function sanitizeUrl(u){
   if(/^data:/.test(t) && !/^data:image\//i.test(t)) return '#';
   return t;
 }
+/* mdeParseBody（v2.6 六形式，规范见 docs/low runner 数据形式规范.md）：
+   body → {ok, disp, dispSimple, ch, val, kvSingle, singleKey, singleVal}
+   ch='kv'   val=object（多对；单对时 kvSingle 带字段）——并入桶 kv
+   ch='vals' val=str / list / 嵌套list —— 入桶 vals
+   ok=false → fail-closed（调用方按普通文本渲染，不产数据点 span）
+   规则：
+   - 含 (( )) → 行文抽取：句中 ((v)) 纯值 / ((k == v)) 键值（不可混用、
+     须闭合非空）；显示 = 去掉 (( )) 标记的干净句子
+   - 无 (( )) 含 == → 键值：按半角 , 分段——单段 = 单键值对（值内逗号
+     是文本，向后兼容）；多段 = 键值向量（每段必须含 ==，否则 fail）
+   - 无 (( )) 无 == → 纯值：含 , = 向量（list）；否则单值 str（现有行为）
+   - 表格型 :N(rxc) 不走此函数（块级收集分支，body 多行） */
+function mdeParseBody(body){
+  var b=String(body);
+  if(b.indexOf('((')>=0||b.indexOf('))')>=0){
+    var items=[];
+    var rx=/\(\(([^()]*?)\)\)/g,mm;
+    var prose=b.replace(/\(\(([^()]*?)\)\)/g,'');
+    while((mm=rx.exec(b))){
+      if(!mm[1].trim()){return {ok:false};}
+      items.push(mm[1]);
+    }
+    /* 成对括号提取后若正文残留 ( 或 ) 单边（未闭合标记）→ fail */
+    if(prose.indexOf('((')>=0||prose.indexOf('))')>=0){return {ok:false};}
+    if(!items.length){return {ok:false};}
+    /* 直写与行文混用 → fail：行文形式的 (( )) 外是散文（用户例子全是
+       全角，），散文出现半角 ,（直写向量分隔符）或 ==（直写键值符）
+       即混写（'a, ((b))' / 'x == 1 ((b))'） */
+    if(prose.indexOf(',')>=0||prose.indexOf('==')>=0){return {ok:false};}
+    var hasKV=items.some(function(it){return it.indexOf('==')>=0;});
+    var hasPure=items.some(function(it){return it.indexOf('==')<0;});
+    if(hasKV&&hasPure){return {ok:false};}   /* ((v)) 与 ((k==v)) 混用 */
+    var disp=b.replace(/\(\(([^()]*?)\)\)/g,'$1');
+    if(hasKV){
+      var o={};
+      for(var i=0;i<items.length;i++){
+        var eq=items[i].indexOf('==');
+        if(eq<0){return {ok:false};}
+        var k=items[i].slice(0,eq).trim(),v=items[i].slice(eq+2).trim();
+        if(!k){return {ok:false};}
+        o[k]=v;
+      }
+      var vs=[];for(var kk in o){vs.push(o[kk]);}
+      return {ok:true,disp:disp,ch:'kv',val:o,dispSimple:vs.join('、')};
+    }
+    return {ok:true,disp:disp,ch:'vals',val:items.map(function(s){return s.trim();})};
+  }
+  if(b.indexOf('==')>=0){
+    var parts=b.split(',');
+    if(parts.length===1){
+      var e1=b.indexOf('==');
+      var k1=b.slice(0,e1).trim();
+      if(!k1){return {ok:true,disp:b,ch:'vals',val:b};}
+      return {ok:true,disp:b.slice(e1+2).trim(),ch:'kv',val:{},kvSingle:true,
+        singleKey:k1,singleVal:b.slice(e1+2).trim()};
+    }
+    var o2={};
+    for(var j=0;j<parts.length;j++){
+      var e2=parts[j].indexOf('==');
+      if(e2<0){return {ok:false};}
+      var k2=parts[j].slice(0,e2).trim();
+      if(!k2){return {ok:false};}
+      o2[k2]=parts[j].slice(e2+2).trim();
+    }
+    var vs2=[];for(var kk2 in o2){vs2.push(o2[kk2]);}
+    return {ok:true,disp:vs2.join('、'),ch:'kv',val:o2};
+  }
+  if(b.indexOf(',')>=0){
+    return {ok:true,disp:b,ch:'vals',val:b.split(',').map(function(s){return s.trim();})};
+  }
+  return {ok:true,disp:b,ch:'vals',val:b};
+}
+/* mdeParseTable（v2.6 表格型 :N(rxc)，规范见 docs/low runner 数据形式规范.md）：
+   dim='2'|'3'，coord='(2x2)' 或 '()'（空括号=全表），body=表格行文本。
+   → {ok,dim,r,c,l,val}；val=二维 [[...]]（:2）/ 三层 [[[...]]]（:3）。
+   规则：分隔行（|-|-| 类：仅 |:-与空白构成）是结构行——不计行号、
+   不进输出（第 1 行=表头行、第 2 行=第一条数据行）；坐标 1-based，
+   数据区 = 第 r 行第 c 列起取到表尾；空单元格=""；\|=字面竖线；
+   :3 表格间空行分隔、张数=实际表数；:2 出现空行多表 → fail；
+   非表格行/坐标越界/括号缺失 → fail（fail-closed 整块按普通文本） */
+function mdeParseTable(dim,coord,body){
+  if(!dim||!coord){return {ok:false};}
+  var cm=coord.match(/^\(\s*(?:(\d+)\s*[xX×]\s*(\d+)\s*)?\)$/);
+  if(!cm){return {ok:false};}
+  var r0=cm[1]?parseInt(cm[1],10):1,c0=cm[2]?parseInt(cm[2],10):1;
+  if(r0<1||c0<1){return {ok:false};}
+  function _isSep(ln){
+    return /^[|:\-\s]+$/.test(ln)&&/[-:]/.test(ln)&&ln.indexOf('|')>=0;
+  }
+  function _splitCells(ln){
+    var s=ln.replace(/\\\|/g,'\x00P\x00');
+    s=s.replace(/^\s*\|/,'').replace(/\|\s*$/,'');
+    var cells=s.split('|').map(function(x){return x.replace(/\x00P\x00/g,'|').trim();});
+    return cells;
+  }
+  /* 分表（空行切分） */
+  var blocks=[],cur=[];
+  var bl=String(body).split('\n');
+  for(var i=0;i<=bl.length;i++){
+    var ln=(i<bl.length)?bl[i]:'';
+    if(ln.trim()===''||i===bl.length){
+      if(cur.length){blocks.push(cur);cur=[];}
+    }else{
+      if(ln.indexOf('|')<0){return {ok:false};}   /* 非表格行 */
+      cur.push(ln);
+    }
+  }
+  if(!blocks.length){return {ok:false};}
+  if(dim==='2'&&blocks.length>1){return {ok:false};}   /* 多表是 :3 专属 */
+  var out=[],maxR=0,maxC=0;
+  for(var bi=0;bi<blocks.length;bi++){
+    var rows=[],nrows=0;
+    for(var ri=0;ri<blocks[bi].length;ri++){
+      var ln2=blocks[bi][ri];
+      if(_isSep(ln2)){continue;}   /* 结构行：不计行号不进输出 */
+      nrows++;
+      rows.push(_splitCells(ln2));
+    }
+    if(!nrows){return {ok:false};}
+    var width=0;
+    for(var w=0;w<rows.length;w++){width=Math.max(width,rows[w].length);}
+    if(r0>nrows||c0>width){return {ok:false};}   /* 坐标越界 */
+    var crop=[];
+    for(var rr=r0-1;rr<rows.length;rr++){
+      var line=[];
+      for(var cc=c0-1;cc<width;cc++){
+        line.push((rows[rr][cc]!==undefined)?rows[rr][cc]:'');
+      }
+      crop.push(line);
+    }
+    out.push(crop);
+    maxR=Math.max(maxR,crop.length);
+    maxC=Math.max(maxC,crop[0]?crop[0].length:0);
+  }
+  /* :2 = 二维 [[行],[行]]（单表去包裹）；:3 = 三层 [[[行],[行]]]（表列表） */
+  var val=(dim==='2')?out[0]:out;
+  return {ok:true,dim:dim,r:maxR,c:maxC,l:out.length,val:val};
+}
+/* 显性表格数据点的屏幕呈现（v2.6.12）：body 里的表格原文直接交给块级
+   渲染器，渲染成真正的表格——与行内形式「显性 = 看得见内容」同一口径，
+   不再造 [数据表 R×C] 这类不可读标签。分表边界与 mdeParseTable 同口径
+   （空行分块）；某块缺分隔行（只写数据行也合法）时补一行结构行，
+   否则 markdown 不认它是表格、整块会退化成段落文字。补的只是 |---|
+   结构行，可见字符一个不动 */
+function _dpTableSrc(body){
+  var lines=String(body).split('\n'),out=[],cur=[];
+  function isSep(ln){return /^[|:\-\s]+$/.test(ln)&&/[-:]/.test(ln)&&ln.indexOf('|')>=0;}
+  function flush(){
+    if(!cur.length){return;}
+    var k;
+    if(cur.some(isSep)){
+      for(k=0;k<cur.length;k++){out.push(cur[k]);}
+    }else{
+      var nc=splitRow(cur[0]).length||1;
+      out.push(cur[0]);
+      out.push('|'+new Array(nc+1).join(' --- |'));
+      for(k=1;k<cur.length;k++){out.push(cur[k]);}
+    }
+    cur=[];
+  }
+  for(var i=0;i<lines.length;i++){
+    if(lines[i].trim()===''){flush();out.push('');}
+    else{cur.push(lines[i]);}
+  }
+  flush();
+  return out.join('\n');
+}
 /* MDE 数据点 span（low runner）：data-dp 存 body 原文（URI 编码），
-   显性渲染 == 后的值（无 == 显示原文），隐性 display:none 完全不占位。
-   run pass 从 DOM 收集全部 data-dp 组装 {kv, raw} */
-function mdeDpSpan(body,hidden,alias){
+   data-dp-val 存结构化值 JSON（v2.6 三通道：kv/vals）；fail-closed 时
+   调用方不产本 span（按普通文本渲染）。隐性 display:none 不占位 */
+function mdeDpSpan(body,hidden,alias,parsed){
+  var pr=parsed||mdeParseBody(body);
   var disp='';
   if(!hidden){
-    var i=body.indexOf('==');
-    disp=(i>=0)?body.slice(i+2).trim():body;
+    disp=pr.ok?(pr.dispSimple!==undefined?pr.dispSimple:pr.disp):(body.indexOf('==')>=0?body.slice(body.indexOf('==')+2).trim():body);
   }
-  /* data-dp-alias = 数据点归属别名（v2.4.5）：空 = 公共池（喂给所有
-     无 is 执行点）；非空 = 只喂给 is 同名的执行点 */
+  var valAttr='';
+  if(pr.ok){
+    var v=pr.kvSingle?function(){var s={};s[pr.singleKey]=pr.singleVal;return s;}():pr.val;
+    valAttr=' data-dp-val="'+escAttr(JSON.stringify({ch:pr.ch,val:v}))+'"';
+  }
   return '<span class="mde-dp'+(hidden?' mde-dp-hidden" style="display:none"':'"')+
     ' data-dp="'+encodeURIComponent(body)+'"'+
-    ' data-dp-alias="'+escAttr(alias||'')+'">'+escapeHtml(disp)+'</span>';
+    ' data-dp-alias="'+escAttr(alias||'')+'"'+valAttr+'>'+escapeHtml(disp)+'</span>';
 }
+
 function parseInline(text){
   var codes=[];
   text=text.replace(/`([^`]+)`/g,function(m,c){codes.push(c);return '@@C'+(codes.length-1)+'@@';});
@@ -64,26 +235,57 @@ function parseInline(text){
      在代码段提取之后做：代码段内反斜杠保持字面，双保险不冲突。 */
   var escs=[];
   text=text.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g,function(m,c){escs.push(c);return '\x00E'+(escs.length-1)+'\x00';});
-  /* MDE 数据点/执行点（low runner，v2.4）：必须在 escapeHtml 之前——
+  /* MDE 数据点/执行点（low runner，v2.4→v2.6）：必须在 escapeHtml 之前——
      body 需存原文（含 <>& 已转义就还原不回来了）。
      @@ MDE_{a == 3}        显性公共池（显示 == 后的值，无 == 显示原文）
      @@ MDE__{...}          隐性公共池（不渲染，只为执行点提供数据）
      @@ MDE_甲{a == 3}      显性别名池（v2.4.5：只喂 is 甲 的执行点）
      @@ MDE__甲{...}        隐性别名池
-     @@ MDE import dark [is zzz] / @@ MDE from utils import add [is xxx]
-                            执行点；is 别名决定吃哪个数据池（无 is = 公共池，
-                            两种形式同规矩——import 同样可能多处调用各喂各的）
-     行内体不含 {} 与换行；跨行数据点由块级收集处理（见 parseMarkdown） */
+     v2.6 六形式：{文本}/{k==v}/{a,b,c}/{k==v,k==v}/行文((...))抽取——
+     解析失败（混用/未闭合/键值段无==）fail-closed：原文保留不产 span。
+     @@ MDE import dark [is zzz] [{global p}] / from X import fn [is xxx] [{global p}]
+     执行点；{global p} = 全局标记（'''p 实例全文收集进 marks，run 返回
+     等长列表逐个替换）；执行点自身渲染不可见。
+     行内体不含 {} 与换行；跨行数据点/表格型由块级收集处理（见 parseMarkdown） */
   var toks=[];
   text=text.replace(/@@ MDE(_{1,2})([\w\u4e00-\u9fff.-]*)\{([^\n{}]*)\}/g,function(m,u,alias,body){
-    toks.push(mdeDpSpan(body,u==='__',alias));
+    var pr=mdeParseBody(body);
+    /* fail-closed：原文保留，但必须先进占位符——否则 body 里的 _{…}
+       会被下面 v2.6.10 的下标正则吃成 <sub>（@@ MDE_{a, ((b))} → @@ MDE<sub>…</sub>），
+       ** / ~~ 同理。占位后原文不受任何后续行内规则影响 */
+    if(!pr.ok){toks.push(escapeHtml(m));return '\x00T'+(toks.length-1)+'\x00';}
+    toks.push(mdeDpSpan(body,u==='__',alias,pr));
     return '\x00T'+(toks.length-1)+'\x00';
   });
-  text=text.replace(/@@ MDE\s+(?:from\s+([\w\u4e00-\u9fff.-]+?)\s+import\s+([\w\u4e00-\u9fff-]+)|import\s+([\w\u4e00-\u9fff.-]+))(?:\s+is\s+([\w\u4e00-\u9fff.-]+))?/g,function(m,f,fn,imp,alias){
-    toks.push('<span class="mde-run" data-run-mod="'+escAttr(f||imp)+'" data-run-fn="'+escAttr(fn||'run')+'" data-run-alias="'+escAttr(alias||'')+'" data-run-orig="'+encodeURIComponent(m)+'">…</span>');
+  text=text.replace(/@@ MDE\s+(?:from\s+([\w\u4e00-\u9fff.-]+?)\s+import\s+([\w\u4e00-\u9fff-]+)|import\s+([\w\u4e00-\u9fff.-]+))(?:\s+is\s+([\w\u4e00-\u9fff.-]+))?(?:\s*\{global\s+([\w\u4e00-\u9fff]+)\})?/g,function(m,f,fn,imp,alias,gmark){
+    /* global 执行点不可见性走 CSS 类（.mde-run-global{display:none}、
+       [data-done=err]/[data-pending] 时可见）——不写内联 style：内联
+       display:none 优先级高于一切 CSS，失败态红字会被永久藏住 */
+    toks.push('<span class="mde-run'+(gmark?' mde-run-global':'"')+'" data-run-mod="'+escAttr(f||imp)+'" data-run-fn="'+escAttr(fn||'run')+'" data-run-alias="'+escAttr(alias||'')+'"'+(gmark?' data-run-global="'+escAttr(gmark)+'"':'')+' data-run-orig="'+encodeURIComponent(m)+'">'+(gmark?'':'…')+'</span>');
+    return '\x00T'+(toks.length-1)+'\x00';
+  });
+  /* '''标记（v2.6 全局执行）：'''名称 实例 → mde-mark span（runPass
+     按 global 声明收集/替换；未声明未替换的保持原文）。行内代码已被
+     @@C 占位保护、代码块走块级分支，不经过这里 */
+  text=text.replace(/'''([\w\u4e00-\u9fff-]+)/g,function(m,name){
+    toks.push('<span class="mde-mark" data-mark="'+escAttr(name)+'">'+escapeHtml(m)+'</span>');
     return '\x00T'+(toks.length-1)+'\x00';
   });
   text=escapeHtml(text);
+  /* v2.6.10：LaTeX 风格上下标，正文直接写、不加 $：
+     ^{任意内容} → <sup>、_{任意内容} → <sub>（^{[1]}、^{1}、^{世界之光} 均可）。
+     放在 escapeHtml 之后：花括号里的内容此时已转义，带不进 HTML；再经 toks
+     占位，后续强调/斜体/链接规则不会碰到里面的字符（否则 _{a} 与 _{b} 之间
+     会被 _.._ 斜体规则吃掉）。只认紧跟 { 的写法，缺右花括号、a^b 一律原样；
+     要显示字面 ^{1} 写 \^{1}（反斜杠转义在上面已兜住）。 */
+  text=text.replace(/\^\{([^{}\n]+)\}/g,function(m,c){
+    toks.push('<sup>'+c+'</sup>');
+    return '\x00T'+(toks.length-1)+'\x00';
+  });
+  text=text.replace(/_\{([^{}\n]+)\}/g,function(m,c){
+    toks.push('<sub>'+c+'</sub>');
+    return '\x00T'+(toks.length-1)+'\x00';
+  });
   /* 生成的标签先进占位符：后续强调/加粗等行内语法绝不能触碰属性值
      （否则下划线文件名 20261015_181923_3419.png 会被 _.._ 改写成 <em>，图片必 404）。
      链接只占位开标签，链接文字仍参与行内格式化。 */
@@ -366,10 +568,11 @@ function parseMarkdown(src, opts){
         continue;
       }
     }
-    /* MDE 跨行数据点（@@ MDE_{ 后行内未闭合 → 向后收集到 }）：
-       长文本参数的自然写法。首行标记前的文本与末行 } 后的文本保留
-       （行内渲染）；体到第一个 }。未闭合 fail-closed 走普通段落。 */
-     var mdeOpen=line.match(/@@ MDE_{1,2}[\w\u4e00-\u9fff.-]*\{/);
+     /* MDE 跨行数据点（@@ MDE_{ 或 :N(rxc){ 后行内未闭合 → 收集到 }）：
+        ① 普通跨行 = 长文本（形式 1，解析含 (( )) 行文/向量等形式）
+        ② :N(rxc){ = 表格型（v2.6）：行内含 | 的行=表格行，空行=分表
+           （:3 专属），坐标裁剪见 mdeParseTable */
+     var mdeOpen=line.match(/@@ MDE(_{1,2})([\w\u4e00-\u9fff.-]*)(?::([23]))?(\([^()]*\))?\{/);
      if(mdeOpen && line.indexOf('}',mdeOpen.index)<0){
        var dchunks=[line],dclosed=false,dj=i+1;
        while(dj<lines.length){
@@ -379,19 +582,55 @@ function parseMarkdown(src, opts){
        }
        if(dclosed){
          var dfull=dchunks.join('\n');
-         var dmm=dfull.match(/@@ MDE(_{1,2})([\w\u4e00-\u9fff.-]*)\{([\s\S]*?)\}/);
+         var dmm=dfull.match(/@@ MDE(_{1,2})([\w\u4e00-\u9fff.-]*)(?::([23]))?(\([^()]*\))?\{([\s\S]*?)\}/);
          if(dmm){
            var dpre=dfull.slice(0,dmm.index),dpost=dfull.slice(dmm.index+dmm[0].length);
            var dout='';
-           if(dpre.trim())dout+=parseInline(dpre);
-           dout+=mdeDpSpan(dmm[3],dmm[1]==='__',dmm[2]);
-           if(dpost.trim())dout+=parseInline(dpost);
-          html+='<p>'+dout+'</p>';
-          i=dj;olSeq=0;curInd=0;
-          continue;
-        }
-      }
-    }
+           var dsp=null,dspBlock=false;
+           if(dmm[3]){   /* 表格型 */
+             var tbl=mdeParseTable(dmm[3],dmm[4],dmm[5]);
+             if(tbl.ok){
+               var dattrs=' data-dp="'+encodeURIComponent(dmm[5])+'"'+
+                 ' data-dp-alias="'+escAttr(dmm[2]||'')+'"'+
+                 ' data-dp-val="'+escAttr(JSON.stringify({ch:'vals',val:tbl.val}))+'"';
+               if(dmm[1]==='__'){
+                 /* 隐性：整块不渲染，只留一个不占位的收集壳（导出时按
+                    .mde-dp-hidden 整块剔除） */
+                 dsp='<span class="mde-dp mde-dp-hidden" style="display:none"'+dattrs+'></span>';
+               }else{
+                 /* 显性（v2.6.12）：表格原文照原样渲染成真表格。行列裁剪
+                    (RxC) 只作用于 data-dp-val，屏幕显示整张原表 */
+                 dsp='<div class="mde-dp mde-dp-block"'+dattrs+'>'+parseMarkdown(_dpTableSrc(dmm[5]))+'</div>';
+                 dspBlock=true;
+               }
+             }
+           }else{
+             var dpr=mdeParseBody(dmm[5]);
+             if(dpr.ok){dsp=mdeDpSpan(dmm[5],dmm[1]==='__',dmm[2],dpr);}
+           }
+           if(dsp!==null){
+             if(dspBlock){
+               /* 表格是块级元素，塞进 <p> 会被 HTML 解析器提前把 p 闭合，
+                  生成串与真实 DOM 对不上——前后残留文本各自成段 */
+               if(dpre.trim()){html+='<p>'+parseInline(dpre)+'</p>';}
+               html+=dsp;
+               if(dpost.trim()){html+='<p>'+parseInline(dpost)+'</p>';}
+             }else{
+               if(dpre.trim())dout+=parseInline(dpre);
+               dout+=dsp;
+               if(dpost.trim())dout+=parseInline(dpost);
+               html+='<p>'+dout+'</p>';
+             }
+             i=dj;olSeq=0;curInd=0;
+             continue;
+           }
+           /* fail-closed：整块按普通段落（含标记行原文） */
+           html+='<p>'+parseInline(dfull.replace(/\n/g,' '))+'</p>';
+           i=dj;olSeq=0;curInd=0;
+           continue;
+         }
+       }
+     }
     var stripped=line.replace(/[ ]/g,'');
     if(stripped.length>=3){
       var ch0=stripped.charAt(0);
@@ -416,9 +655,17 @@ function parseMarkdown(src, opts){
       html+=lst[0];i=lst[1];olSeq=lst[2];curInd=IPX.li;continue;
     }
     var para=[];
-    while(i<lines.length && !/^[ ]*$/.test(lines[i]) && !/^```/.test(lines[i]) && !/^(#{1,6})[ ]+/.test(lines[i]) && !/^[ ]*>/.test(lines[i]) && !/^[ ]*([-+]|[0-9]+\.)[ ]+/.test(lines[i]) && !/^[ ]{0,3}<<<\s*$/.test(lines[i]) && !(lines[i].indexOf('|')>=0 && i+1<lines.length && /^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1]) && lines[i+1].indexOf('-')>=0)){
+    while(i<lines.length && !/^[ ]*$/.test(lines[i]) && !/^```/.test(lines[i]) && !/^(#{1,6})[ ]+/.test(lines[i]) && !/^[ ]*>/.test(lines[i]) && !/^[ ]*([-+]|[0-9]+\.)[ ]+/.test(lines[i]) && !/^[ ]{0,3}<<<\s*$/.test(lines[i]) && !(lines[i].indexOf('|')>=0 && i+1<lines.length && /^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1]) && lines[i+1].indexOf('-')>=0)
+      /* v2.6：未闭合的 MDE 表格起始行（@@ MDE_x:2(2x2){ 后无 }）终断
+         段落收集——否则连续数据点行把表格语法吞进段落漏成明文 */
+      && !(/^@@ MDE(_{1,2})?[\w\u4e00-\u9fff.-]*(:[23])?(\([^()]*\))?\{/.test(lines[i]) && lines[i].indexOf('}')<0)){
       para.push(lines[i]);i++;
     }
+    /* 上面守卫可能在首行就把本行判死（未闭合的 @@ MDE…{ 起始行）→ para 为空且 i
+       未推进；若照旧输出空 <p> 并回到循环，就会永远停在同一行（主线程死锁 = 打开
+       文件即卡死，文末未闭合数据点必中）。这里保证每轮至少吃掉一行，该行按普通
+       文本 fail-closed 渲染。 */
+    if(!para.length){para.push(lines[i]);i++;}
     html+='<p>'+parseInline(para.join('\n')).replace(/\n/g,'<br>')+'</p>';
     olSeq=0;curInd=IPX.p;
   }

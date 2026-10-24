@@ -64,7 +64,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 80  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 89  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 SETTINGS_PATH = os.path.join(HERE, "runtime", "settings.json")
 
 # ---------- low runner（v2.4）：文档内参数值的自动化计算 ----------
@@ -287,87 +287,192 @@ _LLM_ERR = _llm.LLMError if _llm is not None else RuntimeError
 # ---------------------------------------------------------------------------
 # low runner 执行器（v2.4）
 # ---------------------------------------------------------------------------
-# LLM 生成 run 的系统提示词（v2.4.2 加固；v2.4.3 方向修正；v2.4.6 补 D 类）。
-# 四类历史错误纪律：A 幻觉函数（product 非内置）/ B 局部函数不可
-# 导入（用户 from X import fn 找不到顶层）/ C 类型幻觉（kv 全字符串）/
-# D 语义角色误判（v2.4.6，用户实测 count_words 案例：LLM 拿 kv 键名
-#   a/b 当关键词统计、拿 raw[0]（数据点原文行）当被查文本——键名不
-#   承载语义，角色须按值形态推断并注释声明供人工核对）。
-# v2.4.3 修正两条原则性错误（用户纠偏）：
-# ① 三方库是正规能力（runtime/pylibs 通道 + pip --target，执行环境
-#   PYTHONPATH 已挂）——提示词不得劝退三方库，numpy/pandas/matplotlib
-#   直接写；
-# ② 场景中性——run 库服务任意数据加工（数值运算/文本粘合/词频统计/
-#   画图…），提示词不得围着数值例子特化；例子数值文本各半；
-# ③ 不从文档既有执行点反推生成（run 库是源头：用户在管理界面起名
-#   保存，文档之后照库引用——生成时对文档执行点零假设，usage 注入
-#   已撤）。
-_LR_LLM_SYS = (
-    "你是 MDEditor low runner 的代码生成器。用户在写作工具里"
-    "用数据点（@@ MDE_{key == value}）声明数据，用执行点"
-    "（@@ MDE import 名字 或 @@ MDE from 文件 import 函数）"
-    "调用 Python 代码加工文档数据——需求可能是数值运算、文本粘合、"
-    "筛选统计、画图等任意数据加工，按用户需求本身理解场景。\n"
-    "生成规则（必须逐条遵守）：\n"
-    "1.【作用域纪律】用到的每个函数要么是 Python 内置（sum/len/int/"
-    "float/str/sorted/max/min/round/abs/enumerate/zip/range/join 等"
-    "字符串方法），要么来自文件顶部显式 import 的模块。严禁使用未导入"
-    "的函数——product 不是内置（连乘用 math.prod 或 for 循环）、"
-    "reduce 在 functools、Counter 在 collections；不确定就写 for 循环，"
-    "绝不写没 import 的名字。\n"
-    "2.【多操作分函数】需求涉及多个独立操作（多种运算、多种统计口径、"
-    "多种文本加工）时，每个操作定义成**模块顶层函数**，签名统一 "
-    "def 函数名(data):，各自返回 str；**必须**再附一个汇总版 "
-    "def run(data):（拼接各操作结果成一句话返回，不得是空实现——"
-    "实测 LLM 曾生成 return '' 摆烂）。用户会用 "
-    "@@ MDE from 文件 import 函数名 单独调用某个操作"
-    "（数值如 sum_result，文本如 join_text、count_word）——顶层函数名"
-    "与操作语义对应，不能只做 run 内部局部变量。\n"
-    "3.【类型纪律】data 是 dict：data['kv'] 是 {键: 值字符串}（框架已按"
-    "第一个 == 剥离），data['raw'] 是数据点原文列表。kv 的值**全是"
-    "字符串**：数值运算前先转换（先试 int，失败再试 float），转换失败"
-    "返回含键名的中文错误提示字符串，不要抛异常；文本加工则保持字符串"
-    "直接操作（split/join/count 等），不要做数字转换。值**可能是列表"
-    "字面量**（如 \"['词1','词2']\"）：用 ast.literal_eval 解析成列表用"
-    "（import ast；它对单引号/双引号 Python 字面量都认，比 json.loads "
-    "宽容——实测用户数据用单引号、json.loads 会失败）；解析失败按原"
-    "字符串处理，不要抛异常、不要直接返回错误放弃。\n"
-    "4.【角色映射纪律】kv 的**键只是名字**（a/b/中文均可能），不承载任何"
-    "语义——绝不能拿键名当数据用（如把键当关键词去统计）。当不同键的"
-    "数据扮演不同角色（如：一个是关键词列表、一个是被查文本；一个是"
-    "数据、一个是格式）时，按**值的内容形态 + 需求描述**推断角色：值形"
-    "如 ['x','y'] 的 JSON 列表 = 多值参数（词表/轮询项）；值是连续长文本"
-    "= 被处理对象（被查文本/被合并段落）。并在代码顶部注释声明映射"
-    "（如 # 角色映射：a=关键词列表, b=被查文本），供人工查阅核对。"
-    "**严禁**拿 data['raw'][0] 当被处理文本——raw 是含 == 的数据点原文"
-    "行，不是正文；被处理对象一律从 kv 的文本值取。**严禁硬编码键名**"
-    "取被处理文本（如写死 kv['text']——实际键名可能是 a/b/中文）："
-    "用形态推断 + 排除法——列表形值是词表/多值参数，**其余的长文本值"
-    "即被处理对象**（按值长度/是否自然语句判断），代码里动态遍历取值"
-    "而非猜键名。\n"
-    "补充（中文文本事实）：中文没有空格分词——统计中文词/短语出现"
-    "次数用 text.count(词)（子串计数），**不要** split() 分词再比对"
-    "（中文 split 后整句成一个词，永远匹配不上）；中英混合时可先"
-    "count 再对英文词另行处理。\n"
-    "5. 返回值必须是 str——它是直接替换执行点、给读者看的正文内容"
-    "（数值如 '加法 7、减法 -1'，文本如合并后的句子、'共出现 3 次'），"
-    "绝不返回 dict/list（会被强转成难看的 repr）。\n"
-    "6.【三方库直接用】执行环境为便携 Python，用户可通过 "
-    "pip install --target runtime/pylibs 安装三方包。numpy/pandas/"
-    "matplotlib 视为常规可用（数值计算、数据处理、画图的合理选择，"
-    "直接写，勿降级为纯标准库拼凑）；其他三方包也可直接写，并在代码"
-    "顶部注释一行需要安装的包名。若运行时报 ModuleNotFoundError，"
-    "用户按注释安装即可。\n"
-    "7. 作图：matplotlib 保存到当前工作目录（已设为 run_cache），"
-    "返回 '![](文件名.png)' 形式。\n"
-    "8. 代码第一行写注释 # run-name: 建议名（英文或拼音，短横线分隔）。\n"
-    "9. 只输出一个 ```python 代码块，不要多余解释。")
+# LLM 生成 run 的系统提示词（v2.4.2→v2.6 演进）。
+# v2.6 全面重写（用户三要求：明确规范 / 举例 / 正反例并指出错在哪）：
+# 数据契约 = 前端传入的固定类型集（六形式 → kv/vals/raw/marks 四通道，
+# 全 Python 原生类型），LLM 按契约生成不会错位；三方包转换路径明牌。
+# 历史纪律保留的：A 幻觉函数（product 非内置）/ B 顶层函数可导入 /
+# 中文无空格分词；D 类角色映射纪律由结构化通道取代（框架已给结构）。
+# 原则（v2.4.3 用户纠偏，不变）：三方库正规不劝退；场景中性；
+# run 库是源头不从文档反推。
+_LR_LLM_SYS = """你是 MDEditor low runner 的代码生成器。产物固定两段：① 一段 Python 代码（存进 run 库）；② 一份用法说明（用户照抄就能跑）。用法说明里写的每一行数据点、每一行执行点，都是用户要原样粘进文档的可执行 MDE 语法。
+
+═══ 一、代码能拿到什么：data 只有四个键 ═══
+data['kv']    dict，键与值都是 str（数字也是字符串）
+data['vals']  list，元素只有四种形状，按用户的写法决定（见二）：
+              1) str                     一段文字
+              2) list[str]               一串值
+              3) list[list[str]]         二维（行 × 列，单元格全 str）
+              4) list[list[list[str]]]   三维（多张二维表）
+              元素按文档里出现的顺序排列；不同形状可以混在同一个 list 里。
+data['raw']   list[str]，数据点的原文（含 == 与 (( )) 等语法字符）。它是原文备份，不是正文、不是全文、不含任何标记。
+data['marks'] 只有 global 执行点才有，见三-b。
+
+═══ 二、用户能写的数据点：六种形式（全部，没有第七种） ═══
+格式：编号｜用户写法｜屏幕上显示什么｜data 里产生什么
+1 单值文本｜@@ MDE_甲{今天买了苹果}｜原文｜vals += "今天买了苹果"（str）
+2 单键值对｜@@ MDE_甲{苹果 == 3}｜3｜kv["苹果"] = "3"
+3 纯值向量｜@@ MDE_甲{3,4,5}｜原文｜vals += ["3","4","5"]（list[str]）
+4 键值对向量｜@@ MDE_甲{A == 3, B == 4}｜3、4｜kv 合并 {"A":"3","B":"4"}
+5 行文抽取｜@@ MDE_甲{…上涨((8%))，同比上涨((1.5%))}｜去掉 (()) 的句子｜vals += ["8%","1.5%"]（list[str]）
+  键值版：((A == 8%))｜显示 8%｜kv["A"] = "8%"
+6 二维表｜@@ MDE_甲:2(2x2){ 表格行 }｜渲染成真表格（整张原表）｜vals += [["tony","59"],["lily","18"]]
+  三维表｜@@ MDE_甲:3(){ 多张二维表，空行分隔 }｜渲染成多张真表格｜vals += [[[...],[...]],[[...]]]
+
+这六种形式被解释时必须知道的规则（决定 data 的真实形状）：
+- 半角逗号 , 是向量分隔符；全角 ， 与顿号 、 是普通字。
+- 表格行按 Markdown 写（每行以 | 起止）；:2 是二维、:3 是三维；坐标 (rxc) 为 1-based 起点，() 表示全表；表头下面的 |:-|:-| 是结构行，不计入坐标也不进数据。
+- 一个数据点的 body 只有一行时按上面语法解析；body 跨行时一律当整段文字（形式1）。
+- 语法不合规（直写与 (()) 混用、(( 未闭合、坐标越界、键值段缺 ==、:2 里放多张表）→ 整个数据点按普通文字显示，不产生任何数据。这种失效是静默的：代码只能通过"没收到数据"发现。
+- 池名：@@ MDE_甲 只喂 is 甲 的执行点；@@ MDE__甲 是隐性的（屏幕不显示，只供数据）；@@ MDE_ 是公共池。
+- 同一池名可以写多行数据点，自动合并进同一个 data。
+- kv 是 dict：同名键**后写的覆盖先写的**，所以一组键值对里名字必须各不相同。
+
+═══ 三、执行点：两种形式（全部） ═══
+a) 普通
+   写法：@@ MDE import 库名 is 池名 ／ @@ MDE from 库名 import 函数名 is 池名
+   没有 is → 吃公共池。data 只有 kv / vals / raw 三个键。
+   框架把函数返回值直接显示在执行点位置：返回 str 即最终文本。
+b) 全局 global
+   写法：@@ MDE from 库名 import 函数名{global 标记名}（import 库名{global 标记名} 亦可；is 池 可与 global 并存，此时 data 同时带池数据）
+   执行点自身不显示。
+   标记 = 正文里的三单引号加名字：'''标记名。
+   框架全文扫描该标记的每一处，按文档顺序放进 data['marks']：
+     每项 {'mark': '标记名', 'ctx': '该标记所在那一段的文字（截断）'}
+   函数必须返回 list[str]，长度等于 len(data['marks'])；第 i 项替换第 i 个标记。
+   返回非 list、或长度不符 → 按执行失败处理，标记保持原文 '''标记名。
+   替换只做一轮：替换文本里若再出现 '''标记名 不会被再次展开。
+   '''标记名 在文档里本来是普通文字，只有被 {global} 接管时才替换；没声明就没变化。
+
+═══ 四、代码怎么消费这些形状 ═══
+- 一段文字 → vals 里的 str 元素
+- 一串值   → vals 里的 list 元素，遍历它的元素
+- 名字→值  → data['kv'] 的 items()/values()
+- 表格     → vals 里的嵌套 list，先行后列
+- 全文标记 → data['marks']
+用户写的是哪种形式，就决定它落在哪种形状；代码必须按形状分支（isinstance），不能假设 vals[0] 一定是数字、也不能假设某形状一定存在。
+两条硬规矩：
+- **vals 是"装着不同形状的容器"，不是"一串值"本身**。每个元素都要先判形状再消费：
+  isinstance(item, list) 才是向量/表格。禁止把整个 vals 直接 join / sum / 当 list[str] 用
+  ——那会拿 list 去当字符串拼，当场 TypeError。
+- **代码里每一处读 data（kv / vals / raw / marks），都必须在用法说明里对得上一行数据点**；
+  对不上就是代码要了用户没给的东西。用 data['kv']['某名'] 却没有任何一行数据点写 `某名 == 值`，
+  就是错（要么改成遍历 kv.values()，要么在用法说明里补上该键的数据点）。
+
+═══ 五、写代码前先定两件事 ═══
+1) 执行点用哪种：需要"全文某个标记的每一处"→ global；其余 → 普通。
+2) 数据点写几行、每行哪种形式：把代码要吃的每一样东西列出来，每一样选**一种**形式。
+   选择的唯一依据是那样东西的**形状**——整段文字／一串独立值／名字→值／一句话里的几个值／表格；
+   不是它像哪个例子。一行数据点只产生一种形状；要两种形状就写两行（同一池名自动合并）。
+   global 执行点不需要数据点，除非它还要额外吃池数据（is 池 与 global 并存）。
+   判定结果写进代码第二行注释，并原样落进用法说明。
+
+═══ 六、违反即废的硬约束 ═══
+- 禁 input()、sys.stdin（后台子进程无人按键，当场 EOF），禁 print（stdout 被框架独占传结果）。
+- 代码需要的每一样东西都必须在 data 里指得出来；指不出来 → 返回一句说明文字（如 '未找到关键词，请在数据点里写一行词列表，如 {你好,中国话}'），不提问、不用 0 或空串冒充结果。
+- 只许用二的六种写法，禁止自造（例如把 (()) 当向量容器装一串独立值；一行数据点兼两种形状 —— 一行只能产一种形状）。
+- 禁止猜用户的键名（if k in ['苹果','A','B']）；代码自己在用法说明里约定的键名可以按名取，但必须写进用法说明让用户照着填。
+- 一个操作一个顶层 def；禁止把多个操作合并进一个 def、禁止加参数开关；run(data) 只做汇总。
+- 返回值显式转成 str（numpy 数值、None、dict 都要转），否则显示不可控。
+- 用户指定了输出形态就逐字照办：说 ^[x] 就产出 ^[1]、^[2]，不要自行加 {}、** 等修饰；用法说明里的「返回值」必须与代码实际输出逐字一致。
+- 输出里要出现字面 { 或 } 字符时，str.format() 与 f-string 里的花括号必须双写（{{ }}），或改用 % / 字符串拼接；单写会被当成替换字段 —— '^{[{}]}'.format(1) 直接抛 'int' object is not subscriptable。
+- 中文没有空格分词：统计用 count 子串，不要 split()。
+
+═══ 七、两个语法标本（只示范两段输出的形状；判定按五，不要照抄标本的语义） ═══
+标本 A（普通执行点）：
+```python
+# run-name: flat
+# 依据：普通执行点；一行数据点产一种形状，代码按形状分支
+def run(data):
+    out = []
+    for item in data['vals']:
+        if isinstance(item, list):
+            for row in item:
+                if isinstance(row, list):
+                    out.extend(str(c) for c in row)
+                else:
+                    out.append(str(row))
+        else:
+            out.append(str(item))
+    for v in data['kv'].values():
+        out.append(str(v))
+    if not out:
+        return '没有收到数据，请检查数据点写法'
+    return ' / '.join(out)
+```
+```text
+数据点写法：@@ MDE_甲{A == 3, B == 4}（产生 kv，一组名字→值）
+执行点写法：@@ MDE import flat is 甲
+返回值：3 / 4
+注意：vals 四种形状与 kv 都会被吃；没有任何数据时返回提示文字
+```
+标本 B（global 执行点）：
+标本里的替换文本（#1）只是占位，不是格式规范：用户说 ^[x] 就输出 ^[1]、^[2]，不要自行加 {} 等修饰。
+```python
+# run-name: indexes
+# 依据：global 执行点；data['marks'] 每项一处标记，返回等长列表逐个替换
+def run(data):
+    marks = data.get('marks') or []
+    return ['#%d' % (i + 1) for i in range(len(marks))]
+```
+```text
+数据点写法：无（global 的标记本身就是数据源）
+执行点写法：@@ MDE from indexes import run{global p}
+返回值：正文每处 '''p 依次替换成 #1、#2…
+注意：返回 list 长度必须等于标记数；少一个即整点失败、标记保持原文
+```
+
+═══ 八、输出格式（严格两段，多一个字都不要） ═══
+1) 一个 ```python 代码块：首行 # run-name: 短名（英文小写+下划线，即入库名）；第二行 # 依据：<形式编号或 global> + 一句判定；然后是代码。
+2) 紧跟一个 ```text 块，行序固定：
+   数据点写法：<可原样粘贴的一行>（这一行产生什么形状）
+   ……每个数据点 1 行；如果不需要数据点，写「数据点写法：无」
+   内容必须取自**用户文档里的实际内容，或末尾给的「当前文档数据点样例」**——
+   禁止把二的语法说明行原样搬过来充数（那是语法示意，不是用户数据）；也禁止写
+   「段落内容」「词1」「示例文本」这类占位符——那一行是要直接粘进文档跑的，占位符等于没做完。
+   执行点写法：<@@ MDE …>
+   ……每个函数 1 行
+   返回值：<照上面写法真算出来的具体结果；global 写它替换成什么>
+   注意：<值的约束、空数据时的行为>
+输出前自检一遍（不通过就重写，不许把问题留给用户）：
+① 代码里每一次读 data，都能在上面某一行数据点里找到来源（键名、形状都要对得上）；
+② vals 的每个元素都判了形状，没有把整个 vals 当 list[str] 直接拼接；
+③ 需要几样不同形状的东西，就有几行数据点；
+④ 全局执行点返回的是 list，长度跟标记数对得上。
+除这两个代码块外，不得输出任何解释、前言、后语。"""
 
 
 def _lr_valid_name(name):
     """run 库条目名：字母/数字/下划线/连字符/点/中文（\w unicode 含中文）。
     防路径穿越（拒绝 /\ .. 等）。"""
     return bool(re.match(r"^[\w.-]+$", str(name or ""), re.U)) and ".." not in str(name)
+
+
+def _lr_parse_llm_output(raw):
+    """拆模型输出（v2.6.2 输出契约）：
+      1) 第一个 ```python 围栏 → code（无围栏则整段当代码，兼容旧行为）
+      2) 其后的 ```text/```md/```markdown 围栏 → usage（用户侧用法说明）
+      3) usage 缺失但尾巴里有「数据点写法/执行点写法」→ 直接取尾巴
+    返回 (code, name, usage)。"""
+    s = str(raw or "")
+    m = re.search(r"```(?:python|py)?[ \t]*\r?\n([\s\S]*?)```", s)
+    if m:
+        code = m.group(1).strip()
+        rest = s[m.end():]
+    else:
+        code = s.strip()
+        rest = ""
+    nm = re.search(r"#\s*run-name\s*[:：]\s*(.+)", code)
+    name = nm.group(1).strip() if nm else ""
+    usage = ""
+    mu = re.search(r"```(?:text|md|markdown)?[ \t]*\r?\n([\s\S]*?)```", rest)
+    if mu:
+        usage = mu.group(1).strip()
+    else:
+        tail = rest.replace("```", "").strip()
+        if "数据点写法" in tail or "执行点写法" in tail:
+            usage = tail
+    return code, name, usage
 
 
 # 常见 import 名 ≠ pip 包名映射（提醒命令要正确）
@@ -383,10 +488,13 @@ _LR_PIP_MAP = {
 
 def _lr_pip_cmd(module):
     """缺包提醒的安装命令（用户自装：便携包无 pip，任何有 pip 的
-    Python 都行，--target 落 pylibs；需 cp311 版本的编译型包）"""
+    Python 都行，--target 落 pylibs；需 cp311 版本的编译型包）。
+    路径动态：PYLIBS_DIR 随 md_server.py 所在目录（拷到哪跟到哪，
+    用户 maby_tool 安装位的命令即该位路径——非写死）。
+    反斜杠不转义：这是给用户复制进终端的命令原文，单反斜杠即正确
+    形态（v2.6.1 前误做双重转义，显示为 C:\\\\Users 形态）"""
     pkg = _LR_PIP_MAP.get(module, module)
-    return 'pip install --target "%s" %s' % (
-        PYLIBS_DIR.replace("\\", "\\\\"), pkg), pkg
+    return 'pip install --target "%s" %s' % (PYLIBS_DIR, pkg), pkg
 
 
 def _lr_missing_from_error(err):
@@ -446,7 +554,9 @@ def _lr_check_deps(code):
 
 def _lr_driver_code(mod, fn):
     """子进程驱动：stdin 喂 data JSON → import 用户模块 → 调函数 → stdout JSON。
-    多行字符串经 -c 执行；UTF-8 输入输出由 env（PYTHONIOENCODING）保证。"""
+    多行字符串经 -c 执行；UTF-8 输入输出由 env（PYTHONIOENCODING）保证。
+    v2.6：返回 str（普通执行点）或 list[str]（global 执行点——前端按
+    标记顺序逐个替换）；其他类型 str() 化。"""
     return (
         "import sys, json\n"
         "sys.path.insert(0, %r)\n"
@@ -457,7 +567,9 @@ def _lr_driver_code(mod, fn):
         "    f = getattr(m, %r)\n"
         "    data = json.loads(sys.stdin.read())\n"
         "    r = f(data)\n"
-        "    if not isinstance(r, str):\n"
+        "    if isinstance(r, (list, tuple)):\n"
+        "        r = [str(x) for x in r]\n"
+        "    elif not isinstance(r, str):\n"
         "        r = str(r)\n"
         "    sys.stdout.write(json.dumps({'ok': True, 'result': r},"
         " ensure_ascii=False))\n"
@@ -512,8 +624,12 @@ def _lr_run(mod, fn, data):
         err = cp.stderr.decode("utf-8", "replace").strip()
         return {"ok": False, "error": "run 输出非 JSON：%s%s"
                 % (out[:200], ("\nstderr: " + err[:300]) if err else "")}
-    if j.get("ok") and isinstance(j.get("result"), str):
-        j["result"] = _lr_rewrite_imgs(j["result"])[:1024 * 1024]
+    if j.get("ok") and isinstance(j.get("result"), (str, list)):
+        if isinstance(j["result"], str):
+            j["result"] = _lr_rewrite_imgs(j["result"])[:1024 * 1024]
+        else:
+            j["result"] = [_lr_rewrite_imgs(str(x))[:1024 * 1024]
+                           for x in j["result"]]
         return j
     # 失败：错误串解析缺包（前端跟随错误块显示"缺少包"+ 安装命令）
     miss = _lr_missing_from_error(j.get("error") or "")
@@ -1539,12 +1655,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "\n当前文档数据点样例：\n" + sample if sample else "")
                 r = client.chat([{"role": "system", "content": sys_msg},
                                  {"role": "user", "content": prompt}])
-                m = re.search(r"```(?:python)?\s*\n([\s\S]*?)```", str(r))
-                code = m.group(1).strip() if m else str(r).strip()
-                nm = re.search(r"#\s*run-name:\s*(.+)", code)
-                name = nm.group(1).strip() if nm else ""
+                code, name, usage = _lr_parse_llm_output(r)
                 self._send(200, json.dumps(
-                    {"ok": True, "code": code, "name": name},
+                    {"ok": True, "code": code, "name": name, "usage": usage},
                     ensure_ascii=False),
                     "application/json; charset=utf-8")
             except Exception as e:

@@ -19,7 +19,7 @@ threading.Thread(target=httpd.serve_forever, daemon=True).start()
 time.sleep(0.4)
 
 BASE = "http://127.0.0.1:18766"
-RAG_PATH = os.environ.get("MD_RAG_PATH", r"C:\Users\sm001\WorkBuddy\rag-assistant")
+RAG_PATH = os.environ.get("MD_RAG_PATH", r"C:\path\to\rag-assistant")
 fails = []
 
 

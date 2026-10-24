@@ -565,6 +565,15 @@ def _fill_inline(node, para, doc, md_path):
             _add_image(para, child, md_path, doc)
         elif ctag == "svg":
             para.add_run("[图表]")
+        elif ctag in ("sup", "sub"):
+            # v2.6.10：正文 ^{...} / _{...} 由前端渲染成 <sup>/<sub>。
+            # 不在这里转成 Word 的上下标位，文字会退化成普通基线（编号
+            # 看着像正文，导出即失真）。样式沿用节点自带 style（字号/颜色）。
+            _txt = "".join(child.itertext())
+            if _txt:
+                _run = _add_run(para, _txt, child)
+                _run.font.superscript = (ctag == "sup")
+                _run.font.subscript = (ctag == "sub")
         elif child.get("data-tex") is not None:
             _append_omml(para, child.get("data-tex"), child)
         else:
