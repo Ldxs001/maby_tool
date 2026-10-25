@@ -28,7 +28,8 @@ SMOKE_REPORT = os.path.join(tempfile.gettempdir(), "md_setup_smoke_report.txt")
 # dist checklist minimum set (sections 1+2+3+4). Keep in sync with docs checklist.
 DIST_DIRS = ["python", "katex", "pagedjs", "LICENSES",
              "mermaid", "viz", "wavedrom", "vega", "docxdeps"]
-DIST_DOCS_FILES = ["MDEditor 使用指南.md", "版权与开源组件声明.md"]
+DIST_DOCS_FILES = ["MDEditor 使用指南.md", "版权与开源组件声明.md",
+                   "low runner 数据形式规范.md"]
 DIST_DOCS_DIRS = ["MDEditor 使用指南.assets"]
 # low runner run 库（种子：运行树 runtime/runs/ → 安装后 runtime/runs/，
 # md_server 启动 makedirs 不会清掉既有文件）。

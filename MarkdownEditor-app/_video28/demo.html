@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>MDEditor 2.8 Demo</title>
+<style>
+  @font-face{font-family:'Noto Sans SC';src:url('fonts/noto-sc-400.woff2') format('woff2');font-weight:400;}
+  @font-face{font-family:'Noto Sans SC';src:url('fonts/noto-sc-700.woff2') format('woff2');font-weight:700;}
+  @font-face{font-family:'JB Mono';src:url('fonts/jb400.woff2') format('woff2');font-weight:400;}
+  @font-face{font-family:'JB Mono';src:url('fonts/jb700.woff2') format('woff2');font-weight:700;}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  :root{
+    --bg0:#0f1218; --bg1:#171c28; --card:#161a22; --card2:#1b2130;
+    --bd:#2a3142; --ink:#e8ebf2; --dim:#94a0b8;
+    --blue:#6f9bff; --gold:#f0c060; --green:#4ec98a; --red:#e8697a;
+  }
+  html,body{width:1600px;height:900px;overflow:hidden;background:var(--bg0);
+    font-family:'Noto Sans SC',sans-serif;color:var(--ink);}
+  #stage{position:relative;width:1600px;height:900px;
+    background:radial-gradient(1200px 620px at 50% -10%,#1d2434 0%,#12161f 55%,#0d1016 100%);}
+  .scene{position:absolute;inset:0;display:none;}
+  .scene.on{display:flex;align-items:center;justify-content:center;flex-direction:column;}
+  /* 字幕条 */
+  #cap{position:absolute;left:0;right:0;bottom:0;height:74px;background:rgba(8,10,14,.9);
+    display:flex;align-items:center;justify-content:center;z-index:90;border-top:1px solid #202634;}
+  #cap span{font-size:29px;color:#fff;letter-spacing:.5px;}
+  .hl{color:var(--gold);}
+  .hlb{color:var(--blue);}
+
+  /* 通用窗口 */
+  .win{width:1320px;height:740px;background:var(--card);border-radius:16px;overflow:hidden;
+    box-shadow:0 30px 90px rgba(0,0,0,.65), 0 0 0 1px #333c4e;display:flex;flex-direction:column;}
+  .bar{height:54px;background:#1a1f2a;display:flex;align-items:center;padding:0 20px;gap:9px;
+    border-bottom:1px solid var(--bd);flex:0 0 auto;}
+  .brand{font-weight:700;font-size:23px;color:var(--blue);letter-spacing:2px;margin-right:16px;}
+  .tb{padding:7px 16px;border:1px solid #333c4e;border-radius:8px;font-size:17px;color:#c6cddb;background:#232936;}
+
+  /* s0 标题卡 */
+  #s0 h1{font-size:112px;letter-spacing:4px;
+    background:linear-gradient(94deg,#8fb2ff 0%,#f0c060 72%);-webkit-background-clip:text;background-clip:text;color:transparent;}
+  #s0 .sub{margin-top:22px;font-size:38px;color:#c9d2e4;letter-spacing:2px;}
+  #s0 .quote{margin-top:14px;font-size:24px;color:var(--dim);letter-spacing:1px;}
+  #s0 .tags{margin-top:52px;display:flex;gap:18px;}
+  #s0 .tag{padding:11px 28px;border:1px solid #3a4358;border-radius:28px;font-size:23px;color:#c6cddb;}
+
+  /* s1 问题对比 */
+  #s1{justify-content:center;}
+  #s1 .head{font-size:40px;color:#dfe5f2;margin-bottom:44px;letter-spacing:1px;}
+  .pair{display:flex;gap:44px;align-items:stretch;}
+  .pane{width:560px;background:var(--card2);border:1px solid var(--bd);border-radius:16px;padding:28px 30px;}
+  .pane .pt{font-size:22px;color:var(--dim);margin-bottom:18px;letter-spacing:1px;}
+  .flow{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  .chip{padding:10px 20px;border-radius:10px;background:#232a38;border:1px solid #333c4e;font-size:20px;color:#d6dcea;}
+  .arrow{color:#5b6472;font-size:22px;}
+  .pane .note{margin-top:20px;font-size:20px;line-height:1.7;color:#9aa5ba;}
+  .pane.bad .pt{color:var(--red);}
+  .pane.good .pt{color:var(--green);}
+  .dead{margin-top:16px;font-size:26px;color:var(--red);font-family:'JB Mono',monospace;}
+  #s1 .tail{margin-top:40px;font-size:34px;color:#e8ebf2;}
+  .fadeup{opacity:0;transform:translateY(14px);transition:all .5s cubic-bezier(.2,.7,.3,1);}
+  .fadeup.in{opacity:1;transform:none;}
+
+  /* 编辑器分栏 */
+  .split{flex:1;display:flex;min-height:0;}
+  .panev{flex:1;display:flex;flex-direction:column;min-width:0;}
+  .panev+.panev{border-left:1px solid var(--bd);}
+  .ph{height:38px;background:#20242e;display:flex;align-items:center;padding:0 16px;
+    font-size:15px;color:#8a93a6;border-bottom:1px solid var(--bd);flex:0 0 auto;}
+  .code{flex:1;overflow:hidden;padding:16px 22px;font-family:'JB Mono',monospace;
+    font-size:17px;line-height:1.85;color:#d8dee9;white-space:pre-wrap;background:#141821;}
+  .code .ln{opacity:0;transform:translateX(-8px);transition:all .28s;}
+  .code .ln.in{opacity:1;transform:none;}
+  .k{color:var(--gold);}          /* @@ MDE 语法 */
+  .k2{color:var(--blue);}
+  .s{color:#9ad4a0;}              /* 字符串 */
+  .cm{color:#5f6b80;font-style:italic;}
+  .fn{color:#c9a6ff;}
+  .pv{flex:1;overflow:hidden;padding:20px 26px;background:#fdfcfa;color:#333;}
+  .pv h1{font-size:27px;color:#1f2430;margin:2px 0 12px;}
+  .pv p{font-size:18px;line-height:1.8;color:#3a3a3a;margin:9px 0;}
+  .pv .mono{font-family:'JB Mono',monospace;font-size:16px;background:#eef1f6;padding:3px 8px;border-radius:5px;}
+  .pv table{border-collapse:collapse;margin:12px 0;font-size:18px;}
+  .pv th,.pv td{border:1px solid #c9d0dc;padding:7px 16px;}
+  .pv th{background:#eef2fb;color:#243a66;}
+  .runpt{display:inline-flex;align-items:center;gap:10px;padding:6px 14px;border-radius:8px;
+    background:#fff4e0;border:1px solid #e6c58a;font-size:17px;color:#8a6520;margin:10px 0;}
+  .runpt .btn{width:26px;height:26px;border-radius:50%;background:#3d5bd6;color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:14px;}
+  .rows tr{opacity:0;transform:translateY(8px);transition:all .4s;}
+  .rows tr.in{opacity:1;transform:none;}
+
+  /* s4 图片 */
+  .imgs{display:grid;grid-template-columns:1fr 1fr;gap:13px;padding:4px 0;}
+  .imgs img{width:100%;border-radius:9px;box-shadow:0 8px 24px rgba(0,0,0,.16);
+    opacity:0;transform:translateY(14px) scale(.97);transition:all .55s cubic-bezier(.2,.7,.3,1);}
+  .imgs img.in{opacity:1;transform:none;}
+  .cap2{margin-top:10px;font-size:16px;color:#8c96a8;}
+
+  /* s5 目录树 */
+  #s5 .wrap{display:flex;gap:56px;align-items:center;}
+  .tree{width:600px;background:var(--card2);border:1px solid var(--bd);border-radius:14px;padding:26px 30px;
+    font-family:'JB Mono',monospace;font-size:20px;line-height:2.05;color:#c9d2e4;}
+  .tree .dir{color:var(--blue);}
+  .tree .asset{color:#d8dee9;}
+  .tree .newf{color:var(--gold);}
+  .tree .row{opacity:0;transform:translateX(-10px);transition:all .45s;}
+  .tree .row.in{opacity:1;transform:none;}
+  .namelink{width:560px;}
+  .namelink .lbl{font-size:22px;color:var(--dim);margin-bottom:10px;}
+  .namelink .box{background:#141821;border:1px solid #2f3748;border-radius:12px;padding:18px 22px;
+    font-family:'JB Mono',monospace;font-size:21px;margin-bottom:18px;}
+  .namelink .box.lit{border-color:var(--gold);box-shadow:0 0 0 2px rgba(240,192,96,.18);}
+  .namelink .same{display:flex;align-items:center;gap:12px;color:var(--green);font-size:21px;margin:6px 0 18px;}
+  .namelink .bad{color:var(--red);font-size:20px;font-family:'JB Mono',monospace;line-height:1.9;}
+
+  /* s6 代码 + 目录 */
+  #s6 .wrap{display:flex;gap:40px;align-items:center;}
+  .codepanel{width:900px;background:#141821;border:1px solid #2f3748;border-radius:14px;padding:22px 26px;}
+  .cline{margin-bottom:16px;}
+  .cline:last-child{margin-bottom:0;}
+  .cline .no{font-family:'JB Mono',monospace;font-size:15px;color:#5f6b80;margin-bottom:5px;}
+  .cline .src{font-family:'JB Mono',monospace;font-size:16.5px;line-height:1.5;color:#c9d2e4;
+    white-space:nowrap;display:inline-block;padding:4px 8px;border-radius:6px;}
+  .cline .src.hot{background:rgba(240,192,96,.13);color:#f0c060;}
+  .cline .src.cm{color:#5f6b80;font-style:italic;}
+  .expl{width:340px;}
+  .expl .t{font-size:21px;color:var(--dim);margin:0 0 12px;}
+  .expl .dirbox{background:var(--card2);border:1px solid var(--bd);border-radius:12px;padding:18px 22px;
+    font-family:'JB Mono',monospace;font-size:19px;line-height:1.95;color:#c9d2e4;}
+  .expl .dirbox .pylibs{color:var(--gold);}
+  .expl .dirbox .runs{color:var(--blue);}
+
+  /* s7 手动运行 */
+  #s7 .win{width:1180px;height:640px;}
+  .clicked{animation:pop .45s ease-out;}
+  @keyframes pop{0%{transform:scale(1)}45%{transform:scale(1.14)}100%{transform:scale(1)}}
+
+  /* s8 收尾 */
+  #s8 .big{font-size:52px;color:#fff;margin-bottom:38px;letter-spacing:1px;}
+  #s8 .cols{display:flex;gap:26px;}
+  #s8 .c{width:376px;background:var(--card2);border:1px solid var(--bd);border-radius:16px;padding:28px 30px;}
+  #s8 .c .n{font-size:15px;color:var(--gold);letter-spacing:2px;margin-bottom:12px;}
+  #s8 .c .t{font-size:26px;color:#e8ebf2;margin-bottom:10px;}
+  #s8 .c .d{font-size:18px;color:var(--dim);line-height:1.7;}
+  #s8 .end{margin-top:46px;font-size:26px;color:#8f9ab0;letter-spacing:3px;}
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- s0 标题 -->
+  <div class="scene" id="s0">
+    <h1>MDEditor 2.8</h1>
+    <div class="sub">在文档里跑自己的代码</div>
+    <div class="quote">数据点 → 执行点 → 返回值，全部留在文档里</div>
+    <div class="tags">
+      <div class="tag">数据点</div><div class="tag">执行点</div>
+      <div class="tag">表格 / 图片</div><div class="tag">本地运行</div>
+    </div>
+  </div>
+
+  <!-- s1 问题 -->
+  <div class="scene" id="s1">
+    <div class="head">写到要算一下的时候，只能切出去</div>
+    <div class="pair">
+      <div class="pane bad fadeup" id="p1">
+        <div class="pt">切出去</div>
+        <div class="flow">
+          <span class="chip">文档</span><span class="arrow">→</span>
+          <span class="chip">Excel</span><span class="arrow">→</span>
+          <span class="chip">脚本</span><span class="arrow">→</span>
+          <span class="chip">画图</span><span class="arrow">→</span>
+          <span class="chip">复制</span><span class="arrow">→</span>
+          <span class="chip">粘贴</span>
+        </div>
+        <div class="note">六个步骤，每做一次都得重新走一遍。</div>
+      </div>
+      <div class="pane bad fadeup" id="p2">
+        <div class="pt">贴回来的是什么</div>
+        <div class="dead">128000 / 143500 / 152300</div>
+        <div class="note">一段死数字。源数据一改，全部重来，而且没人知道它是哪次算出来的。</div>
+      </div>
+    </div>
+    <div class="tail fadeup" id="p3">能不能让文档<span class="hl">自己算</span>？</div>
+  </div>
+
+  <!-- s2 数据点 + 执行点 -->
+  <div class="scene" id="s2">
+    <div class="win">
+      <div class="bar"><div class="brand">MDEditor</div><div class="tb">保存</div><div class="tb">打开</div>
+        <div class="tb">排版</div><div class="tb">.docx</div><div class="tb">run</div></div>
+      <div class="split">
+        <div class="panev"><div class="ph">编辑器 · Markdown 源文</div>
+          <div class="code" id="c2"></div></div>
+        <div class="panev"><div class="ph">实时预览</div>
+          <div class="pv" id="v2"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- s3 返回表格 -->
+  <div class="scene" id="s3">
+    <div class="win">
+      <div class="bar"><div class="brand">MDEditor</div><div class="tb">run</div><div class="tb">.docx</div>
+        <div class="tb">导出</div></div>
+      <div class="split">
+        <div class="panev"><div class="ph">run 库 · csvcalc.py</div>
+          <div class="code" id="c3"></div></div>
+        <div class="panev"><div class="ph">预览 · 执行点就地渲染</div>
+          <div class="pv" id="v3"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- s4 返回图片 -->
+  <div class="scene" id="s4">
+    <div class="win">
+      <div class="bar"><div class="brand">MDEditor</div><div class="tb">run</div><div class="tb">导出</div></div>
+      <div class="split">
+        <div class="panev"><div class="ph">run 库 · plotimg.py</div>
+          <div class="code" id="c4"></div></div>
+        <div class="panev"><div class="ph">预览 · 三张图共用一个数据池</div>
+          <div class="pv" id="v4"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- s5 落点与命名 -->
+  <div class="scene" id="s5">
+    <div class="wrap">
+      <div class="tree" id="tree"></div>
+      <div class="namelink">
+        <div class="lbl">run 里写什么，就返回什么</div>
+        <div class="box" id="nb1">img.save(<span class="s">'销量图.png'</span>)</div>
+        <div class="box" id="nb2">return <span class="s">'![](销量图.png)'</span></div>
+        <div class="same" id="same">✓ 逐字相同 → 找到文件 → 显示</div>
+        <div class="bad" id="badbox">✗ ![](C:/某处/销量图.png)<br>✗ ![](销量图.PNG) 别赌大小写</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- s6 解释器与三方包 -->
+  <div class="scene" id="s6">
+    <div class="wrap">
+      <div class="codepanel">
+        <div class="cline"><div class="no">md_server.py:77</div>
+          <div class="src hot">PORTABLE_PY = os.path.join(HERE, "python", "python.exe")</div></div>
+        <div class="cline"><div class="no">md_server.py:722&nbsp;&nbsp;← 真正决定用哪个解释器</div>
+          <div class="src hot">py = PORTABLE_PY if os.path.exists(PORTABLE_PY) else sys.executable</div></div>
+        <div class="cline"><div class="no">md_server.py:535&nbsp;&nbsp;← 依赖检测</div>
+          <div class="src cm"># 同一个表达式，换解释器时两处要一起改</div></div>
+      </div>
+      <div class="expl">
+        <div class="t">三方包装这里</div>
+        <div class="dirbox">runtime/<br>&nbsp;&nbsp;<span class="runs">runs/</span>&nbsp;&nbsp;&nbsp;← 你的 run 库<br>&nbsp;&nbsp;<span class="pylibs">pylibs/</span>&nbsp;← 三方包</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- s7 手动运行 -->
+  <div class="scene" id="s7">
+    <div class="win">
+      <div class="bar"><div class="brand">MDEditor</div><div class="tb">run</div><div class="tb">保存</div></div>
+      <div class="split">
+        <div class="panev"><div class="ph">编辑器</div>
+          <div class="code" id="c7"></div></div>
+        <div class="panev"><div class="ph">预览 · 默认手动</div>
+          <div class="pv" id="v7"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- s8 收尾 -->
+  <div class="scene" id="s8">
+    <div class="big">数据进来，结果回去，代码只在你自己的机器上跑</div>
+    <div class="cols">
+      <div class="c"><div class="n">输入</div><div class="t">数据点</div>
+        <div class="d">六种写法，四种形状<br>kv / vals / raw / marks</div></div>
+      <div class="c"><div class="n">输出</div><div class="t">返回值</div>
+        <div class="d">文本 / 表格 / 图片<br>表格自己拼分隔行，图片自己落盘</div></div>
+      <div class="c"><div class="n">运行</div><div class="t">本地解释器</div>
+        <div class="d">便携 Python 3.11<br>三方包放 runtime/pylibs</div></div>
+    </div>
+    <div class="end">MDEditor 2.8 · 在文档里跑自己的代码</div>
+  </div>
+
+  <div id="cap"><span id="cap-t"></span></div>
+</div>
+
+<script>
+/* ── 基础 ── */
+const $ = s => document.querySelector(s);
+const cap = t => { $('#cap-t').innerHTML = t; };
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function show(id){ document.querySelectorAll('.scene').forEach(s=>s.classList.remove('on')); $(id).classList.add('on'); }
+/* 逐行淡入：html 行数组，间隔 ms */
+function lines(el, arr, gap, startDelay){
+  el.innerHTML = arr.map(h=>'<div class="ln">'+h+'</div>').join('');
+  const ns = el.querySelectorAll('.ln');
+  ns.forEach((n,i)=>setTimeout(()=>n.classList.add('in'), (startDelay||0) + i*gap));
+  return ns.length*gap + (startDelay||0);
+}
+function fadeIn(sel, delay){
+  setTimeout(()=>{ const e=$(sel); if(e) e.classList.add('in'); }, delay);
+}
+
+/* ── s2：数据点 + 执行点 ── */
+function playS2(){
+  const code = [
+    '<span class="cm">### 门店月度销量</span>',
+    '',
+    '<span class="k">@@ MDE__月度</span>{标题 == 门店月度销量, 单位 == 元,',
+    '&nbsp;&nbsp;一月 == 128000, 二月 == 143500, 三月 == 152300}',
+    '',
+    '上图：<span class="k">@@ MDE from</span> <span class="fn">plotimg</span> <span class="k">import</span> <span class="fn">bar</span> is 月度',
+    '',
+    '<span class="k">@@ MDE_甲</span>{行 == 2, 列 == 3, 数 == 2, 运算 == *}',
+    '',
+    '单价：<span class="k">@@ MDE from</span> <span class="fn">csvcalc</span> <span class="k">import</span> <span class="fn">cell</span> is 甲'
+  ];
+  lines($('#c2'), code, 240, 300);
+
+  const v = $('#v2');
+  v.innerHTML = '';
+  setTimeout(()=>{ v.innerHTML += '<h1>门店月度销量</h1>'; }, 1400);
+  setTimeout(()=>{
+    v.innerHTML += '<p>数据点写成一行：<span class="mono">@@ MDE__月度{…}</span></p>' +
+      '<p>两个下划线 = 隐性，屏幕上不显示，只把数据交给 run。</p>';
+  }, 3400);
+  setTimeout(()=>{
+    v.innerHTML += '<div class="runpt" id="rp1"><span class="btn">▶</span>待运行 · bar · plotimg</div>';
+  }, 5200);
+  setTimeout(()=>{
+    const e = $('#rp1');
+    if (e) e.outerHTML = '<p><span class="mono">128000 / 143500 / 152300（bar）</span></p>';
+  }, 7600);
+  setTimeout(()=>{
+    v.innerHTML += '<p>同一份数据喂第二个执行点：</p>' +
+      '<div class="runpt" id="rp2"><span class="btn">▶</span>待运行 · cell · csvcalc</div>';
+  }, 9000);
+  setTimeout(()=>{
+    const e = $('#rp2');
+    if (e) e.outerHTML = '<p><span class="mono">152300 × 2 = 304600</span></p>' +
+      '<p class="cap2">run 返回什么，这里就显示什么；两个执行点各自吃同一个池。</p>';
+  }, 11400);
+  setTimeout(()=>{
+    v.innerHTML += '<div class="mono" style="display:block;margin-top:14px;padding:12px 14px;' +
+      'background:#f3f5fa;border-radius:8px;font-size:15px;line-height:1.9;color:#44506b">' +
+      "data['kv'] = {<br>&nbsp;&nbsp;'标题': '门店月度销量', '单位': '元',<br>" +
+      "&nbsp;&nbsp;'一月': '128000', '二月': '143500', '三月': '152300'<br>}</div>";
+  }, 13800);
+}
+
+/* ── s3：返回表格 ── */
+function playS3(){
+  const code = [
+    '<span class="cm"># 数据点写法：@@ MDE_甲{表格 == 示例销售数据.csv, 运算 == *}</span>',
+    '',
+    '<span class="k">def</span> <span class="fn">run</span>(data):',
+    '&nbsp;&nbsp;&nbsp;&nbsp;rows = read_csv(data[<span class="s">\'kv\'</span>][<span class="s">\'表格\'</span>])',
+    '&nbsp;&nbsp;&nbsp;&nbsp;head = <span class="s">\'|门店|一月|二月|\'</span>',
+    '&nbsp;&nbsp;&nbsp;&nbsp;sep&nbsp; = <span class="s">\'|---|---|---|\'</span>',
+    '&nbsp;&nbsp;&nbsp;&nbsp;body = [row(r) <span class="k">for</span> r <span class="k">in</span> rows]',
+    '&nbsp;&nbsp;&nbsp;&nbsp;<span class="k">return</span> <span class="s">\'\\n\'.join([head, sep] + body)</span>'
+  ];
+  lines($('#c3'), code, 230, 300);
+
+  const v = $('#v3');
+  v.innerHTML = '<h1>整表 ×1.1</h1>';
+  setTimeout(()=>{
+    v.innerHTML += '<table class="rows" id="t3"><thead><tr><th>门店</th><th>一月</th><th>二月</th></tr></thead>' +
+      '<tbody><tr><td>北京朝阳店</td><td>140800</td><td>157850</td></tr>' +
+      '<tr><td>上海静安店</td><td>106150</td><td>97020</td></tr>' +
+      '<tr><td>广州天河店</td><td>81620</td><td>87450</td></tr>' +
+      '<tr><td>成都春熙店</td><td>67980</td><td>65230</td></tr></tbody></table>' +
+      '<p class="cap2">这张表是 run 拼出来的字符串，不是框架从数据推出来的</p>';
+    const rs = $('#t3').querySelectorAll('tr');
+    rs.forEach((r,i)=>setTimeout(()=>r.classList.add('in'), i*180));
+  }, 2600);
+  setTimeout(()=>{
+    v.innerHTML += '<p>缺了分隔行 <span class="mono">|---|---|---|</span>，前端就不认表格——整段原样当文字。</p>';
+  }, 7200);
+  setTimeout(()=>{
+    v.innerHTML += '<p class="cap2">单元格里的竖线写成 <span class="mono">\\|</span>；不能换行、不能合并单元格。</p>';
+  }, 9600);
+}
+
+/* ── s4：返回图片 ── */
+function playS4(){
+  const code = [
+    '<span class="k">def</span> <span class="fn">bar</span>(data):',
+    '&nbsp;&nbsp;&nbsp;&nbsp;img = Image.new(<span class="s">\'RGB\'</span>, (900, 520), <span class="s">\'white\'</span>)',
+    '&nbsp;&nbsp;&nbsp;&nbsp;draw_chart(img, data)',
+    '&nbsp;&nbsp;&nbsp;&nbsp;img.save(<span class="s">\'销量图-柱状图.png\'</span>)&nbsp;&nbsp;<span class="cm"># 就写当前目录</span>',
+    '&nbsp;&nbsp;&nbsp;&nbsp;<span class="k">return</span> <span class="s">\'![](销量图-柱状图.png)\'</span>',
+    '',
+    '<span class="cm"># cwd = 文档资产目录，不用拼任何路径</span>',
+    '<span class="cm"># 图片类别的名字对上即可，框架不替你画图</span>'
+  ];
+  lines($('#c4'), code, 240, 300);
+
+  const v = $('#v4');
+  v.innerHTML = '<h1>三种图，一份数据</h1><div class="imgs" id="im4"></div>';
+  const srcs = ['img/bar.png','img/line.png','img/donut.png'];
+  srcs.forEach((s,i)=>{
+    setTimeout(()=>{
+      const im = document.createElement('img');
+      im.src = s;
+      $('#im4').appendChild(im);
+      requestAnimationFrame(()=>im.classList.add('in'));
+    }, 2400 + i*1500);
+  });
+  setTimeout(()=>{
+    v.innerHTML += '<p class="cap2">三张图都落在本文档的资产目录里，跟着文档走。</p>';
+  }, 7400);
+}
+
+/* ── s5：落点与命名 ── */
+function playS5(){
+  const rows = [
+    '<span class="dir">季度报告.md</span>',
+    '<span class="dir">季度报告.assets/</span>',
+    '&nbsp;&nbsp;<span class="newf">销量图.png</span>&nbsp;&nbsp;<span class="cm">← run 刚写的</span>',
+    '&nbsp;&nbsp;<span class="asset">示例销售数据.csv</span>',
+    '&nbsp;&nbsp;<span class="asset">内嵌示例图.png</span>'
+  ];
+  lines($('#tree'), rows, 420, 300);
+
+  setTimeout(()=>$('#nb1').classList.add('lit'), 2400);
+  setTimeout(()=>$('#nb2').classList.add('lit'), 3400);
+  fadeIn('#same', 4600);
+  fadeIn('#badbox', 6600);
+}
+
+/* ── s7：手动运行 ── */
+function playS7(){
+  const code = [
+    '<span class="cm">### 单元格运算</span>',
+    '',
+    '<span class="k">@@ MDE_甲</span>{表格 == 示例销售数据.csv,',
+    '&nbsp;&nbsp;行名 == 北京朝阳店, 列名 == 三月, 数 == 2, 运算 == *}',
+    '',
+    '单价：<span class="k">@@ MDE from</span> <span class="fn">csvcalc</span> <span class="k">import</span> <span class="fn">cell</span> is 甲'
+  ];
+  lines($('#c7'), code, 260, 400);
+
+  const v = $('#v7');
+  v.innerHTML = '';
+  setTimeout(()=>{ v.innerHTML = '<h1>单元格运算</h1>' +
+    '<div class="runpt" id="rp"><span class="btn" id="rbtn">▶</span>待运行 · cell · csvcalc</div>' +
+    '<p class="cap2">默认手动：不点它，它不动</p>'; }, 2000);
+  setTimeout(()=>{ const b=$('#rbtn'); if(b){ b.classList.add('clicked'); } }, 5200);
+  setTimeout(()=>{
+    const rp = $('#rp');
+    if (rp) rp.outerHTML = '<table><thead><tr><th>行</th><th>列</th><th>原值</th><th>结果</th></tr></thead>' +
+      '<tbody><tr><td>北京朝阳店</td><td>三月</td><td>152300</td><td>304600</td></tr></tbody></table>';
+  }, 5700);
+  setTimeout(()=>{ $('#v7').innerHTML += '<p>跑完可以回到「立即」或「等待 N 秒」，选一次就记住。</p>'; }, 8200);
+}
+
+/* ── 时间线 ── */
+const TL = [
+  [0,      () => { show('#s0'); cap('MDEditor 2.8 · 在<span class="hl">文档</span>里跑自己的代码'); }],
+  [7900,   () => { show('#s1'); cap('写到要算一下，只能<span class="hl">切出去</span>：Excel、脚本、画图，走一遍再贴回来'); 
+                   fadeIn('#p1', 400); fadeIn('#p2', 1400); fadeIn('#p3', 3200); }],
+  [17860,  () => { show('#s2'); cap('数据点写数据，执行点写<span class="hl">调用哪个函数</span>'); playS2(); }],
+  [33860,  () => { show('#s3'); cap('返回表格：<span class="hl">表头行 + 分隔行 + 数据行</span>，缺一行就不认'); playS3(); }],
+  [48700,  () => { show('#s4'); cap('返回图片：写到当前目录，返回 <span class="hl">![](文件名)</span>'); playS4(); }],
+  [63090,  () => { show('#s5'); cap('当前目录就是<span class="hl">文档资产目录</span>，名字必须逐字相同'); playS5(); }],
+  [78020,  () => { show('#s6'); cap('解释器改一行；三方包放 <span class="hl">runtime/pylibs</span>'); }],
+  [92410,  () => { show('#s7'); cap('默认<span class="hl">手动</span>：你点它，它才跑'); playS7(); }],
+  [104240, () => { show('#s8'); cap('数据进来，结果回去，代码只在<span class="hl">你自己的机器</span>上跑'); }],
+  [115030, () => { window.__DONE__ = true; }]
+];
+
+if (window.__DRIVE__) { window.__start = function(){ TL.forEach(([t, fn]) => setTimeout(fn, t)); }; }
+else { TL.forEach(([t, fn]) => setTimeout(fn, t)); }
+window.__DUR__ = 115030;
+</script>
+</body>
+</html>

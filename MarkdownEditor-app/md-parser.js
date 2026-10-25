@@ -210,6 +210,17 @@ function _dpTableSrc(body){
 /* MDE 数据点 span（low runner）：data-dp 存 body 原文（URI 编码），
    data-dp-val 存结构化值 JSON（v2.6 三通道：kv/vals）；fail-closed 时
    调用方不产本 span（按普通文本渲染）。隐性 display:none 不占位 */
+/* 外部引用值 → 「打开」按钮的判定（v2.8）：值须是不含换行的相对路径，
+   形如 <名>.assets/文件 或 assets/文件。**允许空格**——文档名带空格
+   （如「MDEditor 使用指南.assets/x.csv」）是常见情形，早先按 \s 一律
+   排除，导致这类文档永远不出按钮。存在性与目录白名单由服务端判定 */
+function _dpRefPath(val){
+  var v=String(val==null?'':val).trim();
+  if(!v||/[\r\n\t]/.test(v))return '';
+  if(/^(https?:|data:|file:|\/|[A-Za-z]:)/.test(v))return '';
+  if(!/(^|\/)([^\/]+\.assets|assets)\/[^\/]+$/.test(v))return '';
+  return v;
+}
 function mdeDpSpan(body,hidden,alias,parsed){
   var pr=parsed||mdeParseBody(body);
   var disp='';
@@ -221,12 +232,21 @@ function mdeDpSpan(body,hidden,alias,parsed){
     var v=pr.kvSingle?function(){var s={};s[pr.singleKey]=pr.singleVal;return s;}():pr.val;
     valAttr=' data-dp-val="'+escAttr(JSON.stringify({ch:pr.ch,val:v}))+'"';
   }
+  /* 显性外部引用：挂「打开」按钮（隐性没有渲染位置，故不加） */
+  var refBtn='';
+  if(!hidden){
+    var rp=_dpRefPath(disp);
+    if(rp){
+      refBtn='<button class="mde-ref-open" type="button" data-ref="'+escAttr(rp)+
+        '" title="用系统关联程序打开这份副本">打开</button>';
+    }
+  }
   return '<span class="mde-dp'+(hidden?' mde-dp-hidden" style="display:none"':'"')+
     ' data-dp="'+encodeURIComponent(body)+'"'+
-    ' data-dp-alias="'+escAttr(alias||'')+'"'+valAttr+'>'+escapeHtml(disp)+'</span>';
+    ' data-dp-alias="'+escAttr(alias||'')+'"'+valAttr+'>'+escapeHtml(disp)+refBtn+'</span>';
 }
 
-function parseInline(text){
+function parseInline(text,noMde){
   var codes=[];
   text=text.replace(/`([^`]+)`/g,function(m,c){codes.push(c);return '@@C'+(codes.length-1)+'@@';});
   /* 反斜杠转义（CommonMark 口径）：\X（X 为 ASCII 标点）→ 占位符，行内语法全部
@@ -248,6 +268,11 @@ function parseInline(text){
      等长列表逐个替换）；执行点自身渲染不可见。
      行内体不含 {} 与换行；跨行数据点/表格型由块级收集处理（见 parseMarkdown） */
   var toks=[];
+  /* noMde：执行点结果上下文专用开关（v2.7）。结果文本里的 @@ MDE… 与 '''
+     只当普通文字——否则 run 返回的一段文件内容会在预览区反向生成数据点、
+     被 _collectBuckets 收进池子，等于"一个 run 的输出能改另一个 run 的输入"。
+     正文渲染不传此参数，行为零变化。 */
+  if(!noMde){
   text=text.replace(/@@ MDE(_{1,2})([\w\u4e00-\u9fff.-]*)\{([^\n{}]*)\}/g,function(m,u,alias,body){
     var pr=mdeParseBody(body);
     /* fail-closed：原文保留，但必须先进占位符——否则 body 里的 _{…}
@@ -271,6 +296,7 @@ function parseInline(text){
     toks.push('<span class="mde-mark" data-mark="'+escAttr(name)+'">'+escapeHtml(m)+'</span>');
     return '\x00T'+(toks.length-1)+'\x00';
   });
+  }
   text=escapeHtml(text);
   /* v2.6.10：LaTeX 风格上下标，正文直接写、不加 $：
      ^{任意内容} → <sup>、_{任意内容} → <sub>（^{[1]}、^{1}、^{世界之光} 均可）。

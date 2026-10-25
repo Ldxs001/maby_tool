@@ -199,6 +199,17 @@
   .mde-run-pending{color:var(--muted);font-size:.85em;border:1px dashed var(--border);
     border-radius:5px;padding:0 6px;}
   /* v2.6 global 执行点：默认不可见（指令非内容）；待运行/失败时可见 */
+  /* 执行点结果是表格或多行文本时容器转块级，否则 table 挤在行内、
+     多行文本只有第一行吃到段落首行缩进（后两行齐左，看着像错位）。
+     text-indent:0 压掉继承来的首行缩进——自身声明胜过继承值，无需 !important */
+  .mde-run-block{display:block; margin:.45em 0; text-indent:0;}
+  /* v2.8 外部引用：显性数据点后的「打开」按钮（系统关联程序打开副本） */
+  .mde-ref-open{margin-left:.4em; padding:0 .45em; font:inherit; font-size:.82em;
+    line-height:1.5; color:var(--gold,#c8a24a); background:none;
+    border:1px solid currentColor; border-radius:4px; cursor:pointer;
+    vertical-align:baseline; opacity:.85;}
+  .mde-ref-open:hover{opacity:1;}
+  .mde-ref-open:active{transform:translateY(1px);}
   .mde-run-global{display:none;}
   .mde-run-global[data-pending]{display:inline;}
   .mde-run-global[data-done="err"]{display:inline;}
@@ -781,6 +792,17 @@ function _dpTableSrc(body){
 /* MDE 数据点 span（low runner）：data-dp 存 body 原文（URI 编码），
    data-dp-val 存结构化值 JSON（v2.6 三通道：kv/vals）；fail-closed 时
    调用方不产本 span（按普通文本渲染）。隐性 display:none 不占位 */
+/* 外部引用值 → 「打开」按钮的判定（v2.8）：值须是不含换行的相对路径，
+   形如 <名>.assets/文件 或 assets/文件。**允许空格**——文档名带空格
+   （如「MDEditor 使用指南.assets/x.csv」）是常见情形，早先按 \s 一律
+   排除，导致这类文档永远不出按钮。存在性与目录白名单由服务端判定 */
+function _dpRefPath(val){
+  var v=String(val==null?'':val).trim();
+  if(!v||/[\r\n\t]/.test(v))return '';
+  if(/^(https?:|data:|file:|\/|[A-Za-z]:)/.test(v))return '';
+  if(!/(^|\/)([^\/]+\.assets|assets)\/[^\/]+$/.test(v))return '';
+  return v;
+}
 function mdeDpSpan(body,hidden,alias,parsed){
   var pr=parsed||mdeParseBody(body);
   var disp='';
@@ -792,12 +814,21 @@ function mdeDpSpan(body,hidden,alias,parsed){
     var v=pr.kvSingle?function(){var s={};s[pr.singleKey]=pr.singleVal;return s;}():pr.val;
     valAttr=' data-dp-val="'+escAttr(JSON.stringify({ch:pr.ch,val:v}))+'"';
   }
+  /* 显性外部引用：挂「打开」按钮（隐性没有渲染位置，故不加） */
+  var refBtn='';
+  if(!hidden){
+    var rp=_dpRefPath(disp);
+    if(rp){
+      refBtn='<button class="mde-ref-open" type="button" data-ref="'+escAttr(rp)+
+        '" title="用系统关联程序打开这份副本">打开</button>';
+    }
+  }
   return '<span class="mde-dp'+(hidden?' mde-dp-hidden" style="display:none"':'"')+
     ' data-dp="'+encodeURIComponent(body)+'"'+
-    ' data-dp-alias="'+escAttr(alias||'')+'"'+valAttr+'>'+escapeHtml(disp)+'</span>';
+    ' data-dp-alias="'+escAttr(alias||'')+'"'+valAttr+'>'+escapeHtml(disp)+refBtn+'</span>';
 }
 
-function parseInline(text){
+function parseInline(text,noMde){
   var codes=[];
   text=text.replace(/`([^`]+)`/g,function(m,c){codes.push(c);return '@@C'+(codes.length-1)+'@@';});
   /* 反斜杠转义（CommonMark 口径）：\X（X 为 ASCII 标点）→ 占位符，行内语法全部
@@ -819,6 +850,11 @@ function parseInline(text){
      等长列表逐个替换）；执行点自身渲染不可见。
      行内体不含 {} 与换行；跨行数据点/表格型由块级收集处理（见 parseMarkdown） */
   var toks=[];
+  /* noMde：执行点结果上下文专用开关（v2.7）。结果文本里的 @@ MDE… 与 '''
+     只当普通文字——否则 run 返回的一段文件内容会在预览区反向生成数据点、
+     被 _collectBuckets 收进池子，等于"一个 run 的输出能改另一个 run 的输入"。
+     正文渲染不传此参数，行为零变化。 */
+  if(!noMde){
   text=text.replace(/@@ MDE(_{1,2})([\w\u4e00-\u9fff.-]*)\{([^\n{}]*)\}/g,function(m,u,alias,body){
     var pr=mdeParseBody(body);
     /* fail-closed：原文保留，但必须先进占位符——否则 body 里的 _{…}
@@ -842,6 +878,7 @@ function parseInline(text){
     toks.push('<span class="mde-mark" data-mark="'+escAttr(name)+'">'+escapeHtml(m)+'</span>');
     return '\x00T'+(toks.length-1)+'\x00';
   });
+  }
   text=escapeHtml(text);
   /* v2.6.10：LaTeX 风格上下标，正文直接写、不加 $：
      ^{任意内容} → <sup>、_{任意内容} → <sub>（^{[1]}、^{1}、^{世界之光} 均可）。
@@ -1653,10 +1690,10 @@ function parseMarkdown(src){
      中间的数据点一律进 data，位置无关）。结果缓存（会话内存）：
      mod/fn + 数据指纹；run 库保存时清空。
      运行模式（v2.5，lr 界面设置，localStorage 持久化）：
-     instant=渲染收尾 400ms 防抖自动跑（原行为）
-     wait=停止输入 N 秒后跑（默认 5，用户可调）
      manual=不自动跑：执行点显示"▶ 待运行"，单点 ▶ 或左下角
-     "全部运行"按钮触发 */
+     "全部运行"按钮触发（v2.8.1 起为默认，避免一边打字一边反复跑）
+     instant=渲染收尾 400ms 防抖自动跑
+     wait=停止输入 N 秒后跑（默认 5，用户可调） */
   var runPassTimer=null, runCache={}, runBusy=false;
   var RUN_MODE_KEY='md-editor-run-mode';
   /* v2.5.3 单向迁移：v2.5 裸 localStorage 时代的 run-mode 值从未上云——
@@ -1668,7 +1705,9 @@ function parseMarkdown(src){
     if(!_rmHasRemote&&_rmLocal){ lsSet(RUN_MODE_KEY,_rmLocal); }
   }catch(e){}
   function runModeCfg(){
-    var c={mode:'instant',waitSec:5};
+    /* v2.8.1：默认改手动——不再是"打开就自动跑"，必须点 ▶ 或「全部运行」。
+       只对**没有持久值**的环境生效；已有 md-editor-run-mode 的照旧读用户选择 */
+    var c={mode:'manual',waitSec:5};
     try{
       var j=JSON.parse(localStorage.getItem(RUN_MODE_KEY)||'{}');
       if(j&&j.mode)c.mode=j.mode;
@@ -1722,6 +1761,7 @@ function parseMarkdown(src){
       var fn=rs[i].getAttribute('data-run-fn');
       var gm=rs[i].getAttribute('data-run-global');
       rs[i].removeAttribute('data-done');
+      rs[i].classList.remove('mde-run-block');
       if(gm){rs[i].setAttribute('data-pending','1');}
       rs[i].innerHTML='<span class="mde-run-pending">待运行 '+
         escapeHtml((fn!=='run'?fn+' · ':'')+mod+(gm?(' · 全局 '+gm):''))+
@@ -1734,6 +1774,35 @@ function parseMarkdown(src){
       }
     }
     _updateRunAllBtn();
+  }
+  /* v2.8：用外部程序改完副本回来，把吃该池的执行点复位为待运行。
+     必须同时删缓存项——否则块重建时 _replayFromCache 会把旧结果贴回去，
+     用户看到"文件改了但数没变"。key 与执行/重放同一来源（_runKeyOf） */
+  function _resetRunsForAlias(alias){
+    alias=alias||'';
+    var buckets=_collectBuckets();
+    var rs=preview.querySelectorAll('.mde-run');
+    var n=0;
+    for(var i=0;i<rs.length;i++){
+      var el=rs[i];
+      if((el.getAttribute('data-run-alias')||'')!==alias)continue;
+      var bucket=buckets[alias]||{kv:{},vals:[],raw:[],
+        sig:'{"kv":{},"vals":[],"raw":[]}'};
+      delete runCache[_runKeyOf(el,bucket)];
+      el.removeAttribute('data-done');
+      el.classList.remove('mde-run-block');
+      var mod=el.getAttribute('data-run-mod');
+      var fn=el.getAttribute('data-run-fn');
+      var gm=el.getAttribute('data-run-global');
+      if(gm){el.setAttribute('data-pending','1');}
+      el.innerHTML='<span class="mde-run-pending">待运行 '+
+        escapeHtml((fn!=='run'?fn+' · ':'')+mod+(gm?(' · 全局 '+gm):''))+
+        '</span><button class="mde-run-btn" title="运行此执行点">▶</button>';
+      n++;
+    }
+    _updateRunAllBtn();
+    if(n&&runModeCfg().mode!=='manual'){ scheduleRunPass(); }
+    return n;
   }
   function _updateRunAllBtn(){
     var btn=document.getElementById('btnRunAll');
@@ -1786,6 +1855,17 @@ function parseMarkdown(src){
        buckets 可选（单点调用时现收集）。串行防风暴：runBusy。
        v2.6：global 执行点（data-run-global=标记名）——收集全文该标记
        实例进 data['marks']，run 返回等长列表逐个替换标记 span。 */
+    /* 缓存 key 单一来源（v2.8）：执行 / 重放 / 引用复位三处必须同构，
+       否则"外部改了文件 → 复位后仍命中旧结果" */
+    function _runKeyOf(el,bucket,mlen){
+      var mod=el.getAttribute('data-run-mod'),fn=el.getAttribute('data-run-fn');
+      var alias=el.getAttribute('data-run-alias')||'';
+      var gmark=el.getAttribute('data-run-global')||'';
+      if(gmark&&mlen===undefined){
+        mlen=preview.querySelectorAll('.mde-mark[data-mark="'+CSS.escape(gmark)+'"]').length;
+      }
+      return mod+'/'+fn+'#'+alias+'#'+(gmark?('g:'+gmark+'#'+mlen+'#'):'')+bucket.sig;
+    }
     function _execRunPoint(el,buckets){
         var mod=el.getAttribute('data-run-mod'),fn=el.getAttribute('data-run-fn');
         var alias=el.getAttribute('data-run-alias')||'';
@@ -1807,7 +1887,7 @@ function parseMarkdown(src){
           }
           data.marks=marks;
         }
-        var key=mod+'/'+fn+'#'+alias+'#'+(gmark?('g:'+gmark+'#'+marks.length+'#'):'')+bucket.sig;
+        var key=_runKeyOf(el,bucket,marks?marks.length:undefined);
         if(runCache[key]!==undefined){
           if(runCache[key]&&runCache[key].__fail){ _applyRunFail(el,runCache[key].__fail); }
           else if(gmark){ _applyGlobalResult(el,markEls,runCache[key]); }
@@ -1821,7 +1901,7 @@ function parseMarkdown(src){
         if(runBusy)return;   /* 串行防风暴：下一轮防抖再跑 */
         runBusy=true;
         fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({mod:mod,fn:fn,data:data})})
+          body:JSON.stringify({mod:mod,fn:fn,data:data,mdPath:currentFile||''})})
           .then(function(r){return r.json();})
           .then(function(j){
             runBusy=false;
@@ -1870,21 +1950,57 @@ function parseMarkdown(src){
       if(markEls&&arr&&markEls.length===arr.length){
         for(var i=0;i<markEls.length;i++){
           if(markEls[i].parentNode){
-            markEls[i].innerHTML=parseInline(String(arr[i]));
+            markEls[i].innerHTML=parseInline(String(arr[i]),true);
           }
         }
       }
       el.setAttribute('data-done','1');
       _updateRunAllBtn();
     }
+    /* 执行点结果渲染（v2.7）：受限块级。只认两种东西——
+       ① 表格：本行含 | 且下一行是分隔行（与正文 parseTable 同一判定、同一函数，
+          分隔行只定列数与对齐、自身不渲染）；不写分隔行就不是表格，原样当文字；
+       ② 换行：真换行切成行，行内仍走 parseInline（粗斜体/行内码/链接/图片）。
+       刻意不调 parseMarkdown：那会把标题/列表/引用/数据点/执行点一起吃掉——
+       结果文本不是文档源文，越权解析等于让 run 的输出混进文档语法。
+       noMde=true：结果里的 @@ MDE… 与 ''' 只当文字，不反向生成数据点/标记。 */
+    function renderRunResult(text){
+      var lines=String(text==null?'':text).replace(/^\n+|\n+$/g,'').split(/\r?\n/);
+      var out=[],buf=[],hasTable=false;
+      function flush(){
+        while(buf.length&&buf[buf.length-1].trim()===''){buf.pop();}
+        if(buf.length){
+          out.push(buf.map(function(l){return parseInline(l,true);}).join('<br>'));
+        }
+        buf=[];
+      }
+      var i=0;
+      while(i<lines.length){
+        var ln=lines[i];
+        if(ln.indexOf('|')>=0 && i+1<lines.length &&
+           /^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1]) && lines[i+1].indexOf('-')>=0){
+          flush();
+          var t=parseTable(lines,i);   /* 返回 [html, 下一行下标] */
+          out.push(t[0]); i=t[1]; hasTable=true; continue;
+        }
+        buf.push(ln); i++;
+      }
+      flush();
+      return {html:out.join(''),hasTable:hasTable,block:(hasTable||lines.length>1)};
+    }
     function _applyRunResult(el,result){
-      el.innerHTML=parseInline(String(result));
+      var r=renderRunResult(result);
+      el.innerHTML=r.html;
+      /* 表格/多行 → 容器转块级（单行结果维持行内，不打断所在句子） */
+      if(r.block){el.classList.add('mde-run-block');}
+      else{el.classList.remove('mde-run-block');}
       el.setAttribute('data-done','1');
       _updateRunAllBtn();
     }
    /* 失败态（v2.5）：跟随式红色错误块紧随执行点（title 悬停用户从未
       发现，废除）；缺包时错误块含 pip 包名；▶ 重试按钮。导出剥离。 */
    function _applyRunFail(el,reason,missing){
+     el.classList.remove('mde-run-block');
      el.innerHTML='<span class="mde-run-err">⚠ '+
        (missing?('缺少包 '+escapeHtml(missing.pip_name)+'：'):escapeHtml(String(reason||'执行失败').substring(0,160)))+
        '</span><button class="mde-run-btn" title="重试">▶</button>';
@@ -1904,7 +2020,7 @@ function parseMarkdown(src){
        markEls=preview.querySelectorAll('.mde-mark[data-mark="'+CSS.escape(gmark)+'"]');
        mlen=markEls.length;
      }
-     var key=mod+'/'+fn+'#'+alias+'#'+(gmark?('g:'+gmark+'#'+mlen+'#'):'')+bucket.sig;
+     var key=_runKeyOf(el,bucket,mlen);
      if(runCache[key]===undefined)return false;
      var v=runCache[key];
      if(v&&v.__fail){ _applyRunFail(el,v.__fail,v.__missing); return true; }
@@ -2391,7 +2507,7 @@ function parseMarkdown(src){
        err 态与未运行执行点导出原文（fail-closed，导出的是文档最终形态） */
     var hiddens=clone.querySelectorAll('.mde-dp-hidden');
     for(var h=0;h<hiddens.length;h++){ if(hiddens[h].parentNode){hiddens[h].parentNode.removeChild(hiddens[h]);} }
-     var uiels=clone.querySelectorAll('.mde-run-btn, .mde-run-err, .mde-run-pending');
+     var uiels=clone.querySelectorAll('.mde-run-btn, .mde-run-err, .mde-run-pending, .mde-ref-open');
      for(var u=0;u<uiels.length;u++){ if(uiels[u].parentNode){uiels[u].parentNode.removeChild(uiels[u]);} }
      /* v2.6：global 执行点是不可见指令，导出整体删除（成功失败的标记
         替换内容留在 .mde-mark span 里不受影响） */
@@ -2401,6 +2517,29 @@ function parseMarkdown(src){
      for(var r2=0;r2<runc.length;r2++){
        if(runc[r2].getAttribute('data-done')!=='1'){
          runc[r2].textContent=decodeURIComponent(runc[r2].getAttribute('data-run-orig')||'');
+       }
+     }
+     /* v2.7：执行点结果是表格时，table 生成在 <p><span> 里（行内容器）。
+        docx 侧不认"段内表格"，会退化成纯文字段落——所以导出克隆里把 table
+        提到最近的块级容器之后（同一父级），再把掏空的 span / 空 <p> 收掉。
+        HTML 导出不走这条克隆，浏览器本来就能渲染嵌套 table，无需处理 */
+     var tbs=clone.querySelectorAll('.mde-run:not(.mde-run-global) table');
+     for(var tb=0;tb<tbs.length;tb++){
+       var tbl=tbs[tb],rn=tbl.parentNode;
+       while(rn&&!(rn.classList&&rn.classList.contains('mde-run'))){rn=rn.parentNode;}
+       if(!rn||!rn.parentNode){continue;}
+       var blk=rn;
+       while(blk&&blk.parentNode&&!/^(P|LI|TD|BLOCKQUOTE)$/.test(blk.tagName)){blk=blk.parentNode;}
+       if(!blk||!blk.parentNode){continue;}
+       rn.removeChild(tbl);
+       blk.parentNode.insertBefore(tbl,blk.nextSibling);
+       if(rn.classList){rn.classList.remove('mde-run-block');}
+       if(!rn.textContent.trim()&&!rn.querySelector('img,table')&&rn.parentNode){
+         rn.parentNode.removeChild(rn);
+       }
+       if(blk.tagName==='P'&&!blk.textContent.trim()&&!blk.querySelector('img,table,span.mde-run')
+          &&blk.parentNode){
+         blk.parentNode.removeChild(blk);
        }
      }
     return _rasterAll(clone).then(function(){
@@ -3334,6 +3473,30 @@ function parseMarkdown(src){
     el.textContent='…';
     _execRunPoint(el,null);
   });
+  /* v2.8 外部引用「打开」：交给系统关联程序打开副本；成功后把吃该池的
+     执行点复位为待运行（改了文件就该重算，不拿旧值冒充） */
+  preview.addEventListener('click',function(e){
+    var b=e.target;
+    if(!b||b.nodeType!==1||!b.classList||!b.classList.contains('mde-ref-open'))return;
+    e.preventDefault();
+    e.stopPropagation();
+    var rel=b.getAttribute('data-ref')||'';
+    if(!rel)return;
+    if(!currentFile){ showToast('文档尚未保存，无法打开副本'); return; }
+    var dp=b.closest('.mde-dp');
+    var alias=dp?(dp.getAttribute('data-dp-alias')||''):'';
+    fetch('/api/open-ref',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({docPath:currentFile,rel:rel})})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if(j&&j.ok){
+          var n=_resetRunsForAlias(alias);
+          showToast('已用系统程序打开副本'+(n?('，'+n+' 个执行点已置为待运行'):''));
+        }else{
+          showToast('打开失败：'+((j&&j.error)||'未知错误'));
+        }
+      }).catch(function(er){ showToast('打开失败：'+er.message); });
+  });
   /* 左下角"全部运行"（仅手动模式显示，用户指定位置：工具栏已拥挤）。
      链式执行：runChainActive 标志下 _execRunPoint 完成后自动找下一个 */
   var runChainActive=false;
@@ -3672,6 +3835,23 @@ function parseMarkdown(src){
     var name = (document.getElementById('svName').value.trim() || '未命名').replace(/\.(md|smd)$/i, '') + fmt;
     saveAsTo(dir, name, getText());
   });
+  /* v2.8 外部文件引用：插入行的池前缀照抄文档里最近一个数据点的完整前缀
+     —— 显性/隐性、公共池/别名池都是用户那一行决定的，这里不替他选 */
+  function _lastDpPrefix(){
+    var t=getText()||'';
+    var re=/@@ MDE(_{1,2})([\w\u4e00-\u9fff-]*)\{/g,m,last='@@ MDE_{';
+    while((m=re.exec(t))){ last='@@ MDE'+m[1]+m[2]+'{'; }
+    return last;
+  }
+  function _dpRefLine(fname,rel){
+    var stem=String(fname||'').replace(/\.[^.]+$/,'');
+    var key=stem||String(fname||'');
+    /* 主干已作过键（数据.xlsx 与 数据.csv）→ 改用完整文件名，免得撞键 */
+    var t=getText()||'';
+    var lit=key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    if(new RegExp('(^|[\\s,{])'+lit+'\\s*==').test(t)){ key=String(fname||''); }
+    return _lastDpPrefix()+key+' == '+rel+'}';
+  }
   editor.addEventListener('paste', function(e){
     var items = (e.clipboardData || window.clipboardData).items;
     if (!items) return;
@@ -3701,6 +3881,45 @@ function parseMarkdown(src){
             }).catch(function(er){ showToast('图片保存失败：'+er.message); });
         };
         fr.readAsDataURL(blob);
+        return;
+      }
+      /* v2.8 外部文件引用：剪贴板里是真文件（从资源管理器复制 xlsx/pdf/csv…）
+         → 字节复制进本文档资产目录，插入一行数据点，值是相对路径。
+         文本/网页图片进不了这个分支（它们没有 kind='file'）。 */
+      if (items[i].kind === 'file') {
+        e.preventDefault();
+        var f = items[i].getAsFile();
+        if (!f) return;
+        if (!currentFile) {
+          showToast('粘贴文件前请先保存文档（Ctrl+S），文件将存入同名 .assets 目录。');
+          openSaveAs();
+          return;
+        }
+        if (f.size > 20 * 1024 * 1024) {
+          showToast('文件超过 20MB 上限（当前 ' + (f.size / 1048576).toFixed(1) + 'MB）');
+          return;
+        }
+        var caretF = getSel();
+        showToast('正在写入 ' + f.name + ' …');
+        var frF = new FileReader();
+        frF.onload = function () {
+          fetch('/api/paste-file', {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({docPath: currentFile, name: f.name, dataUrl: frF.result})})
+            .then(function(r){ return r.json(); })
+            .then(function(j){
+              if (j && j.ok) {
+                var t0 = getText() || '';
+                var pre = (caretF.e > 0 && t0.charAt(caretF.e - 1) !== '\n') ? '\n' : '';
+                var ins = pre + _dpRefLine(f.name, j.rel);
+                setSel(caretF.e, caretF.e);
+                insertPlainText(ins);
+                showToast('已插入数据点：' + ins.replace(/^\n/, ''));
+              } else {
+                showToast('文件写入失败：' + ((j && j.error) || '未知错误'));
+              }
+            }).catch(function(er){ showToast('文件写入失败：' + er.message); });
+        };
+        frF.readAsDataURL(f);
         return;
       }
     }

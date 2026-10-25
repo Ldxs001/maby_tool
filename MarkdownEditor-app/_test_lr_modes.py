@@ -106,11 +106,16 @@ try:
         check("等待模式：2 秒后自动执行", "1" in d2, str(d2))
 
         # ── 2. 手动模式：不自动跑 + 待运行态 + ▶ ──
+        #    v2.7 起渲染收尾会按缓存重放已跑过的执行点（"改别处 = 白跑一次"
+        #    的修法）。runCache 是内存态，重载页面即清空——不重载的话，上一
+        #    阶段在等待模式下跑出的结果会被重放回来，"全部待运行"不再成立。
+        pg.goto("http://127.0.0.1:%d/?file=" % PORT)
+        pg.wait_for_timeout(900)
         pg.evaluate(SET_MODE, {"mode": "manual", "waitSec": 2})
         pg.evaluate(
             "d=>{var ed=document.getElementById('editor');"
-            "ed.textContent=ed.textContent+'\\n尾。';"
-            "ed.dispatchEvent(new Event('input',{bubbles:true}));}", DOC)
+            "ed.textContent=d;"
+            "ed.dispatchEvent(new Event('input',{bubbles:true}));}", DOC + "\n尾。")
         pg.wait_for_timeout(3000)
         st = pg.evaluate("""()=>{var rs=document.querySelectorAll('.mde-run');
           var out=[];

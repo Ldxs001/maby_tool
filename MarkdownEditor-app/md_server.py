@@ -64,7 +64,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 89  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 92  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 SETTINGS_PATH = os.path.join(HERE, "runtime", "settings.json")
 
 # ---------- low runner（v2.4）：文档内参数值的自动化计算 ----------
@@ -332,7 +332,18 @@ data['marks'] 只有 global 执行点才有，见三-b。
 a) 普通
    写法：@@ MDE import 库名 is 池名 ／ @@ MDE from 库名 import 函数名 is 池名
    没有 is → 吃公共池。data 只有 kv / vals / raw 三个键。
-   框架把函数返回值直接显示在执行点位置：返回 str 即最终文本。
+   框架把函数返回值直接显示在执行点位置，按形状渲染、不做猜测：
+     · 单行 str → 行内文本（粗体、行内码、链接可用），就在执行点原位
+     · 多行 str（字符串里带真换行 \\n）→ 逐行显示
+     · 表格 → 字符串里写出表头行 + 分隔行（|---|---|）+ 数据行，
+       前端渲染成真表格，分隔行只定列数与对齐、自身不显示；
+       缺分隔行就不认表格，整段原样当文字
+       例：return "|项目|一月|\\n|---|---|\\n|收入|100|\\n|成本|60|"
+     · list（非 global）→ 逐元素 str 后用逗号连成一行
+   表格单元格里的竖线写成 \\|；单元格内不能换行、不能合并单元格。
+   返回值里出现 @@ MDE… 或 '''标记 只当普通文字，不会生成数据点。
+   图片：当前目录＝文档资产目录，写这里，返回 "![](x.png)"，别写绝对路径。
+   kv 里的本地文件值已是绝对路径，直接 open(值,'rb')；解析自己定，只用标准库。
 b) 全局 global
    写法：@@ MDE from 库名 import 函数名{global 标记名}（import 库名{global 标记名} 亦可；is 池 可与 global 并存，此时 data 同时带池数据）
    执行点自身不显示。
@@ -579,63 +590,195 @@ def _lr_driver_code(mod, fn):
     ) % (RUNS_DIR, PYLIBS_DIR, mod, fn)
 
 
-def _lr_rewrite_imgs(result):
-    """run 结果里的相对路径图片引用 → /img 代理（run 代码 cwd=run_cache，
-    约定作图存当前目录返回 ![](文件名)；http/data/file:// 原样不动）。"""
+def _doc_ref_base(doc_path):
+    """文档里“相对路径”的解析基准：.md → 文档所在目录；.smd → 解包工作目录。
+    未保存/文件不存在 → None（调用方自行回落）。"""
+    if not doc_path:
+        return None
+    try:
+        p = os.path.abspath(str(doc_path))
+    except Exception:
+        return None
+    if not os.path.isfile(p):
+        return None
+    if _smd is not None and _smd.is_smd(p):
+        try:
+            return _smd.base_dir_for(p)
+        except Exception:
+            return None
+    return os.path.dirname(p)
+
+
+def _doc_assets_dir(doc_path):
+    """文档资产目录（图片与外部引用文件的落点，v2.8）：
+    .md → <目录>/<文档名>.assets/    .smd → <解包目录>/assets/
+    与 /api/paste-image 的落位规则同一口径；未保存 → None。"""
+    base = _doc_ref_base(doc_path)
+    if not base:
+        return None
+    try:
+        p = os.path.abspath(str(doc_path))
+    except Exception:
+        return None
+    if _smd is not None and _smd.is_smd(p):
+        return os.path.join(base, "assets")
+    stem = os.path.splitext(os.path.basename(p))[0]
+    return os.path.join(base, stem + ".assets")
+
+
+def _within(path, root):
+    """path 是否落在 root 内（拒绝 ../ 穿越；跨盘符安全失败）。"""
+    try:
+        return (os.path.commonpath([os.path.abspath(path),
+                                    os.path.abspath(root)])
+                == os.path.abspath(root))
+    except Exception:
+        return False
+
+
+# 引用型相对路径：<名>.assets/xxx 或 assets/xxx（v2.8 粘贴外部文件落盘形状）
+_ASSET_REL_RE = re.compile(r"^(?:[^/\\]+\.assets|assets)[/\\].+$")
+
+
+def _lr_expand_refs(node, base):
+    """data 里形如 <名>.assets/x / assets/x 的相对路径 → 绝对路径（v2.8）。
+    只替换“真实存在且落在 base 内”的文件，其余字符串原样；vals 可嵌套。"""
+    if isinstance(node, str):
+        s = node.strip()
+        if not s or not _ASSET_REL_RE.match(s) or os.path.isabs(s):
+            return node
+        try:
+            ap = os.path.normpath(os.path.join(base, s.replace("\\", "/")))
+        except Exception:
+            return node
+        if not _within(ap, base) or not os.path.isfile(ap):
+            return node
+        return ap.replace("\\", "/")
+    if isinstance(node, list):
+        return [_lr_expand_refs(x, base) for x in node]
+    if isinstance(node, dict):
+        return {k: _lr_expand_refs(v, base) for k, v in node.items()}
+    return node
+
+
+def _drop_empty_dir(d):
+    """run 结束后清掉“为当 cwd 临时创建、且仍为空”的资产目录。"""
+    try:
+        if d and os.path.isdir(d) and not os.listdir(d):
+            os.rmdir(d)
+    except Exception:
+        pass
+
+
+def _safe_asset_name(name):
+    """外部引用文件名清洗（v2.8）：去路径、替换数据点分隔符
+    （, = { } 与换行会让 @@ MDE 那一行解析错），保留扩展名与原名主干。"""
+    n = os.path.basename(str(name or "").replace("\\", "/")).strip()
+    if not n or n in (".", ".."):
+        return ""
+    n = re.sub(r"[,={}\r\n\t]", "_", n).strip().lstrip(".")
+    if not n:
+        return ""
+    if len(n) > 120:
+        stem, ext = os.path.splitext(n)
+        n = stem[:100] + ext[:20]
+    return n
+
+
+def _lr_rewrite_imgs(result, assets_dir=None, ref_base=None):
+    """run 结果里的相对路径图片引用 → /img 代理（v2.8 多基址）：
+    文档资产目录优先（run 的 cwd 已是它）、ref_base 兜住 <名>.assets/x 写法、
+    run_cache 兜底（旧约定仍可跑）；http/data/file:// 原样不动。"""
+    bases = []
+    for b in (assets_dir, ref_base, RUN_CACHE_DIR):
+        if b and b not in bases:
+            bases.append(b)
+
     def _rw(m):
         alt, src = m.group(1), m.group(2).strip()
         if re.match(r"^(https?:|data:|file:|/)", src):
             return m.group(0)
-        p = os.path.join(RUN_CACHE_DIR, src)
-        if os.path.exists(p):
-            return "![%s](/img?path=%s)" % (
-                alt, urllib.parse.quote(p.replace("\\", "/")))
+        for b in bases:
+            p = os.path.join(b, src)
+            if os.path.isfile(p):
+                return "![%s](/img?path=%s)" % (
+                    alt, urllib.parse.quote(p.replace("\\", "/")))
         return m.group(0)
     return re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", _rw, result)
 
 
-def _lr_run(mod, fn, data):
-    """执行 run：便携 python 子进程，超时 10s、stdout 1MB。返回 dict。"""
+def _lr_run(mod, fn, data, doc_path=None):
+    """执行 run：便携 python 子进程，超时 10s、stdout 1MB。返回 dict。
+
+    v2.8 文档上下文（doc_path 给出时）：
+    - 子进程 cwd = 本文档资产目录 —— run 里 save('x.png') 直接落到能跟着
+      文档走的地方；目录不存在则临时创建，跑完仍空即删掉；
+    - data 里 <名>.assets/x、assets/x 形式的相对路径展开成绝对路径 ——
+      run 只拿到一个能 open() 的地址，怎么解析由 run 自己负责；
+    - 结果图片改写多一个基址。
+    文档未保存时全部回落 run_cache（旧行为，逐字节一致）。"""
     if not _lr_valid_name(mod) or not _lr_valid_name(fn):
         return {"ok": False, "error": "run 名或函数名不合法"}
     py = PORTABLE_PY if os.path.exists(PORTABLE_PY) else sys.executable
     path = os.path.join(RUNS_DIR, mod + ".py")
     if not os.path.exists(path):
         return {"ok": False, "error": "run 不存在：%s（low runner 界面可创建）" % mod}
+    ref_base = _doc_ref_base(doc_path)
+    assets_dir = _doc_assets_dir(doc_path)
+    if ref_base and isinstance(data, dict):
+        for _k in ("kv", "vals", "raw"):
+            if _k in data:
+                data[_k] = _lr_expand_refs(data[_k], ref_base)
+    cwd = RUN_CACHE_DIR
+    created = False
+    if assets_dir:
+        try:
+            if not os.path.isdir(assets_dir):
+                os.makedirs(assets_dir, exist_ok=True)
+                created = True
+            cwd = assets_dir
+        except Exception:
+            cwd = RUN_CACHE_DIR
     code = _lr_driver_code(mod, fn)
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONPATH"] = PYLIBS_DIR if os.path.isdir(PYLIBS_DIR) else ""
     try:
-        cp = subprocess.run(
-            [py, "-c", code],
-            input=json.dumps(data, ensure_ascii=False).encode("utf-8"),
-            capture_output=True, timeout=10, cwd=RUN_CACHE_DIR, env=env)
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "error": "run 执行超时（>10s）"}
-    except Exception as e:
-        return {"ok": False, "error": "子进程启动失败：%s" % e}
-    out = cp.stdout.decode("utf-8", "replace").strip()
-    if len(out) > 1024 * 1024:
-        return {"ok": False, "error": "run 输出超过 1MB 限制"}
-    try:
-        j = json.loads(out)
-    except Exception:
-        err = cp.stderr.decode("utf-8", "replace").strip()
-        return {"ok": False, "error": "run 输出非 JSON：%s%s"
-                % (out[:200], ("\nstderr: " + err[:300]) if err else "")}
-    if j.get("ok") and isinstance(j.get("result"), (str, list)):
-        if isinstance(j["result"], str):
-            j["result"] = _lr_rewrite_imgs(j["result"])[:1024 * 1024]
-        else:
-            j["result"] = [_lr_rewrite_imgs(str(x))[:1024 * 1024]
-                           for x in j["result"]]
+        try:
+            cp = subprocess.run(
+                [py, "-c", code],
+                input=json.dumps(data, ensure_ascii=False).encode("utf-8"),
+                capture_output=True, timeout=10, cwd=cwd, env=env)
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "run 执行超时（>10s）"}
+        except Exception as e:
+            return {"ok": False, "error": "子进程启动失败：%s" % e}
+        out = cp.stdout.decode("utf-8", "replace").strip()
+        if len(out) > 1024 * 1024:
+            return {"ok": False, "error": "run 输出超过 1MB 限制"}
+        try:
+            j = json.loads(out)
+        except Exception:
+            err = cp.stderr.decode("utf-8", "replace").strip()
+            return {"ok": False, "error": "run 输出非 JSON：%s%s"
+                    % (out[:200], ("\nstderr: " + err[:300]) if err else "")}
+        if j.get("ok") and isinstance(j.get("result"), (str, list)):
+            if isinstance(j["result"], str):
+                j["result"] = _lr_rewrite_imgs(
+                    j["result"], assets_dir, ref_base)[:1024 * 1024]
+            else:
+                j["result"] = [_lr_rewrite_imgs(
+                    str(x), assets_dir, ref_base)[:1024 * 1024]
+                    for x in j["result"]]
+            return j
+        # 失败：错误串解析缺包（前端跟随错误块显示"缺少包"+ 安装命令）
+        miss = _lr_missing_from_error(j.get("error") or "")
+        if miss:
+            j["missing"] = miss
         return j
-    # 失败：错误串解析缺包（前端跟随错误块显示"缺少包"+ 安装命令）
-    miss = _lr_missing_from_error(j.get("error") or "")
-    if miss:
-        j["missing"] = miss
-    return j
+    finally:
+        if created:
+            _drop_empty_dir(assets_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -1595,13 +1738,123 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(500, json.dumps({"ok": False, "error": str(e)},
                                            ensure_ascii=False))
             return
+        # ---------- 外部文件引用（v2.8）----------
+        if u.path == "/api/paste-file":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                obj = json.loads(self.rfile.read(length).decode("utf-8"))
+                doc_path = obj.get("docPath") or ""
+                data_url = obj.get("dataUrl") or ""
+                if not doc_path:
+                    self._send(400, json.dumps({"ok": False,
+                        "error": "文档尚未保存"}, ensure_ascii=False))
+                    return
+                ref_base = _doc_ref_base(doc_path)
+                assets = _doc_assets_dir(doc_path)
+                if not ref_base or not assets:
+                    self._send(400, json.dumps({"ok": False,
+                        "error": "文档路径无效或尚未保存"}, ensure_ascii=False))
+                    return
+                fname = _safe_asset_name(obj.get("name"))
+                if not fname:
+                    self._send(400, json.dumps({"ok": False,
+                        "error": "文件名不合法"}, ensure_ascii=False))
+                    return
+                _head, _, b64 = data_url.partition(",")
+                try:
+                    blob = base64.b64decode(b64) if b64 else b""
+                except Exception:
+                    blob = b""
+                if not blob:
+                    self._send(400, json.dumps({"ok": False,
+                        "error": "文件内容为空"}, ensure_ascii=False))
+                    return
+                if len(blob) > 20 * 1024 * 1024:
+                    self._send(400, json.dumps({"ok": False,
+                        "error": "文件超过 20MB 上限（当前 %.1fMB）"
+                                 % (len(blob) / 1048576.0)}, ensure_ascii=False))
+                    return
+                os.makedirs(assets, exist_ok=True)
+                target = os.path.join(assets, fname)
+                if not _within(target, assets):
+                    self._send(400, json.dumps({"ok": False,
+                        "error": "目标路径越界"}, ensure_ascii=False))
+                    return
+                if os.path.exists(target):
+                    same = False
+                    try:
+                        with open(target, "rb") as f:
+                            same = (f.read() == blob)
+                    except Exception:
+                        same = False
+                    if not same:
+                        # 同名不同内容：加短哈希后缀，绝不覆盖
+                        stem2, ext2 = os.path.splitext(fname)
+                        h = hashlib.sha256(blob).hexdigest()[:4]
+                        cand = "%s__%s%s" % (stem2, h, ext2)
+                        n = 1
+                        while os.path.exists(os.path.join(assets, cand)):
+                            cand = "%s__%s%d%s" % (stem2, h, n, ext2)
+                            n += 1
+                        fname = cand
+                        target = os.path.join(assets, fname)
+                with open(target, "wb") as f:
+                    f.write(blob)
+                rel = os.path.relpath(target, ref_base).replace("\\", "/")
+                self._send(200, json.dumps({"ok": True, "rel": rel,
+                    "name": fname, "size": len(blob)}, ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
+            return
+        if u.path == "/api/open-ref":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                obj = json.loads(self.rfile.read(length).decode("utf-8"))
+                doc_path = obj.get("docPath") or ""
+                rel = str(obj.get("rel") or "").strip()
+                ref_base = _doc_ref_base(doc_path)
+                assets = _doc_assets_dir(doc_path)
+                if not ref_base or not assets:
+                    self._send(400, json.dumps({"ok": False,
+                        "error": "文档路径无效或尚未保存"}, ensure_ascii=False))
+                    return
+                cands = []
+                if _ASSET_REL_RE.match(rel):
+                    cands.append(os.path.join(ref_base, rel))
+                cands.append(os.path.join(assets, rel))
+                target = None
+                for c in cands:
+                    c = os.path.normpath(c)
+                    # 白名单：必须落在本文档资产目录内 —— 否则"打开"等于
+                    # 双击运行任意程序（文档可以被别人发给你）
+                    if _within(c, assets) and os.path.isfile(c):
+                        target = c
+                        break
+                if not target:
+                    self._send(400, json.dumps({"ok": False,
+                        "error": "文件不存在或不在本文档资产目录内"},
+                        ensure_ascii=False))
+                    return
+                if hasattr(os, "startfile"):
+                    os.startfile(target)
+                elif sys.platform == "darwin":
+                    subprocess.Popen(["open", target])
+                else:
+                    subprocess.Popen(["xdg-open", target])
+                self._send(200, json.dumps({"ok": True,
+                    "path": target.replace("\\", "/")}, ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
+            return
         # ---------- low runner（v2.4）----------
         if u.path == "/api/run":
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 obj = json.loads(self.rfile.read(length).decode("utf-8"))
                 j = _lr_run(str(obj.get("mod", "")), str(obj.get("fn", "run")),
-                            obj.get("data") or {})
+                            obj.get("data") or {}, obj.get("mdPath") or "")
                 self._send(200, json.dumps(j, ensure_ascii=False),
                            "application/json; charset=utf-8")
             except Exception as e:

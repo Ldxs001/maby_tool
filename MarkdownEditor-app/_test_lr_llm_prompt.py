@@ -131,7 +131,10 @@ def prompt_tests():
     check("B16 执行点两种形式",
           ("a) 普通" in p) and ("b) 全局 global" in p) and "（全部）" in p)
     check("B17 普通执行点返回 str 即最终文本",
-          "返回 str 即最终文本" in p)
+          ("按形状渲染、不做猜测" in p) and ("单行 str → 行内文本" in p))
+    check("B42b 图片落点与文件引用口径（v2.8）",
+          ("当前目录＝文档资产目录" in p) and ("open(值,'rb')" in p)
+          and ('![](x.png)' in p))
     check("B18 global 语法带 {global 标记名}",
           "{global 标记名}" in p and "'''标记名" in p)
     check("B19 global 的 marks 结构与等长契约",

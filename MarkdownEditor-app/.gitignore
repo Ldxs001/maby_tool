@@ -25,3 +25,13 @@ _tmp_*
 # 安装包构建产物（installer/ 源码入库；staging 与 Setup.exe 产物不入库，仅挂 Release）
 /_setup_staging/
 /_setup_out/
+
+# 视频合成中间产物（_video28）：合成源码/字体/示例图/静帧入库，
+# 配音 wav、录制帧、中间视频、合成音频、录制日志不入库（合计约 27MB）
+/_video28/tts/
+/_video28/raw28/
+/_video28/frames/
+/_video28/*.m4a
+/_video28/video_only.mp4
+/_video28/_rec.log
+/_video28/_tts.log

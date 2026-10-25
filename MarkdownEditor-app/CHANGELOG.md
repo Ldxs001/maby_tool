@@ -11,6 +11,41 @@
 
 ---
 
+## v2.8.1（2026-10-25）
+
+- **现象**：打开文档后执行点自行开始跑，一边打字一边反复重跑；改一个字就触发全文档执行，页面卡顿，且用户没有明确的「什么时候开始算」的预期。
+- **根因**：`runModeCfg()` 的兜底默认值为 `{mode:'instant',waitSec:5}`。渲染收尾调 `scheduleRunPass()` 时立即模式走 400ms 防抖自动执行，未做用户操作门槛。
+- **修法**：默认值改为 `{mode:'manual',waitSec:5}`。手动模式下 `scheduleRunPass()` 不调度，仅调 `markPendingRuns()` 把新渲染的执行点标为「▶ 待运行」，由单点 ▶ 或左下角「全部运行」触发；三选一互斥面板与 `md-editor-run-mode` 双通道持久化逻辑未变，已有持久值的环境照旧读用户自己的选择。使用指南运行模式一节改为「手动（默认）」并补一句「选一次就记住」。
+- **验证**：新增 `Temp/_test_run_default.py` 10 条 PASS——无持久值时面板亮在「手动」、打开即有执行点、静置 3 秒一个都没自动跑、执行点显示「待运行」而非结果、手动模式下状态栏「▶ 运行」可见、点它后全部出结果、无页面报错；持久值 `manual` 生效；持久值 `instant` 仍能自动跑（自动模式未被破坏）。回归：`_e2e_ref` 21、`_e2e_guide_csv` 14、`_e2e_guide_plot` 13、`_e2e_tablecalc` 7、`tablecalc` 94、`csvcalc` 22、`plotimg` 31、`_test_lr_modes`／`_test_lr_persist`／`_test_lr_llm_prompt`／`_test_lr_alias` 全 PASS，`_test_routes` ALL PASS，`_test_smd` 33、`_test_parser_sync` PASS、`md-parser.test.cjs` 77/77；安装包 `--smoke` 全项 PASS、`_pkg_audit` 9/9、`_test_dist_verify` 22/22。
+- **说明**：本次仅改兜底默认值与文案，不改执行链路。已有的 `md-editor-run-mode` 持久值不会被覆盖——升级后若仍为自动跑，需在面板里手动点一次「手动」。
+
+---
+
+## v2.8.0（2026-10-25）
+
+- **现象**：两处。① 从资源管理器复制 `.xlsx`／`.pdf`／`.csv` 在编辑区 `Ctrl+V`，没有任何反应；即使手写路径进数据点，`run` 里 `open(data['kv']['表'])` 也读不到——子进程当前目录是 `runtime/run_cache`。② `run` 里 `save('assets/x.png')` 再返回 `![](assets/x.png)`，预览显示正常，文件却落在 `runtime/run_cache/assets/`，文档目录为空；改返回 `![](<名>.assets/x.png)` 则浏览器请求 `/<名>.assets/x.png` 得 404。
+- **根因**：粘贴监听只认 `type` 以 `image` 开头，其余项落到文本兜底被静默丢弃；`/api/run` 请求体只有 `{mod, fn, data}`，服务端不知道文档在哪，既无法把相对路径换算成可读地址，也无从确定子进程该在哪个目录跑；`_lr_rewrite_imgs` 只在 `run_cache` 里找图，与 `cwd` 同源，因此"落错位置"在界面上看不出来。
+- **修法**：新增 `/api/paste-file`（保留原文件名；`,` `=` `{` `}` 与换行清洗为 `_`；同名不同内容追加 `__<4位哈希>` 不覆盖；目标必须落在文档资产目录内；单文件 20MB 上限）与 `/api/open-ref`（同一套目录白名单校验后交系统关联程序打开）；粘贴监听新增 `kind === 'file'` 分支，落盘后在光标处插入一行数据点，池前缀照抄文档里最近一个数据点（显性/隐性、公共池/别名池不另设规则）；`/api/run` 补 `mdPath`，服务端据此确定资产目录——子进程 `cwd` 改为资产目录（不存在则临时创建，跑完仍为空即删）、`kv`／`vals`（含嵌套）／`raw` 中的资产相对路径展开为绝对路径（限定文档目录内，`../` 穿越不展开）、`_lr_rewrite_imgs` 改为资产目录 → 文档目录 → `run_cache` 多基址；显性引用数据点后挂「打开」按钮，打开成功后删除该池执行点的结果缓存并复位为「待运行」；缓存 key 抽出 `_runKeyOf()`，执行／重放／复位三处同源；docx 与 HTML 导出剥离该按钮。
+- **验证**：接口层 24 条 PASS（落盘 rel 与字节一致、同内容不新增、同名不同内容加哈希且不覆盖、穿越文件名降为 basename、非法字符清洗、21MB 拒绝、未保存拒绝、`open-ref` 三条拒绝、路径展开与穿越拒绝、嵌套 `vals` 逐元素展开）；浏览器 23 条 PASS（合成 `kind=file` 粘贴 → 单行插入且池前缀继承、字节落盘、数据点值＝相对路径且挂按钮、`run` 收到绝对路径且 `isfile=True`、`cwd` 等于资产目录、结果图片正常显示且落资产目录、`run_cache` 无新增、导出已剥离按钮、打开后该池执行点全部复位）。回归：`tablecalc` 单测 94 条、`tablecalc` E2E 7 条、数据点渲染 E2E 9 条、docx 表格导出 3 条全 PASS。
+- **说明**：边界明确——框架不解析任何文件（xlsx／pdf／csv 怎么读由 run 决定，只用标准库），不引三方包，不做原文件同步与来源路径记录，不做远程引用，不新增第七种数据形式。文档未保存时回落 `run_cache`（旧行为）。`run` 里的相对路径落点由 `run_cache` 改为文档资产目录，属对外可见的行为变化；原有 5 个 run 均为纯计算，不受影响（新增的 `csvcalc` 按需读资产目录下的 csv）。
+- **补充（同日）**：随包新增模拟数据 `docs/MDEditor 使用指南.assets/示例销售数据.csv` 与运行库 `csvcalc.py`（仅标准库 `csv`；编码依次试 utf-8-sig／gbk／utf-8；整表按 `table`、整行按 `row`、整列按 `col`、单元格按 `cell` 做 `+ - * /`，一律返回 Markdown 表格字符串，出错返回中文说明不抛异常；行名／列名与 1-based 行号／列号双入口），使用指南新增「完整示例：一份 CSV 的行列单元格运算」一章，五个执行点分别覆盖 `table`（原样）／`table`（整表 ×1.1）／`row`／`col`／`cell`。同时补掉一处空档：`_dpRefPath` 原按 `\s` 一律排除，文档名带空格时（`MDEditor 使用指南.assets/x.csv`）显性引用的「打开」按钮永不出现，现只排除换行与制表符。验证：`csvcalc` 单测 22 条、指南浏览器验收 14 条（五个执行点各渲染一张真表格 + 数字逐项比对 + 按钮出现 + 无错误块）、`_e2e_ref` 21 条、`tablecalc` 单测 94／E2E 7、`_test_routes`／`_test_lr_alias`／`_test_lr_persist`／`_test_lr_modes`／`_test_lr_llm_prompt` 全 PASS，`_test_parser_sync` 与 `md-parser.test.cjs` 77 条不变。
+- **新增（同日）**：随包新增运行库 `plotimg.py`——用内置 Pillow（便携版 `python/Lib/site-packages/PIL`，13.0.0）把编辑区的数据直接画成图，`bar`／`line`／`donut` 三个入口。取数走 `kv`：`标题`／`单位`／`宽`／`高`／`配色` 五个键为配置不参与绘图，其余键一律按「标签 == 数值」以书写顺序绘制；数值接受千分位、`12万`／`1.5万元`（按 10000 倍换算）、`8%`（纵轴带百分号），无法解析的值跳过且不影响其它柱；刻度用 1／1.5／2／2.5／3／4／5／6／8×10^n 抬整，不出现 `148,591.50` 之类小数刻度；图片写入子进程 `cwd`（即文档资产目录）后返回 `![](<标题>-<类型>.png)`，同名重跑覆盖、不囤积，无标题时用前两个标签兜底命名。使用指南新增「（五）数据写作」（四种写法／`kv` 类型为 str／值内禁用半角逗号／单个下划线显性双下划线隐性／键序即文档顺序，原（五）～（七）顺延为（六）～（八））与「完整示例 7. 用数据点画图（返回图片）」（同一隐性池喂 `bar`／`line`／`donut` 出三张图）。验证：`plotimg` 单测 31 条 PASS；指南浏览器验收 12 条 PASS（三个执行点各渲一张 `<img>`、走 `/img` 代理、路径指向本文档资产目录、`naturalWidth`／`naturalHeight` 均大于 0、三个 png 落盘且大于 4KB、隐性数据点不露字、表格里的示例代码未被当成数据点、无错误块、无 console 报错）；`csvcalc` 与 `_e2e_ref` 等既有回归不受影响。
+- **说明（同日）**：`plotimg` 依赖 Pillow，属便携版自带组件；pip 安装版（`markdowneditor-ldxs`）不含内嵌运行时与 Pillow，需先 `pip install --target runtime/pylibs pillow`，已写入 `plotimg.py` 文件头注释。图片不预置：安装包内资产目录只有 `示例销售数据.csv` 等原始素材，三张示例图由用户首次运行执行点时生成，避免包内塞入可再生的图片。
+- **补充（同日·2）**：run 库用法说明补齐。约定为文件头四类注释行（`# 数据点写法：`／`# 执行点写法：`／`# 返回值：`／`# 注意：`），run 面板载入时由 `lrUsageFromCode()` 抽到代码框上方的说明区；缺这四类行的 run 说明区一直 `hidden`，界面表现为「有的 run 有说明、有的没有」。`plotimg` 新写时只写了 docstring、`auto_cite` 自 v2.6 起就没补过，现两者均补齐（`plotimg` 8 行、`auto_cite` 4 行），7 个 run 全部齐备。验证：正则抽取行数与内容逐条核对，面板载入 `plotimg`／`auto_cite`／`stats` 三者说明区均可见，界面点「覆盖保存」后文件按行尾归一化与保存前**逐字节一致**（幂等，不重复堆注释）。
+- **说明（同日·2）**：`/api/runs` 保存走 Windows 文本模式，LF 会写成 CRLF，因此界面保存过的 run 是 CRLF（`stats`／`auto_cite`／`mergecontent`／`wordcount`／`plotimg`）、未保存过的仍是 LF（`csvcalc`／`tablecalc`）。属既有行为，本次未改；若后续要消除 git 里的整文件 diff，需在写文件处显式指定 `newline='\n'`。
+
+---
+
+## v2.7.0（2026-10-25）
+
+- **现象**：run 返回 GFM 表格字符串（`"|x|x|\n|-|-|\n|y|y|\n|z|z|"`），预览区显示成一行被折断的竖线文字，`---:` 等对齐标记原样露出，`table` 元素 0 个；带 `\n` 的多行文本挤成一行（容器高度 20px＝单行）；docx 导出后表格退化成纯文字段落。
+- **根因**：结果落地面只跑行内解析——`_applyRunResult` 调 `parseInline`，而行内解析既无表格规则也不处理换行；结果容器是行内 `<span>`，块级表格本来就无处安放。另有一处越权：`parseInline` 会解析 `@@ MDE…` 与 `'''`，结果文本里若含这两种写法，会在预览区反向生成数据点（实测进池），等于"一个 run 的输出能改另一个 run 的输入"。
+- **修法**：新增 `renderRunResult()` 受限块级——逐行扫描，命中「本行含 `|` 且下一行为分隔行」复用正文的 `parseTable()`（同一判定、同一函数），其余行仍走 `parseInline` 并以换行连接；表格或多行时容器加 `.mde-run-block`（块级 + `text-indent:0`，压掉继承来的段落首行缩进）；`parseInline` 增 `noMde` 开关，结果上下文与 global 结果均传 `true`；`_applyRunFail`／待运行态清掉块级类。导出侧补一步：克隆里把结果表格提升到最近块级容器之后（Word 不认段内表格），掏空的 span／空 `<p>` 一并收掉。
+- **验证**：浏览器实测七例——用户原话写法得 `thead x/x` + `tbody y/y`、`z/z`，分隔行不渲染；三列对齐 `right`／`center` 生效；无分隔行 → 三行文字、0 表格；三行文本容器 71px；两张表与普通行混排正确；`@@ MDE_乙{注入 == 7}` 结果只作文字、数据点总数仍为 1；表格紧跟文字行正确。回归：`tablecalc` 单测 94 条、E2E 7 条、数据点渲染 E2E 9 条全 PASS。docx 端到端（真实导出按钮 → 抓 `/api/export-docx` 的 `bodyHtml` → `docx_export`）：5 张表全部为 `w:tbl`，单元格与多行文字齐。
+- **说明**：边界明确——单元格内换行、跨行跨列合并不支持；不写分隔行就不认表格，整段原样当文字。提示词、使用指南、数据形式规范（新增第十节）同步更新。
+
+---
+
 ## v2.6.13（2026-10-24）
 
 - **现象**：run 库存在两处来源——仓库级 `runs/`（`calc_operations.py`、`count_words_in_text.py` 两个旧示例）与运行树 `runtime/runs/`（`stats`、`wordcount`、`mergecontent`、`auto_cite`、`tablecalc` 五个现役）。安装包只种子化旧的两个，装完打开 low runner 看不到文档里点名的现役示例；旧的两个还留在仓库根目录，与现役库同名不同目录，谁生效看运气。
