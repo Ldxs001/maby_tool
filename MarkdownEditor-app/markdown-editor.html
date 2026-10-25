@@ -388,6 +388,34 @@
     #selTools button:disabled,.sv-mini:disabled{opacity:.4;cursor:not-allowed;}
     #selTools button:disabled:hover{background:transparent;color:#d7dce6;}
     .sv-mini:disabled:hover{background:#262c38;color:#aab2c4;}
+    /* v2.11.0 查找替换：编辑区右上非模态浮层（Ctrl+F／Ctrl+H） */
+    #editorPane{position:relative;}
+    #findBar{position:absolute;top:10px;right:14px;z-index:55;width:470px;max-width:calc(100% - 28px);
+      background:#2b2f36;border:1px solid #3a4358;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.45);
+      padding:8px;display:flex;flex-direction:column;gap:6px;}
+    #findBar[hidden]{display:none !important;}
+    .fb-row{display:flex;align-items:center;gap:5px;}
+    .fb-row input{flex:1;min-width:0;background:#1a1d24;color:#e8eaed;border:1px solid #3a4358;border-radius:6px;
+      padding:6px 9px;font-size:13px;font-family:var(--mono);outline:none;}
+    .fb-row input:focus{border-color:#4a6cf7;}
+    .fb-count{font-size:12px;color:#8a93a6;min-width:50px;text-align:center;white-space:nowrap;}
+    #findBar .fb-btn,#findBar .fb-opt{background:transparent;border:none;color:#d7dce6;cursor:pointer;
+      font-size:13px;font-family:var(--sans);padding:4px 8px;border-radius:6px;flex:none;line-height:1.3;}
+    #findBar .fb-btn:hover{background:#3d4657;color:#fff;}
+    .fb-opt.on{background:#4a6cf7;color:#fff;}
+    #fbMsg{font-size:11px;color:#e8b45a;padding:0 2px;}
+    #fbMsg:empty{display:none;}
+    /* 命中高亮走 Custom Highlight API：不碰 DOM、不抢焦点（addRange 会把
+       焦点拽回编辑器，与「焦点留在输入框」互斥） */
+    ::highlight(fb-all){ background:rgba(122,162,247,.22); }
+    ::highlight(fb-cur){ background:#a8842c; color:#fff; }
+    body.light ::highlight(fb-all){ background:rgba(74,108,247,.15); }
+    body.light ::highlight(fb-cur){ background:#f3d27a; color:#222; }
+    body.light #findBar{background:#ffffff;border-color:#d8d4cb;box-shadow:0 10px 30px rgba(0,0,0,.18);}
+    body.light #findBar .fb-btn,body.light #findBar .fb-opt{color:#444;}
+    body.light #findBar .fb-btn:hover{background:#e8e6e1;color:#111;}
+    body.light .fb-row input{background:#f5f6f8;color:#2b2b2e;border-color:#d8d4cb;}
+    body.light .fb-count{color:#777;}
   </style>
   <meta name="generator" content="MDEditor - AI-assisted (generated with an AI coding agent)">
 </head>
@@ -417,6 +445,25 @@
   <aside id="outline" class="pane"></aside>
   <section id="editorPane" class="pane">
     <div id="editor" contenteditable="true" spellcheck="false" data-placeholder="在这里写 Markdown..." aria-label="Markdown 源码编辑区"></div>
+    <div id="findBar" hidden>
+      <div class="fb-row">
+        <button id="fbCase" class="fb-opt" title="区分大小写">Aa</button>
+        <button id="fbRe" class="fb-opt" title="正则表达式">.*</button>
+        <button id="fbWord" class="fb-opt" title="全字匹配">\b</button>
+        <input id="fbFind" type="text" placeholder="查找…" spellcheck="false">
+        <span id="fbCount" class="fb-count"></span>
+        <button id="fbPrev" class="fb-btn" title="上一个（Shift+Enter）">↑</button>
+        <button id="fbNext" class="fb-btn" title="下一个（Enter）">↓</button>
+        <button id="fbRepTgl" class="fb-btn" title="展开/收起替换（Ctrl+H）">⇄</button>
+        <button id="fbClose" class="fb-btn" title="关闭（Esc）">×</button>
+      </div>
+      <div class="fb-row" id="fbRepRow" hidden>
+        <input id="fbRepl" type="text" placeholder="替换为（\n 换行、\t 制表；正则模式支持 $1 引用）" spellcheck="false">
+        <button id="fbRepOne" class="fb-btn" title="替换当前命中（Ctrl+Z 可撤销）">替换</button>
+        <button id="fbRepAll" class="fb-btn" title="全部替换（整体一步，Ctrl+Z 一次撤销）">全部</button>
+      </div>
+      <div id="fbMsg"></div>
+    </div>
   </section>
   <section id="previewPane" class="pane">
     <article id="preview" class="markdown-body"></article>
@@ -5162,10 +5209,287 @@ function parseMarkdown(src){
       })
       .catch(function(e){ showToast('RAG 停止失败：'+e.message); setTimeout(ragProbe,600); });
   });
+  /* ── 查找替换（v2.11.0）────────────────────────────────────
+     编辑区源码级查找：纯前端扫描 textContent，命中坐标复用 getSel/setSel。
+     - 单处替换：setSel 命中区间 + insertPlainText → 进原生 undo 栈
+     - 全部替换：全文选中一次写入 → 浏览器只记一笔，Ctrl+Z 一步还原
+     - 批注安全：整体替换后 annReanchorLocal() 按快照重找位置重包裹；
+       局部替换跨批注 span 时由 MutationObserver 自愈（拆分/剥壳/同步快照）
+     - 开关经 lsSet 持久化（md-editor- 前缀随 ui-settings 上服务端） */
+  var fbBar=document.getElementById('findBar'),
+      fbFind=document.getElementById('fbFind'),
+      fbRepl=document.getElementById('fbRepl'),
+      fbCount=document.getElementById('fbCount'),
+      fbMsgEl=document.getElementById('fbMsg'),
+      fbRepRow=document.getElementById('fbRepRow');
+  var fb={q:'',idx:-1,ms:[],last:'',undoSnap:null,busy:false,
+          opts:{a:false,r:false,w:false}};
+  (function(){
+    try{
+      var s=localStorage.getItem('md-editor-find-opts');
+      if(s){ var o=JSON.parse(s)||{}; fb.opts.a=!!o.a; fb.opts.r=!!o.r; fb.opts.w=!!o.w; }
+    }catch(e){}
+  })();
+  function fbSaveOpts(){ lsSet('md-editor-find-opts',JSON.stringify(fb.opts)); }
+  function fbBuildRe(){
+    if(!fb.q) return null;
+    var p=fb.opts.r?fb.q:fb.q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    if(fb.opts.w)p='\\b(?:'+p+')\\b';
+    try{ return new RegExp(p,'g'+(fb.opts.a?'':'i')); }catch(ex){ return null; }
+  }
+  function fbExpand(s){
+    return s.replace(/\\\\/g,'\uE000').replace(/\\n/g,'\n').replace(/\\t/g,'\t').replace(/\uE000/g,'\\');
+  }
+  function fbReplFor(mText){
+    var t=fbExpand(fbRepl.value);
+    if(fb.opts.r){
+      try{ var single=new RegExp(fbBuildRe().source,fb.opts.a?'':'i'); t=mText.replace(single,t); }catch(ex){}
+    }
+    return t;
+  }
+  function fbSplice(s,e,rep){
+    /* 手动 Range 替换：换行保真。execCommand('insertText') 多行字符串会把
+       \n 劈成空 div 并丢字（Chromium 实测，plaintext-only 同样中招；单字符
+       \n 正常），故含换行的替换走此路径；撤销由 fb.undoSnap 快照 +
+       编辑器捕获 Ctrl+Z 承担（见下方 restore 分支） */
+    var a=_posToNode(s),b=_posToNode(e);
+    var r=document.createRange();
+    r.setStart(a.node,a.off); r.setEnd(b.node,b.off);
+    r.deleteContents();
+    if(rep)r.insertNode(document.createTextNode(rep));
+    editor.dispatchEvent(new Event('input',{bubbles:true}));
+  }
+  function fbPaint(){
+    /* 命中高亮：全命中淡蓝、当前命中金色，经 Custom Highlight API 注册 */
+    try{
+      if(!window.Highlight||!window.CSS||!CSS.highlights)return;
+      CSS.highlights.delete('fb-all');
+      CSS.highlights.delete('fb-cur');
+      if(!fb.ms.length)return;
+      var ranges=[],cur=null,i;
+      for(i=0;i<fb.ms.length;i++){
+        var a=_posToNode(fb.ms[i].s),b=_posToNode(fb.ms[i].e);
+        var r=document.createRange();
+        r.setStart(a.node,a.off); r.setEnd(b.node,b.off);
+        if(i===fb.idx){ cur=new Highlight(r); } else { ranges.push(r); }
+      }
+      if(ranges.length){
+        var mk=Function.prototype.bind.apply(Highlight,[null].concat(ranges));
+        CSS.highlights.set('fb-all',new mk());
+      }
+      if(cur)CSS.highlights.set('fb-cur',cur);
+    }catch(e){}
+  }
+  function fbRefocus(){ fbFind.focus(); }
+  function fbScan(){
+    fb.ms=[];
+    var re=fbBuildRe(); if(!re)return;
+    var text=getText(),m,n=0;
+    while((m=re.exec(text))){
+      fb.ms.push({s:m.index,e:m.index+m[0].length});
+      if(m[0]===''){ re.lastIndex++; if(re.lastIndex>text.length)break; }
+      if(++n>text.length+1)break;
+    }
+  }
+  function fbShow(){
+    fbCount.textContent=!fb.q?'':(fb.ms.length?
+      (fb.idx<0?fb.ms.length+' 个结果':(fb.idx+1)+'/'+fb.ms.length):'无结果');
+    fbPaint();
+  }
+  function fbSay(t){ fbMsgEl.textContent=t||''; }
+  function fbScrollCur(){
+    try{
+      var sel=window.getSelection();
+      if(!sel.rangeCount)return;
+      var r=sel.getRangeAt(0).getBoundingClientRect();
+      var ep=document.getElementById('editorPane').getBoundingClientRect();
+      if(r.top<ep.top+8||r.bottom>ep.bottom-8){
+        var node=sel.getRangeAt(0).startContainer;
+        var el=node.nodeType===3?node.parentElement:node;
+        if(el&&editor.contains(el))el.scrollIntoView({block:'center'});
+      }
+    }catch(e){}
+  }
+  function fbGoto(i){
+    var n=fb.ms.length; if(!n)return;
+    var wrapped=false;
+    if(i>=n){i=0;wrapped=true;} else if(i<0){i=n-1;wrapped=true;}
+    fb.idx=i;
+    var m=fb.ms[i];
+    fb.last=getText().substring(m.s,m.e);
+    setSel(m.s,m.e);
+    fbScrollCur(); fbShow();
+    fbSay(wrapped?'已到文末，从头继续':'');
+  }
+  function fbFromCaret(dir){
+    /* idx 失效（查询变更/正文被改/切文件）后从光标位置就近找 */
+    var pos=getSel().s,i;
+    if(dir>0){ for(i=0;i<fb.ms.length;i++){ if(fb.ms[i].s>=pos)return i; } return 0; }
+    for(i=fb.ms.length-1;i>=0;i--){ if(fb.ms[i].e<=pos)return i; }
+    return fb.ms.length-1;
+  }
+  function fbIdxValid(){
+    return fb.idx>=0&&fb.ms[fb.idx]&&
+      getText().substring(fb.ms[fb.idx].s,fb.ms[fb.idx].e)===fb.last;
+  }
+  function fbNext(){
+    if(!fb.q)return;
+    fbScan();
+    if(!fb.ms.length){ fb.idx=-1; fb.last=''; fbShow(); return; }
+    if(!fbIdxValid())fb.idx=-1;
+    fbGoto(fb.idx<0?fbFromCaret(1):fb.idx+1);
+    fbRefocus();                      /* setSel 抢焦点进编辑器：还回并重贴选区 */
+  }
+  function fbPrev(){
+    if(!fb.q)return;
+    fbScan();
+    if(!fb.ms.length){ fb.idx=-1; fb.last=''; fbShow(); return; }
+    if(!fbIdxValid())fb.idx=-1;
+    fbGoto(fb.idx<0?fbFromCaret(-1):fb.idx-1);
+    fbRefocus();                      /* 同上 */
+  }
+  function fbRepCur(){
+    if(!fb.q)return;
+    fbScan();
+    if(!fbIdxValid()){ if(fb.ms.length)fbGoto(0); return; }
+    var m=fb.ms[fb.idx],rep=fbReplFor(getText().substring(m.s,m.e));
+    if(rep.indexOf('\n')>=0){
+      /* 多行替换值：execCommand 会吞换行，走手动 splice + 快照撤销 */
+      var beforeCur=getText();
+      fb.busy=true;
+      fbSplice(m.s,m.e,rep);
+      fb.undoSnap=beforeCur;
+      setTimeout(function(){fb.busy=false;},0);  /* 等 MutationObserver 微任务过完 */
+      fbScan();
+      if(fb.idx>=fb.ms.length)fb.idx=fb.ms.length-1;
+      if(fb.ms.length){ fbGoto(fb.idx<0?0:fb.idx); }
+      else{ fb.idx=-1; fb.last=''; fbShow(); }
+      return;
+    }
+    setSel(m.s,m.e);
+    if(!insertPlainText(rep)){ fbSay('替换失败'); return; }
+    fbScan();
+    if(fb.idx>=fb.ms.length)fb.idx=fb.ms.length-1;
+    if(fb.ms.length){ fbGoto(fb.idx<0?0:fb.idx); }
+    else{ fb.idx=-1; fb.last=''; fbShow(); }
+  }
+  function fbRepAll(){
+    if(!fb.q)return;
+    fbScan();
+    var n=fb.ms.length;
+    if(!n){ fbSay('无命中'); return; }
+    var text=getText(),nt;
+    if(fb.opts.r){ nt=text.replace(fbBuildRe(),fbExpand(fbRepl.value)); }
+    else{ nt=text.split(fb.q).join(fbExpand(fbRepl.value)); }
+    if(nt===text){ fbSay('替换后与原文相同'); return; }
+    /* 多行字符串进 execCommand('insertText') 会吞换行（Chromium 实测），
+       故全部替换一律走手动 splice；一步撤销靠 undoSnap 快照 */
+    fb.busy=true;
+    fbSplice(0,text.length,nt);
+    fb.undoSnap=text;
+    setTimeout(function(){fb.busy=false;},0);    /* 等 MutationObserver 微任务过完 */
+    annReanchorLocal();               /* 批注快照重锚（正文被整体改写） */
+    fb.idx=-1; fb.last='';
+    fbScan(); fbShow();
+    if(fb.ms.length){ fbGoto(0); }
+    showToast('已替换 '+n+' 处（Ctrl+Z 一步撤销）');
+  }
+  var fbTimer=null;
+  function fbRefresh(){
+    fbTimer=null;
+    fb.q=fbFind.value;
+    fb.idx=-1; fb.last='';
+    if(fb.opts.r&&fb.q&&!fbBuildRe()){ fb.ms=[]; fbShow(); fbSay('正则表达式无效'); return; }
+    fbScan(); fbShow(); fbSay('');
+  }
+  function fbResync(){                /* 正文被编辑/切档后：重扫描，保持当前命中 */
+    fbScan();
+    if(fb.idx>=fb.ms.length)fb.idx=fb.ms.length-1;
+    fbShow();
+  }
+  function fbOptStyle(){
+    document.getElementById('fbCase').classList.toggle('on',fb.opts.a);
+    document.getElementById('fbRe').classList.toggle('on',fb.opts.r);
+    document.getElementById('fbWord').classList.toggle('on',fb.opts.w);
+  }
+  function fbOpen(showRepl){
+    fbBar.hidden=false;
+    fbRepRow.hidden=!showRepl;
+    if(!fbFind.value){
+      var r=getSel();
+      if(r&&r.e>r.s){
+        var t=getText().substring(r.s,r.e).split('\n')[0];
+        if(t)fbFind.value=t;
+      }
+    }
+    fbOptStyle(); fbRefresh();
+    fbFind.focus(); fbFind.select();
+  }
+  function fbClose(){ fbBar.hidden=true; fbSay(''); editor.focus(); }
+  fbFind.addEventListener('input',function(){ if(fbTimer)clearTimeout(fbTimer); fbTimer=setTimeout(fbRefresh,120); });
+  fbRepl.addEventListener('input',function(){ fbSay(''); });
+  function fbKey(e){
+    if(e.isComposing)return;
+    if(e.key==='Enter'){ e.preventDefault(); e.shiftKey?fbPrev():fbNext(); }
+    else if(e.key==='F3'){ e.preventDefault(); e.shiftKey?fbPrev():fbNext(); }
+    else if(e.key==='Escape'){ e.preventDefault(); fbClose(); }
+  }
+  fbFind.addEventListener('keydown',fbKey);
+  fbRepl.addEventListener('keydown',fbKey);
+  document.getElementById('fbNext').addEventListener('click',function(){ fbNext(); fbRefocus(); });
+  document.getElementById('fbPrev').addEventListener('click',function(){ fbPrev(); fbRefocus(); });
+  document.getElementById('fbRepTgl').addEventListener('click',function(){
+    fbRepRow.hidden=!fbRepRow.hidden; fbFind.focus();
+  });
+  document.getElementById('fbClose').addEventListener('click',fbClose);
+  document.getElementById('fbRepOne').addEventListener('click',function(){ fbRepCur(); fbRefocus(); });
+  document.getElementById('fbRepAll').addEventListener('click',function(){ fbRepAll(); fbRefocus(); });
+  function fbOptBind(id,key){
+    document.getElementById(id).addEventListener('click',function(){
+      fb.opts[key]=!fb.opts[key];
+      fbOptStyle(); fbSaveOpts(); fbRefresh(); fbFind.focus();
+    });
+  }
+  fbOptBind('fbCase','a'); fbOptBind('fbRe','r'); fbOptBind('fbWord','w');
+  editor.addEventListener('input',function(){ if(!fbBar.hidden)fbResync(); });
+  /* 快照作废：任何非替换自身的 DOM 变更（手打字/切文件 setText/程序改写）
+     都使 undoSnap 失效——之后的 Ctrl+Z 回归原生撤销栈，防串档 */
+  new MutationObserver(function(){
+    if(fb.busy)return;
+    fb.undoSnap=null;
+  }).observe(editor,{childList:true,characterData:true,subtree:true});
+  /* 一步撤销：替换后第一次 Ctrl+Z 还原快照（capture 抢在原生 undo 前） */
+  editor.addEventListener('keydown',function(e){
+    if(!fb.undoSnap)return;
+    if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&!e.altKey&&(e.key==='z'||e.key==='Z')){
+      e.preventDefault(); e.stopPropagation();
+      var snap=fb.undoSnap; fb.undoSnap=null;
+      fb.busy=true;
+      setText(snap);
+      scheduleRender(); scheduleSave();
+      annReanchorLocal();
+      setSel(0,0); editor.focus();
+      fb.idx=-1; fb.last=''; fbScan(); fbShow();
+      setTimeout(function(){fb.busy=false;},0);
+      showToast('已撤销全部替换');
+    }
+  },true);
+  document.addEventListener('keydown',function(e){
+    if(e.isComposing)return;
+    if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&!e.altKey){
+      var k=(e.key||'').toLowerCase();
+      if(k==='f'){ e.preventDefault(); fbOpen(false); }
+      else if(k==='h'){ e.preventDefault(); fbOpen(true); }
+    }else if(e.key==='F3'&&!fbBar.hidden){
+      e.preventDefault(); e.shiftKey?fbPrev():fbNext();
+    }
+  });
+  fbOptStyle();
   updateAnnCount();
   document.addEventListener('keydown',function(e){
     if(e.key!=='Escape') return;
-    if(!document.getElementById('llmOverlay').hidden){ document.getElementById('llmOverlay').hidden=true; }
+    if(!fbBar.hidden){ fbClose(); }
+    else if(!document.getElementById('llmOverlay').hidden){ document.getElementById('llmOverlay').hidden=true; }
     else if(!document.getElementById('annOverlay').hidden){ annModalClose(); }
     else if(!document.getElementById('rwOverlay').hidden){ closeRw(); }
     else { selTools.hidden=true; }

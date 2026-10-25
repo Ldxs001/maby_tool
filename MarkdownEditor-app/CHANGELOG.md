@@ -11,6 +11,26 @@
 
 ---
 
+## v2.11.0（2026-10-26）
+
+**本次改动：新增编辑区查找替换浮层（Ctrl+F / Ctrl+H），大小写 / 正则 / 全字三开关，全部替换一步撤销**
+
+**新增**
+- **查找替换浮层**：Ctrl+F 唤起查找、Ctrl+H 唤起并展开替换行，编辑区右上非模态浮层。Enter/Shift+Enter（或 ↑/↓ 按钮、F3/Shift+F3）跳下/上一个命中，文末自动循环并提示；Esc 或 × 关闭并把焦点还给编辑器；选中文字按 Ctrl+F 自动带入查找词（取首行）。计数实时显示「n 个结果 / i/n / 无结果」，输入 120ms 防抖；编辑正文或切档后自动重扫描，偏移失效即从光标处就近重定位（当前命中文本不匹配即视为失效，fail-closed）。
+- **三开关**：`Aa` 区分大小写、`.*` 正则、`\b` 全字匹配；状态经 `md-editor-find-opts` 随 ui-settings 持久化到服务端（沿用 WebView2 localStorage 不落盘的既有口径），刷新后保持。正则模式替换值支持 `$1` 组引用；两种模式的替换值均支持 `\n` / `\t` 转义（`\\` 还原字面反斜杠）。非法正则提示「正则表达式无效」且不产生命中（fail-closed）。
+- **命中高亮**：全命中淡蓝、当前命中金色，经 CSS Custom Highlight API 注册 Range 实现——不碰 DOM（保持「编辑区只有文本节点与批注 span」的结构不变量）、不抢焦点。选区方案不可行已实测：`addRange` 会把焦点拽回编辑器，与「焦点留在输入框」互斥。
+- **撤销语义**：单处替换（替换值无换行）经 `insertPlainText` 进原生 undo 栈，Ctrl+Z 按格撤。全部替换与含 `\n` 的替换值走手动 Range 替换 + 全文快照：execCommand('insertText') 对多行字符串会把 `\n` 劈成空 div 并丢字（Chromium 实测 `'X\nY\nZ'` 插入后 textContent 只剩 `'XYZ'`，plaintext-only 同样中招），多行路径弃用；替换后第一次 Ctrl+Z 由编辑器捕获层还原快照，之后回归原生撤销栈且更早历史不断。任何非替换自身的 DOM 变更（手打字 / 切文件 / 程序改写）经 MutationObserver 使快照作废，防止跨文档误还原。整体替换后调 `annReanchorLocal()` 按批注快照重锚；局部替换跨批注 span 由既有 MutationObserver 自愈。
+
+**测试**
+- **`_test_find_replace.py` 31 条**（playwright 驱动真服务）：唤起与焦点、计数三态、Enter/Shift+Enter 导航与文末循环、三开关命中数按文档推演（5→3 / 3→2）、非法正则 fail-closed、`$1` 组引用与 `\n` 展开的全部替换及其一步撤销、单处替换只改当前命中且 Ctrl+Z 撤销、Highlight 注册断言、×/Esc 关闭还焦点、开关刷新后保持、无页面错误。
+- **全量回归**：`md-parser.test.cjs` 95/95、`_test_parser_sync` 字节一致、`_test_autonum` ALL PASS、`_test_color` 26/26、`_test_math_code` 12/12、`_test_paged_e2e` 64/64、`_test_docx_export` 40/40（3.11）、`_test_export_ui` ALL PASS、`_test_routes` ALL PASS、`_test_lr_llm_prompt` PASS、`_test_low_runner` ALL PASS。
+
+**说明**
+- 仅前端改动（`markdown-editor.html`），`MD_SERVER_VERSION` 不变。
+- 对照实测 `_test_persist` 3 项失败在 v2.10.0 原状（`3b4ab45`）同样复现，与本次改动无关，属既有问题另行处理。
+
+---
+
 ## v2.10.0（2026-10-26）
 
 **本次改动：新增图题 / 表题 / 题注自动编号三套语法与排版面板档位；修复 docx 内置样式蓝字、表格单元格格式丢失、编号章级判定、fill 栏内图宽语义、打印与导出 HTML 丢图题参数**
