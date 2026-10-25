@@ -460,6 +460,8 @@
       <div class="ts-sep"><span>目录（打印导出时自动生成，条目带页码）</span></div>
       <div class="ts-row"><label>目录</label><select id="tsTocOn"><option value="off">不生成</option><option value="on">生成</option></select><select id="tsTocPos"><option value="top">置于文首</option><option value="afterh1">第一个 # 之下</option></select></div>
       <div class="ts-row"><label>目录独占一页（后续 ## 与正文强制新页，不得侵入）</label><input id="tsTocSolo" type="checkbox" checked></div>
+      <div class="ts-sep"><span>标题自动序号（只作用于预览与导出，不改源文；范围 ## ~ #####）</span></div>
+      <div class="ts-row"><label>自动序号</label><input id="tsNumOn" type="checkbox"><select id="tsNumStyle"><option value="cn">中文体　一、（一）1.（1）</option><option value="num">层级体　1 / 1.1 / 1.1.1</option></select></div>
     </div>
      <div class="ts-foot"><button id="tsApply">应用</button></div>
    </div>
@@ -803,6 +805,22 @@ function _dpRefPath(val){
   if(!/(^|\/)([^\/]+\.assets|assets)\/[^\/]+$/.test(v))return '';
   return v;
 }
+/* v2.9 @@ color 色值解析（行内与块级共用，口径只此一处）：
+   简写 11 个（r/g/b/y/o/p/c/m/k/w/a，不分大小写）→ 固定 hex；
+   3 / 6 / 8 位十六进制（规定不带 #，误写 # 也容忍）；8 位末两位为透明度，
+   按 CSS #RRGGBBAA 渲染（浏览器原生支持）。
+   其余一律返回 ''——调用方 fail-closed 保留原文，不猜颜色。 */
+var MDE_COLOR_ABBR={r:'#e53935',g:'#43a047',b:'#1e88e5',y:'#f9a825',
+  o:'#fb8c00',p:'#8e24aa',c:'#00acc1',m:'#d81b60',k:'#000000',
+  w:'#ffffff',a:'#757575'};
+function _colorVal(s){
+  s=String(s==null?'':s).trim().replace(/^#+/,'').toLowerCase();
+  if(!s)return '';
+  if(s.length===1)return MDE_COLOR_ABBR[s]||'';
+  if(/^[0-9a-f]{3}$/.test(s))return '#'+s[0]+s[0]+s[1]+s[1]+s[2]+s[2];
+  if(/^[0-9a-f]{6}$/.test(s)||/^[0-9a-f]{8}$/.test(s))return '#'+s;
+  return '';
+}
 function mdeDpSpan(body,hidden,alias,parsed){
   var pr=parsed||mdeParseBody(body);
   var disp='';
@@ -880,6 +898,38 @@ function parseInline(text,noMde){
   });
   }
   text=escapeHtml(text);
+  /* v2.9 @@ color x{内容}：行内文字着色，色值口径见 _colorVal。
+     位置在 escapeHtml 之后：内容此时已转义，插入的 <span> 不会被二次转义，
+     且后面的上下标/加粗/斜体/链接规则仍会作用于内容（@@ color r{价 x^{2}}
+     出来的是真上标）。
+     花括号用配对计数而非 [^}]*：内容可含 ^{2} / _{1} 这类内嵌花括号，
+     深度归零处才是闭合点，否则会在第一个 } 处错切。
+     到行尾仍未闭合 → 原文保留；内容不跨行；不支持自嵌套（内层按字面露出）。
+     noMde 时整条不生效——run 结果文本不该反向生成语法（与 @@ MDE / ''' 同口径）。 */
+  if(!noMde){
+  /* 用 exec 游标而非 String.replace：replace 的匹配区间只能到 { 为止，
+     内容与闭合 } 落在区间外，返回值里再带内容就会重复一遍。这里手动
+     拼接——已定界的一段拼进 _cOut，未定的部分原样留在 text 尾部。 */
+  var _cRe=/@@\s*color\s+([\w#]{1,8})\s*\{/g,_cPos=0,_cOut='',_cM;
+  while((_cM=_cRe.exec(text))!==null){
+    var _cSt=_cM.index+_cM[0].length,_cD=1,_cQ=_cSt;
+    while(_cQ<text.length){
+      var _cCh=text.charAt(_cQ);
+      if(_cCh==='\n')break;
+      if(_cCh==='{')_cD++;
+      else if(_cCh==='}'){_cD--;if(_cD===0)break;}
+      _cQ++;
+    }
+    /* 未闭合（到行尾/文末没归零）或色值非法 → 不做替换，游标继续往后找 */
+    var _cCol=(_cQ<text.length&&text.charAt(_cQ)==='}')?_colorVal(_cM[1]):'';
+    if(!_cCol)continue;
+    _cOut+=text.slice(_cPos,_cM.index)+
+      '<span class="mde-color" style="color:'+_cCol+'">'+text.slice(_cSt,_cQ)+'</span>';
+    _cPos=_cQ+1;
+    _cRe.lastIndex=_cPos;
+  }
+  if(_cPos>0)text=_cOut+text.slice(_cPos);
+  }
   /* v2.6.10：LaTeX 风格上下标，正文直接写、不加 $：
      ^{任意内容} → <sup>、_{任意内容} → <sub>（^{[1]}、^{1}、^{世界之光} 均可）。
      放在 escapeHtml 之后：花括号里的内容此时已转义，带不进 HTML；再经 toks
@@ -1173,6 +1223,37 @@ function parseMarkdown(src){
         var ftxt=finner.join('\n');
         if(ftxt.trim()){html+=parseMarkdown(ftxt);}
         i=fj;olSeq=0;curInd=0;
+        continue;
+      }
+    }
+    /* v2.9 @@ begin color x / @@ begin color {x} … @@ end color：块级整块着色。
+       与行内 @@ color 分工——块级管「整段/整节」，内容按完整 markdown 渲染
+       （标题/列表/引用/图片/表格/公式都走正常分支），内部可再用行内
+       @@ color 做局部覆盖（span 内联色 > 父 div 继承色，CSS 就近）。
+       色值口径与行内共用 _colorVal（不另立一套）。
+       容器用 div 不用 span：里面装的是 p/ul/h3/table，行内元素包块级是非法嵌套。
+       不嵌套、不跨缩进层（内层 parseMarkdown 独立递归，与 @@ begin fill 同口径）；
+       curInd 不清零——颜色块不改变缩进语义，清了会打断后续 <<< 继承。
+       未闭合 / 色值非法 → 标记行按原文、内容照常渲染，结束行不露出。 */
+    var cm=line.match(/^[ ]{0,3}@@\s*begin\s+color\s+(?:\{([^}]*)\}|([\w#]+))\s*$/);
+    if(cm){
+      var cval=_colorVal(cm[1]!==undefined?cm[1]:cm[2]);
+      var cinner=[],cclosed=false,cj=i+1;
+      while(cj<lines.length){
+        if(/^[ ]{0,3}@@\s*end\s+color\s*$/.test(lines[cj])){cclosed=true;cj++;break;}
+        cinner.push(lines[cj]);cj++;
+      }
+      if(cval&&cclosed){
+        html+='<div class="mde-color" style="color:'+cval+(curInd?';margin-left:'+curInd+'px':'')+'">'+
+          parseMarkdown(cinner.join('\n'))+'</div>';
+        i=cj;olSeq=0;
+        continue;
+      }
+      if(cclosed){
+        html+='<p>'+parseInline(line)+'</p>';
+        var ctxt=cinner.join('\n');
+        if(ctxt.trim()){html+=parseMarkdown(ctxt);}
+        i=cj;olSeq=0;
         continue;
       }
     }
@@ -1471,15 +1552,25 @@ function parseMarkdown(src){
   var mathStore=[];
   function extractMath(src){
     mathStore=[];
+    /* 围栏与行内代码都是"代码"，里面的 $ 一律字面：不提取、不占位。
+       行内代码必须在这一层挡住——parseInline 的 @@C 占位在解析层，而公式提取跑在
+       它之前（源码层），挡不住；漏挡的后果是 `$x^2$` 变成 <code> 里嵌 KaTeX。
+       被反斜杠转义的 \$ 同样不能当定界符：先换私用区占位符（不参与配对），
+       末尾原样还原为 \$，字面 $ 仍由 parseInline 的 \X 规则产出。
+       注意不能用"命中后原样返回"来跳过——replace 会吃掉那段区间，
+       于是 "\$5 与 $z$" 里的 \$ 会把真正的 $z$ 的起始定界符一起吞掉。 */
+    src=String(src).replace(/\\\$/g,'\uE002');
     var parts=src.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~)/);
+    var re=/`[^`\n]*`|\$\$[\s\S]+?\$\$|\$[^$\n]+?\$/g;
     for(var i=0;i<parts.length;i++){
       if(i%2===1)continue; /* fenced code stays untouched */
-      parts[i]=parts[i].replace(/\$\$[\s\S]+?\$\$|\$[^$\n]+?\$/g,function(m){
+      parts[i]=parts[i].replace(re,function(m){
+        if(m.charAt(0)==='`')return m;   /* 行内代码：整段字面 */
         mathStore.push(m);
         return '\uE000M'+(mathStore.length-1)+'\uE001';
       });
     }
-    return parts.join('');
+    return parts.join('').replace(/\uE002/g,function(){return '\\$';});
   }
   function restoreMath(root){
     if(!window.katex){
@@ -2062,7 +2153,7 @@ function parseMarkdown(src){
     q.t=setTimeout(function step(){
       if(!renderQueue || renderQueue!==q) return;
       var bi=q.changed[q.idx];
-      if(bi===undefined){ renderQueue=null; tagAnchorLines(q.blocks,q.startLines); buildOutline(); scheduleRunPass(); return; }
+      if(bi===undefined){ renderQueue=null; tagAnchorLines(q.blocks,q.startLines); applyAutoNum(); buildOutline(); scheduleRunPass(); return; }
       q.idx++;
       var div=q.existing[bi];
       var fresh=false;
@@ -2078,6 +2169,56 @@ function parseMarkdown(src){
       }
       renderQueue.t=setTimeout(step,0);
     },0);
+  }
+  /* 标题自动序号（v2.9）：纯预览层后处理，只改 DOM，不回写源文。
+     范围 h2-h5；h1 出现即清零（视为新章）；引用块/列表/表格内标题跳过。
+     分块增量渲染会反复调用，故每次先删旧 .mde-anum 再全文重算（幂等）。
+     跳级补 0 是自增结构的自然结果：中间级计数保持 0，join('.') 即出 2.0.1。 */
+  function _cnNum(n){
+    if(n<=0) return '零';
+    if(n>99) return String(n);
+    var d=['零','一','二','三','四','五','六','七','八','九'];
+    if(n<10) return d[n];
+    if(n===10) return '十';
+    if(n<20) return '十'+d[n-10];
+    return d[Math.floor(n/10)]+'十'+(n%10?d[n%10]:'');
+  }
+  function _numPrefix(style,lvl,c){
+    if(style==='num'){
+      var seg=[];
+      for(var i=2;i<=lvl;i++) seg.push(String(c[i]||0));
+      return seg.join('.')+' ';
+    }
+    if(lvl===2) return _cnNum(c[2])+'、';
+    if(lvl===3) return '（'+_cnNum(c[3])+'）';
+    if(lvl===4) return c[4]+'. ';
+    if(lvl===5) return '（'+c[5]+'）';
+    return '';
+  }
+  function applyAutoNum(){
+    var body=document.getElementById('preview');
+    if(!body) return;
+    var olds=body.querySelectorAll('.mde-anum');
+    for(var i=0;i<olds.length;i++){ if(olds[i].parentNode) olds[i].parentNode.removeChild(olds[i]); }
+    if(!tsCfg||!tsCfg.num||!tsCfg.num.on) return;
+    var style=(tsCfg.num.style==='num')?'num':'cn';
+    var c={2:0,3:0,4:0,5:0};
+    var hs=body.querySelectorAll('h1,h2,h3,h4,h5');
+    for(var j=0;j<hs.length;j++){
+      var h=hs[j],tg=h.tagName.toLowerCase();
+      if(tg==='h1'){ c[2]=0;c[3]=0;c[4]=0;c[5]=0; continue; }
+      if(h.closest('blockquote,li,td,th')) continue;   /* 只正文顶层 */
+      var lvl=tg.charCodeAt(1)-48;
+      if(!(lvl>=2&&lvl<=5)) continue;
+      c[lvl]++;
+      for(var k=lvl+1;k<=5;k++) c[k]=0;
+      var txt=_numPrefix(style,lvl,c);
+      if(!txt) continue;
+      var s=document.createElement('span');
+      s.className='mde-anum';
+      s.textContent=txt;
+      h.insertBefore(s,h.firstChild);
+    }
   }
   /* 标题锚点打标：块内 h1-h4 元素盖源行标（fence 内 # 不算），供分屏联动做像素插值锚。
      源标题行与 DOM heading 顺序一一对应（ATX 行首 # 才算，与 splitBlocks 口径一致） */
@@ -2697,13 +2838,27 @@ function parseMarkdown(src){
       "color","background-color","text-align","line-height","text-decoration",
       "letter-spacing","vertical-align","text-indent","border-top","border-bottom",
       "border-left","border-right","padding","padding-left","margin","margin-left"];
+    /* color 不抄计算值，只抄作者显式上色的那部分：getComputedStyle 的 color
+       恒有值（继承主题正文色，暗色主题是 #e6e6e8），无差别抄会把整篇刷成
+       浅灰字——Word 白底上几乎看不见。判据：元素自身或祖先带内联 color
+       （@@ color 渲染出的 span/div 就是内联 color；块级容器内的子元素靠
+       祖先命中）。其余不抄，Word 落回默认黑。 */
+    function _ownColor(n){
+      for(var a=n;a;a=a.parentElement){
+        if(a.style&&a.style.color)return true;
+        if(a===el)break;
+      }
+      return false;
+    }
     var all=[el].concat([].slice.call(el.querySelectorAll("*")));
     var snap=[];
     for(var i=0;i<all.length;i++){
       var kv=[];
+      var keepColor=!!(all[i].style&&_ownColor(all[i]));
       if(all[i].style){
         var cs=getComputedStyle(all[i]);
         for(var k=0;k<props.length;k++){
+          if(props[k]==="color"&&!keepColor)continue;
           var v=cs.getPropertyValue(props[k]);
           if(v&&v!=="none"&&v!=="normal"&&v!=="0px"&&v!=="rgba(0, 0, 0, 0)")kv.push(props[k]+":"+v);
         }
@@ -3132,6 +3287,8 @@ function parseMarkdown(src){
         tpl:(pg.pn&&pg.pn.tpl)||'{p}',
         size:(function(v){v=parseFloat(v);return isNaN(v)?9:v;})(pg.pn&&pg.pn.size)},
       toc:{on:(pg.toc&&pg.toc.on==='on')?'on':'off',pos:(pg.toc&&pg.toc.pos)||'top',solo:pg.toc?(pg.toc.solo!==false):true}};
+    /* v2.9 标题自动序号：默认关闭、默认中文体；非法值一律回落默认，不信任旧配置 */
+    o.num={on:!!(raw.num&&raw.num.on),style:(raw.num&&raw.num.style==='num')?'num':'cn'};
     return o;})();
   function applyTypeset(){
     var old=document.getElementById('ts-style');if(old)old.parentNode.removeChild(old);
@@ -3311,6 +3468,8 @@ function parseMarkdown(src){
     document.getElementById('tsPnTpl').value=pg.pn.tpl;document.getElementById('tsPnSize').value=pg.pn.size;
     document.getElementById('tsTocOn').value=pg.toc.on;document.getElementById('tsTocPos').value=pg.toc.pos;
     document.getElementById('tsTocSolo').checked=!!pg.toc.solo;
+    document.getElementById('tsNumOn').checked=!!tsCfg.num.on;
+    document.getElementById('tsNumStyle').value=tsCfg.num.style;
     document.getElementById('tsOverlay').hidden=false;
   }
   document.getElementById('btnTypeset').addEventListener('click',tsOpen);
@@ -3983,6 +4142,8 @@ function parseMarkdown(src){
     pg.pn.size=parseFloat(document.getElementById('tsPnSize').value)||9;
     pg.toc.on=document.getElementById('tsTocOn').value;pg.toc.pos=document.getElementById('tsTocPos').value;
     pg.toc.solo=document.getElementById('tsTocSolo').checked;
+    tsCfg.num.on=!!document.getElementById('tsNumOn').checked;
+    tsCfg.num.style=(document.getElementById('tsNumStyle').value==='num')?'num':'cn';
     applyTypeset();applyPaperWidth();render(true);resetAutoDisk();
     document.getElementById('tsOverlay').hidden=true;
     var ss=document.getElementById('statSave');ss.textContent='排版已更新（缓存）';ss.className='saved';

@@ -367,6 +367,77 @@ t('未闭合在文档中间、下文另有 } → 不丢正文', () => {
   return h.includes('正文');
 });
 
+section('九、颜色语法 @@ color（v2.9）');
+
+t('行内简写 r → #e53935', () =>
+  parseInline('@@ color r{红}') === '<span class="mde-color" style="color:#e53935">红</span>');
+
+t('行内简写 b → #1e88e5', () =>
+  parseInline('@@ color b{蓝}').includes('color:#1e88e5'));
+
+t('简写不分大小写（R）', () =>
+  parseInline('@@ color R{红}').includes('color:#e53935'));
+
+t('六位 HEX 原样输出', () =>
+  parseInline('@@ color 99b3c1{灰}').includes('color:#99b3c1'));
+
+t('三位 HEX 展开成六位', () =>
+  parseInline('@@ color f00{红}').includes('color:#ff0000'));
+
+t('八位 HEX 保留末两位透明度', () =>
+  parseInline('@@ color 99b3c180{半}').includes('color:#99b3c180'));
+
+t('色值非法 → 原文保留（fail-closed）', () =>
+  parseInline('@@ color zz{内容}') === '@@ color zz{内容}');
+
+t('行内未闭合 → 原文保留', () =>
+  parseInline('@@ color r{没闭合') === '@@ color r{没闭合');
+
+t('内容含 ^{2}：配对计数不错切、上标生效', () =>
+  parseInline('@@ color r{价 x^{2}}') ===
+  '<span class="mde-color" style="color:#e53935">价 x<sup>2</sup></span>');
+
+t('内容含 \\}：字面花括号不提前闭合', () => {
+  const h = parseInline('@@ color r{a\\}b}');
+  return h.startsWith('<span') && h.includes('a}b') && h.endsWith('</span>');
+});
+
+t('行内代码里的 @@ color 不上色', () =>
+  parseInline('`@@ color r{x}`') === '<code>@@ color r{x}</code>');
+
+t('同段两个实例各自上色', () => {
+  const h = parseInline('@@ color r{a} @@ color b{b}');
+  return h.includes('color:#e53935') && h.includes('color:#1e88e5');
+});
+
+t('块级基本：div 包两段', () =>
+  parseMarkdown('@@ begin color r\n第一段\n\n第二段\n@@ end color') ===
+  '<div class="mde-color" style="color:#e53935"><p>第一段</p><p>第二段</p></div>');
+
+t('块级花括号写法 {x}', () =>
+  parseMarkdown('@@ begin color {99b3c1}\n灰\n@@ end color').includes('color:#99b3c1'));
+
+t('块内行内覆盖：span 盖在 div 内', () => {
+  const h = parseMarkdown('@@ begin color r\n甲@@ color b{乙}丙\n@@ end color');
+  return h.includes('<div class="mde-color" style="color:#e53935">') &&
+    h.includes('<span class="mde-color" style="color:#1e88e5">乙</span>');
+});
+
+t('块内可放标题与列表', () => {
+  const h = parseMarkdown('@@ begin color b\n### 标题\n\n- 项\n@@ end color');
+  return h.includes('<h3>标题</h3>') && h.includes('<li');
+});
+
+t('块级未闭合：标记与正文都保留、不吞', () => {
+  const h = parseMarkdown('@@ begin color r\n没收尾\n\n后面正文');
+  return h.includes('@@ begin color r') && h.includes('后面正文');
+});
+
+t('块级色值非法：标记行原文、结束行不露出', () => {
+  const h = parseMarkdown('@@ begin color zz\n内容\n@@ end color');
+  return h.includes('@@ begin color zz') && !h.includes('@@ end color') && h.includes('内容');
+});
+
 console.log('');
 console.log('合计 ' + (pass + fail) + ' 条：PASS ' + pass + ' / FAIL ' + fail);
 console.log(pass && !fail ? '✅ ALL CORE CHECKS PASS' : '❌ SOME CHECKS FAILED');

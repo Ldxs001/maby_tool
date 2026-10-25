@@ -221,6 +221,22 @@ function _dpRefPath(val){
   if(!/(^|\/)([^\/]+\.assets|assets)\/[^\/]+$/.test(v))return '';
   return v;
 }
+/* v2.9 @@ color 色值解析（行内与块级共用，口径只此一处）：
+   简写 11 个（r/g/b/y/o/p/c/m/k/w/a，不分大小写）→ 固定 hex；
+   3 / 6 / 8 位十六进制（规定不带 #，误写 # 也容忍）；8 位末两位为透明度，
+   按 CSS #RRGGBBAA 渲染（浏览器原生支持）。
+   其余一律返回 ''——调用方 fail-closed 保留原文，不猜颜色。 */
+var MDE_COLOR_ABBR={r:'#e53935',g:'#43a047',b:'#1e88e5',y:'#f9a825',
+  o:'#fb8c00',p:'#8e24aa',c:'#00acc1',m:'#d81b60',k:'#000000',
+  w:'#ffffff',a:'#757575'};
+function _colorVal(s){
+  s=String(s==null?'':s).trim().replace(/^#+/,'').toLowerCase();
+  if(!s)return '';
+  if(s.length===1)return MDE_COLOR_ABBR[s]||'';
+  if(/^[0-9a-f]{3}$/.test(s))return '#'+s[0]+s[0]+s[1]+s[1]+s[2]+s[2];
+  if(/^[0-9a-f]{6}$/.test(s)||/^[0-9a-f]{8}$/.test(s))return '#'+s;
+  return '';
+}
 function mdeDpSpan(body,hidden,alias,parsed){
   var pr=parsed||mdeParseBody(body);
   var disp='';
@@ -298,6 +314,38 @@ function parseInline(text,noMde){
   });
   }
   text=escapeHtml(text);
+  /* v2.9 @@ color x{内容}：行内文字着色，色值口径见 _colorVal。
+     位置在 escapeHtml 之后：内容此时已转义，插入的 <span> 不会被二次转义，
+     且后面的上下标/加粗/斜体/链接规则仍会作用于内容（@@ color r{价 x^{2}}
+     出来的是真上标）。
+     花括号用配对计数而非 [^}]*：内容可含 ^{2} / _{1} 这类内嵌花括号，
+     深度归零处才是闭合点，否则会在第一个 } 处错切。
+     到行尾仍未闭合 → 原文保留；内容不跨行；不支持自嵌套（内层按字面露出）。
+     noMde 时整条不生效——run 结果文本不该反向生成语法（与 @@ MDE / ''' 同口径）。 */
+  if(!noMde){
+  /* 用 exec 游标而非 String.replace：replace 的匹配区间只能到 { 为止，
+     内容与闭合 } 落在区间外，返回值里再带内容就会重复一遍。这里手动
+     拼接——已定界的一段拼进 _cOut，未定的部分原样留在 text 尾部。 */
+  var _cRe=/@@\s*color\s+([\w#]{1,8})\s*\{/g,_cPos=0,_cOut='',_cM;
+  while((_cM=_cRe.exec(text))!==null){
+    var _cSt=_cM.index+_cM[0].length,_cD=1,_cQ=_cSt;
+    while(_cQ<text.length){
+      var _cCh=text.charAt(_cQ);
+      if(_cCh==='\n')break;
+      if(_cCh==='{')_cD++;
+      else if(_cCh==='}'){_cD--;if(_cD===0)break;}
+      _cQ++;
+    }
+    /* 未闭合（到行尾/文末没归零）或色值非法 → 不做替换，游标继续往后找 */
+    var _cCol=(_cQ<text.length&&text.charAt(_cQ)==='}')?_colorVal(_cM[1]):'';
+    if(!_cCol)continue;
+    _cOut+=text.slice(_cPos,_cM.index)+
+      '<span class="mde-color" style="color:'+_cCol+'">'+text.slice(_cSt,_cQ)+'</span>';
+    _cPos=_cQ+1;
+    _cRe.lastIndex=_cPos;
+  }
+  if(_cPos>0)text=_cOut+text.slice(_cPos);
+  }
   /* v2.6.10：LaTeX 风格上下标，正文直接写、不加 $：
      ^{任意内容} → <sup>、_{任意内容} → <sub>（^{[1]}、^{1}、^{世界之光} 均可）。
      放在 escapeHtml 之后：花括号里的内容此时已转义，带不进 HTML；再经 toks
@@ -591,6 +639,37 @@ function parseMarkdown(src, opts){
         var ftxt=finner.join('\n');
         if(ftxt.trim()){html+=parseMarkdown(ftxt);}
         i=fj;olSeq=0;curInd=0;
+        continue;
+      }
+    }
+    /* v2.9 @@ begin color x / @@ begin color {x} … @@ end color：块级整块着色。
+       与行内 @@ color 分工——块级管「整段/整节」，内容按完整 markdown 渲染
+       （标题/列表/引用/图片/表格/公式都走正常分支），内部可再用行内
+       @@ color 做局部覆盖（span 内联色 > 父 div 继承色，CSS 就近）。
+       色值口径与行内共用 _colorVal（不另立一套）。
+       容器用 div 不用 span：里面装的是 p/ul/h3/table，行内元素包块级是非法嵌套。
+       不嵌套、不跨缩进层（内层 parseMarkdown 独立递归，与 @@ begin fill 同口径）；
+       curInd 不清零——颜色块不改变缩进语义，清了会打断后续 <<< 继承。
+       未闭合 / 色值非法 → 标记行按原文、内容照常渲染，结束行不露出。 */
+    var cm=line.match(/^[ ]{0,3}@@\s*begin\s+color\s+(?:\{([^}]*)\}|([\w#]+))\s*$/);
+    if(cm){
+      var cval=_colorVal(cm[1]!==undefined?cm[1]:cm[2]);
+      var cinner=[],cclosed=false,cj=i+1;
+      while(cj<lines.length){
+        if(/^[ ]{0,3}@@\s*end\s+color\s*$/.test(lines[cj])){cclosed=true;cj++;break;}
+        cinner.push(lines[cj]);cj++;
+      }
+      if(cval&&cclosed){
+        html+='<div class="mde-color" style="color:'+cval+(curInd?';margin-left:'+curInd+'px':'')+'">'+
+          parseMarkdown(cinner.join('\n'))+'</div>';
+        i=cj;olSeq=0;
+        continue;
+      }
+      if(cclosed){
+        html+='<p>'+parseInline(line)+'</p>';
+        var ctxt=cinner.join('\n');
+        if(ctxt.trim()){html+=parseMarkdown(ctxt);}
+        i=cj;olSeq=0;
         continue;
       }
     }

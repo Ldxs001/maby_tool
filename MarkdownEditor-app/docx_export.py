@@ -226,10 +226,23 @@ def _style_dict(style_str):
 
 
 def _color(rgb):
-    m = re.match(r"#([0-9a-fA-F]{6})", rgb or "")
+    """CSS 颜色字符串 → RGBColor。两种书写形式都必须认：
+      ① #RRGGBB（@color 语法写的是 hex，八位 #RRGGBBAA 取前六位——
+         w:color 只有一个 w:val，OOXML 没有 alpha 槽，透明度必然丢失）
+      ② rgb(r, g, b) / rgba(r, g, b, a) —— 导出前 inlineStylesInto 把
+         getComputedStyle 的结果写回 style，恒为 rgb()/rgba() 形式，
+         hex 在那里已被抹掉。只认 hex 会让文字颜色全部进不了 Word。
+    认不出返回 None（调用方不写颜色槽，保持默认黑）。"""
+    s = rgb or ""
+    m = re.match(r"#([0-9a-fA-F]{6})", s)
     if m:
         h = m.group(1)
         return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+    m = re.match(r"rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})", s)
+    if m:
+        return RGBColor(min(int(m.group(1)), 255),
+                        min(int(m.group(2)), 255),
+                        min(int(m.group(3)), 255))
     return None
 
 

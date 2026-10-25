@@ -64,7 +64,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 92  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 97  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 SETTINGS_PATH = os.path.join(HERE, "runtime", "settings.json")
 
 # ---------- low runner（v2.4）：文档内参数值的自动化计算 ----------
@@ -75,6 +75,15 @@ RUNS_DIR = os.path.join(HERE, "runtime", "runs")
 PYLIBS_DIR = os.path.join(HERE, "runtime", "pylibs")
 RUN_CACHE_DIR = os.path.join(HERE, "runtime", "run_cache")
 PORTABLE_PY = os.path.join(HERE, "python", "python.exe")
+
+# 子进程一律不带控制台（v2.9.0 修）：本服务跑在 pythonw.exe 里（GUI 子系统、
+# 无控制台），被拉起的 python.exe 是控制台程序——不指定 CREATE_NO_WINDOW 时
+# Windows 必须为每个子进程新建一个 conhost.exe。实测（pythonw 当父进程，8 次
+# run 一组）：无 flags 均 0.386s、净增 2 个 conhost；带 flags 均 0.058s、净增 0。
+# 更要紧的是控制台初始化失败会弹「应用程序无法正常启动(0xc0000142)」，进程挂在
+# 对话框上不退出，父进程等 stdout EOF 等满 10s 才 kill，前端误报"执行超时"。
+# 非 Windows 上该常量为 0，等价于不传。
+_NO_WIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 for _d in (RUNS_DIR, RUN_CACHE_DIR):
     try:
         os.makedirs(_d, exist_ok=True)
@@ -551,7 +560,8 @@ def _lr_check_deps(code):
         cp = subprocess.run(
             [py, "-c", driver],
             input=json.dumps(mods).encode("utf-8"),
-            capture_output=True, timeout=15, env=env)
+            capture_output=True, timeout=15, env=env,
+            creationflags=_NO_WIN)
         raw = cp.stdout.decode("utf-8", "replace").strip()
         deps = json.loads(raw) if raw else []
     except Exception:
@@ -748,7 +758,8 @@ def _lr_run(mod, fn, data, doc_path=None):
             cp = subprocess.run(
                 [py, "-c", code],
                 input=json.dumps(data, ensure_ascii=False).encode("utf-8"),
-                capture_output=True, timeout=10, cwd=cwd, env=env)
+                capture_output=True, timeout=10, cwd=cwd, env=env,
+                creationflags=_NO_WIN)
         except subprocess.TimeoutExpired:
             return {"ok": False, "error": "run 执行超时（>10s）"}
         except Exception as e:
@@ -760,6 +771,12 @@ def _lr_run(mod, fn, data, doc_path=None):
             j = json.loads(out)
         except Exception:
             err = cp.stderr.decode("utf-8", "replace").strip()
+            if not out and cp.returncode not in (0, None):
+                # 一个字都没输出就非零退出 = 进程没跑起来（典型 0xC0000142：
+                # 控制台/DLL 初始化失败）。报准确退出码，别误报"输出非 JSON"。
+                return {"ok": False, "error": "子进程异常退出（0x%08X）%s"
+                        % (cp.returncode & 0xFFFFFFFF,
+                           ("：" + err[:300]) if err else "")}
             return {"ok": False, "error": "run 输出非 JSON：%s%s"
                     % (out[:200], ("\nstderr: " + err[:300]) if err else "")}
         if j.get("ok") and isinstance(j.get("result"), (str, list)):
@@ -911,7 +928,8 @@ def _rag_start_async(rag_path):
         cmd = _rag_python_cmd(rag_path) + [main_py, "--port", "18765",
                                            "--api-port", str(RAG_PORT)]
         proc = subprocess.Popen(cmd, cwd=rag_path, env=env,
-                                stdout=subprocess.DEVNULL, stderr=stderr_tmp)
+                                stdout=subprocess.DEVNULL, stderr=stderr_tmp,
+                                creationflags=_NO_WIN)
         stderr_tmp.close()
         with _rag_lock:
             _rag_process = proc
