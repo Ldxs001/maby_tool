@@ -64,7 +64,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 97  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 99  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 SETTINGS_PATH = os.path.join(HERE, "runtime", "settings.json")
 
 # ---------- low runner（v2.4）：文档内参数值的自动化计算 ----------
@@ -2529,6 +2529,29 @@ PAPER_W_MM = {"A0": 841, "A1": 594, "A2": 420, "A3": 297, "A4": 210, "A5": 148,
 #   * 表格 width:100% + table-layout:auto + th/td 细边框 keep-all+anywhere（1.1）
 #   * thead 跨页自动重复表头 + tr/li break-inside:avoid（表格切分行不腰斩）
 #   * 引用编号索引表（表头=编号|引用|出处）ref-table 固定列宽 8%/47%/45%（1.2）
+# v2.10 图题/表题基础样式：与 markdown-editor.html 预览同口径。打印（paged）
+# 与导出 HTML 的模板 CSS 是独立拷贝，此前一条 .mde-fig 规则都没有——
+# t/b（flex-direction:column-reverse）、{N} 宽度（width:var(--figw)）、
+# s 间距（calc × --figgap/--tabgap）、w 裁剪（nowrap+ellipsis）在打印件里
+# 全部丢失（题注恒显示在图下方）。克隆保留 class 与内联 style（--figw 等
+# 自定义属性随元素带过来），模板里有规则即可完整还原。
+FIGCAP_BASE_CSS = """
+.markdown-body figure.mde-fig{margin:.9em 0;max-width:100%;width:var(--figw,auto);break-inside:avoid;}
+.markdown-body figure.mde-fig[data-fig-side="t"]{display:flex;flex-direction:column-reverse;align-items:flex-start;}
+.markdown-body figure.mde-fig>img{max-width:100%;height:auto;margin:0;}
+.markdown-body figure.mde-fig>.diagram{width:100%;max-width:100%;margin:0;}
+.markdown-body figcaption.mde-figcap{width:100%;max-width:100%;overflow:hidden;font-size:.92em;line-height:1.5;}
+.markdown-body figure.mde-fig[data-fig-side="b"]>figcaption{margin-top:calc(1em * var(--figgap,.3));}
+.markdown-body figure.mde-fig[data-fig-side="t"]>figcaption{margin-bottom:calc(1em * var(--figgap,.3));}
+.markdown-body figure.mde-fig[data-fig-mode="w"]>figcaption{white-space:nowrap;text-overflow:ellipsis;}
+.markdown-body .mde-tblwrap{margin:.9em 0;}
+.markdown-body .mde-tabcap{font-size:.92em;line-height:1.5;overflow:hidden;}
+.markdown-body .mde-tblwrap[data-tab-side="t"]>.mde-tabcap{margin-bottom:calc(1em * var(--tabgap,.3));}
+.markdown-body .mde-tblwrap[data-tab-side="b"]>.mde-tabcap{margin-top:calc(1em * var(--tabgap,.3));}
+.markdown-body .mde-cnum{margin-right:.35em;}
+.markdown-body .fill-col figure.mde-fig{width:auto !important;margin:0;}
+"""
+
 PAGED_BASE_CSS = """
 *{box-sizing:border-box;}
 .markdown-body{color:#222;line-height:1.7;word-wrap:break-word;overflow-wrap:anywhere;}
@@ -2569,8 +2592,9 @@ PAGED_BASE_CSS = """
 .markdown-body .diagram[data-diagram-align="left"]{margin-right:auto;}
 .markdown-body .fill-row{display:flex;gap:1em;margin:.6em 0;break-inside:avoid;}
 .markdown-body .fill-col{min-width:0;}
-.markdown-body .fill-col img{width:auto !important;max-width:100% !important;height:auto;}
-.markdown-body .fill-col .diagram{width:auto !important;max-width:100% !important;}
+.markdown-body .fill-col img{width:100% !important;height:auto;}
+.markdown-body .fill-col table img{width:auto !important;max-width:100% !important;height:auto;}
+.markdown-body .fill-col .diagram{width:100% !important;}
 .markdown-body .fill-col .diagram svg{max-width:100%;height:auto;}
 .markdown-body table.ref-table{table-layout:fixed;}
 .markdown-body table.ref-table th:nth-child(1),.markdown-body table.ref-table td:nth-child(1){width:8%;}
@@ -2811,10 +2835,12 @@ def build_standalone_html(md_path, body_html, ts_css, page_cfg=None):
         '.diagram[data-diagram-align="left"]{margin-right:auto;}'
         '.fill-row{display:flex;gap:1em;margin:.6em 0;}'
         '.fill-col{min-width:0;}'
-        '.fill-col img{width:auto !important;max-width:100% !important;height:auto;}'
-        '.fill-col .diagram{width:auto !important;max-width:100% !important;}'
+        '.fill-col img{width:100% !important;height:auto;}'
+        '.fill-col table img{width:auto !important;max-width:100% !important;height:auto;}'
+        '.fill-col .diagram{width:100% !important;}'
         '.fill-col .diagram svg{max-width:100%;height:auto;}'
-        'img,svg{max-width:100%;}svg{height:auto;}a{color:#4a6cf7;}</style></head><body class="markdown-body">__BODY__'
+        'img,svg{max-width:100%;}svg{height:auto;}a{color:#4a6cf7;}'
+        '__FIGCAP__</style></head><body class="markdown-body">__BODY__'
         '<button id="__copyBtn" style="position:fixed;right:18px;bottom:18px;z-index:2147483647;'
         'padding:9px 16px;border:0;border-radius:8px;background:#4a6cf7;color:#fff;'
         'font:14px/1.2 -apple-system,Segoe UI,PingFang SC,Microsoft YaHei,sans-serif;'
@@ -2858,6 +2884,7 @@ def build_standalone_html(md_path, body_html, ts_css, page_cfg=None):
     html = html.replace("__TITLE__", html_module.escape(title))
     html = html.replace("__KATEX__", katex_css)
     html = html.replace("__TS__", ts)
+    html = html.replace("__FIGCAP__", FIGCAP_BASE_CSS)
     html = html.replace("__CONTENTW__", ("%.2f" % _w_mm).rstrip("0").rstrip("."))
     html = html.replace("__BODY__", body)
     return html
@@ -3005,7 +3032,7 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
 
     # 基础正文样式（表格边框/图片版面/断行纪律）——此前缺失是表格边框
     # 在分页导出中消失的根因；置于 ts_css 之前，排版设置的 !important 仍可覆盖
-    base_css = PAGED_BASE_CSS.replace("__IMGMAXH__", ("%.2f" % img_maxh))
+    base_css = PAGED_BASE_CSS.replace("__IMGMAXH__", ("%.2f" % img_maxh)) + FIGCAP_BASE_CSS
 
     # 资源内嵌（全部本地，离线可用）
     katex_css = ""

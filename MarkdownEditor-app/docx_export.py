@@ -567,7 +567,7 @@ def _apply_run_style(run, style_node):
 _SKIP_INLINE_TAGS = {"ul", "ol", "table", "blockquote", "pre", "div"}
 
 
-def _fill_inline(node, para, doc, md_path):
+def _fill_inline(node, para, doc, md_path, max_in=None):
     if node.text:
         _add_run(para, node.text, node)
     for child in _children(node):
@@ -577,7 +577,7 @@ def _fill_inline(node, para, doc, md_path):
         if ctag == "br":
             para.add_run().add_break()
         elif ctag == "img":
-            _add_image(para, child, md_path, doc)
+            _add_image(para, child, md_path, doc, max_in=max_in)
         elif ctag == "svg":
             para.add_run("[图表]")
         elif ctag in ("sup", "sub"):
@@ -592,7 +592,7 @@ def _fill_inline(node, para, doc, md_path):
         elif child.get("data-tex") is not None:
             _append_omml(para, child.get("data-tex"), child)
         else:
-            _fill_inline(child, para, doc, md_path)
+            _fill_inline(child, para, doc, md_path, max_in=max_in)
         if child.tail:
             # tail 在父容器里，样式用父容器的——用 child 会把前一个
             # 行内元素的样式（红/粗）出血到尾随文字（实测 <span>红</span>
@@ -641,13 +641,21 @@ def _content_width_in(doc):
         return 6.0
 
 
-def _img_width_in(doc, img, natural_px):
+def _img_width_in(doc, img, natural_px, max_in=None):
     """图片显示宽（英寸），与前端 {N} 宽度规则同口径：
+    ⓪ data-x-fill（fill 栏内直接图，v2.10.0）→ 直接取 usable：栏内图一律
+      相对栏 100%（与不分栏 {N} 相对版心同一语义），usable 已被 max_in
+      钳到栏宽——是定宽不是上限，小图同样放大到栏宽；
     ① data-x-pct（{N} 参数）→ 版心 × N%（钳 100），等比靠只传 width；
     ② data-x-w（前端栅格化图的 1x 显示宽）→ px/96dpi；
     ③ 自然尺寸（普通图片：小图原始、大图钳版心）。
-    全部以版心为上限（"最大是版面宽度100%"）。"""
+    全部以版心为上限（"最大是版面宽度100%"）；max_in（fill 栏宽英寸）
+    更小时进一步钳到栏宽。"""
     usable = _content_width_in(doc)
+    if max_in is not None and max_in > 0:
+        usable = min(usable, max_in)
+    if img.get("data-x-fill"):
+        return usable
     pct = img.get("data-x-pct")
     if pct:
         try:
@@ -665,7 +673,7 @@ def _img_width_in(doc, img, natural_px):
     return None
 
 
-def _add_image(para, img, md_path, doc=None):
+def _add_image(para, img, md_path, doc=None, max_in=None):
     src = img.get("src", "") or ""
     # 前端栅格化的图表 PNG（data URL）：直接解码嵌入
     if src.startswith("data:image/"):
@@ -677,7 +685,7 @@ def _add_image(para, img, md_path, doc=None):
                 natural_px = Image.open(io.BytesIO(data)).size[0]
             except Exception:
                 pass
-            w_in = _img_width_in(doc, img, natural_px) if doc else None
+            w_in = _img_width_in(doc, img, natural_px, max_in) if doc else None
             if w_in:
                 para.add_run().add_picture(io.BytesIO(data), width=Inches(w_in))
             else:
@@ -698,7 +706,7 @@ def _add_image(para, img, md_path, doc=None):
             natural_px = Image.open(path).size[0]
         except Exception:
             pass
-        w_in = _img_width_in(doc, img, natural_px) if doc else None
+        w_in = _img_width_in(doc, img, natural_px, max_in) if doc else None
         if w_in:
             para.add_run().add_picture(path, width=Inches(w_in))
         else:
@@ -886,7 +894,7 @@ def _walk(node, doc, md_path, ctx):
     if re.match(r"h[1-6]$", tag):
         level = int(tag[1])
         p = doc.add_heading(level=level)
-        _fill_inline(node, p, doc, md_path)
+        _fill_inline(node, p, doc, md_path, max_in=ctx.get("max_in"))
         ctx["para"] = None
         return
 
@@ -908,7 +916,7 @@ def _walk(node, doc, md_path, ctx):
             if ctag in ("p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "ul", "ol", "pre", "table"):
                 _walk(ch, doc, md_path, ctx)
             else:
-                _fill_inline(ch, p, doc, md_path)
+                _fill_inline(ch, p, doc, md_path, max_in=ctx.get("max_in"))
             if ch.tail and ch.tail.strip():
                 _add_run(p, ch.tail, ch)
         ctx["ind"] = saved
@@ -944,7 +952,7 @@ def _walk(node, doc, md_path, ctx):
                 # 正文浅一层半，"列表没继承缩进"）。显式 firstLine=0 让
                 # 编号与文本都从容器左缘起（inside 语义，与预览同几何）
                 p.paragraph_format.first_line_indent = Pt(0)
-                _fill_inline(li, p, doc, md_path)
+                _fill_inline(li, p, doc, md_path, max_in=ctx.get("max_in"))
                 # li 内嵌套列表：嵌套层缩进 = 本层容器档 + 嵌套自身档
                 for sub in _children(li):
                     if etree.QName(sub).localname in ("ul", "ol"):
@@ -965,6 +973,12 @@ def _walk(node, doc, md_path, ctx):
         run.font.name = "Consolas"
         run.font.size = Pt(10)
         ctx["para"] = None
+        return
+
+    # 图片题注容器（v2.10.0）：<figure><img><figcaption>——图与题注
+    # 必须是两个段落（同段落时题注会被挤在图片行里）
+    if tag == "figure":
+        _add_figure(node, doc, md_path, ctx)
         return
 
     # 表格
@@ -994,7 +1008,7 @@ def _walk(node, doc, md_path, ctx):
                     al = _align(_style_dict(parent.get("style", "")))
         if al is not None:
             p.alignment = al
-        _add_image(p, node, md_path, doc)
+        _add_image(p, node, md_path, doc, max_in=ctx.get("max_in"))
         ctx["para"] = None
         return
 
@@ -1002,6 +1016,13 @@ def _walk(node, doc, md_path, ctx):
     # 当布局骨架（Word 原生多图并排做法），列宽 = 版心 × 比例；
     # 栏内容递归 _walk（图片/图表段在单元格内）；<<继承链的块级缩进
     # 由表格 left_indent 承载
+    # @@ caption 表格包裹（v2.10.0）：题注段 + 表格，顺序由 data-tab-side
+    # 定。必须排在通用 div 分支之前——否则题注会被当普通 div 下钻，
+    # 表格与题注的相邻关系（keepNext / 段序）就丢了
+    if tag == "div" and node.get("data-tab-wrap"):
+        _add_tabwrap(node, doc, md_path, ctx)
+        return
+
     if tag == "div" and node.get("data-fill-row"):
         cols = [ch for ch in _children(node)
                 if isinstance(ch.tag, str)
@@ -1030,7 +1051,11 @@ def _walk(node, doc, md_path, ctx):
             cell = tbl.cell(0, ci)
             base_saved = float(ctx.get("ind", 0.0))
             celldoc = _CellDoc(cell)
-            cell_ctx = {"para": None, "ind": 0.0}
+            # max_in：图宽上限=栏宽（v2.10.0）。栏内宽度参数失效后，栏内
+            # 图片（含 figure/表格内图）的"自然尺寸钳版心"要换成钳栏宽，
+            # 否则大图从单元格里溢出
+            cell_ctx = {"para": None, "ind": 0.0,
+                        "max_in": usable_mm * ratios[ci] / total / 25.4}
             for sub in _children(ch):
                 _walk(sub, celldoc, md_path, cell_ctx)
             # 清掉单元格默认空首段（有后续内容时；OOXML 要求 cell ≥1 段）
@@ -1115,17 +1140,184 @@ def _walk(node, doc, md_path, ctx):
                 p.paragraph_format.left_indent = Pt(base)
         elif base:
             p.paragraph_format.left_indent = Pt(base)
-        _fill_inline(node, p, doc, md_path)
+        _fill_inline(node, p, doc, md_path, max_in=ctx.get("max_in"))
         ctx["para"] = None
         return
 
     # 其它：当作内联内容挂到当前段落（或新建）
     p = ctx.get("para") or doc.add_paragraph()
-    _fill_inline(node, p, doc, md_path)
+    _fill_inline(node, p, doc, md_path, max_in=ctx.get("max_in"))
     ctx["para"] = p
 
 
-def _add_table(doc, table, md_path):
+def _cap_pt(cap_node, default=9.0):
+    """题注字号（pt）：取自内联 font-size（排版面板「图题/表题」档经
+    inlineStylesInto 抄进来），认不出按 9pt。"""
+    sd = _style_dict(cap_node.get("style", ""))
+    return _pt(sd.get("font-size")) or default
+
+
+def _narrow_para(p, doc, pct, al):
+    """题注段落按图片显示宽缩窄 —— 这就是「按宽度换行」在 Word 里的
+    落地方式：段落宽度 = 图宽，文字自然在框内折行。图居中则左右各留
+    (版心-图宽)/2，居左右侧留白，居右左侧留白。pct 认不出（"auto" 或
+    非法）时不缩窄，题注按版心宽折行（HTML 侧的 w 裁剪在 Word 无对应
+    槽位，一律交给 Word 自己的折行规则）。"""
+    try:
+        ratio = float(pct)
+    except (TypeError, ValueError):
+        return
+    usable = _content_width_in(doc)
+    w = usable * min(max(ratio, 1.0), 100.0) / 100.0
+    rest = max(usable - w, 0.0)
+    if al == WD_ALIGN_PARAGRAPH.CENTER:
+        left = right = rest / 2.0
+    elif al == WD_ALIGN_PARAGRAPH.RIGHT:
+        left, right = rest, 0.0
+    else:
+        left, right = 0.0, rest
+    if left:
+        p.paragraph_format.left_indent = Pt(left * 72)   # inch → pt
+    if right:
+        p.paragraph_format.right_indent = Pt(right * 72)
+
+
+def _add_figure(node, doc, md_path, ctx):
+    """<figure>（图 + 题注）：两段的先后由 data-fig-side 定（t=题注在上、
+    b=在下，默认 b），间距 s<n> 是「题注字号 × n」，落在题注与图相邻的那
+    一侧（题注在下写 space_before，在上写 space_after）；相邻段 keepNext
+    保证图与题注不被分页拆开。v2.10.0：主体也可以是图表容器（围栏图题
+    ```mermaid "题注" 产出 figure>div.diagram）——div.diagram 走既有
+    _walk 下钻（栅格化 PNG 或 svg 占位），对齐沿用 data-diagram-align。"""
+    img = None
+    cap = None
+    charts = []
+    for ch in _children(node):
+        t = etree.QName(ch).localname
+        if t == "img" and img is None:
+            img = ch
+        elif t == "figcaption" and cap is None:
+            cap = ch
+        elif t == "div" and ch.get("data-diagram") is not None:
+            charts.append(ch)
+    if img is None and cap is None and not charts:
+        return
+    side = (node.get("data-fig-side") or "b").strip().lower()
+    try:
+        gap = float(node.get("data-fig-gap") or 0.3)
+    except (TypeError, ValueError):
+        gap = 0.3
+
+    fig_al = _align_from_attr(img) if img is not None else None
+    if fig_al is None and charts:
+        fig_al = _align_from_attr(charts[0])
+    if fig_al is None:
+        fig_al = _align(_style_dict(node.get("style", "")))
+    cap_al = _align(_style_dict(cap.get("style", ""))) if cap is not None else None
+    if cap_al is None:
+        cap_al = fig_al
+
+    def mk_img():
+        p = doc.add_paragraph()
+        if fig_al is not None:
+            p.alignment = fig_al
+        _add_image(p, img, md_path, doc, max_in=ctx.get("max_in"))
+        return p
+
+    def mk_cap():
+        p = doc.add_paragraph()
+        try:
+            p.style = doc.styles["Caption"]
+        except KeyError:
+            pass
+        if cap_al is not None:
+            p.alignment = cap_al
+        gap_pt = _cap_pt(cap) * gap
+        if side == "t":
+            p.paragraph_format.space_after = Pt(gap_pt)
+        else:
+            p.paragraph_format.space_before = Pt(gap_pt)
+        _narrow_para(p, doc, node.get("data-fig-w"), cap_al)
+        _fill_inline(cap, p, doc, md_path, max_in=ctx.get("max_in"))
+        return p
+
+    order = [("cap", mk_cap), ("img", mk_img)] if side == "t" \
+        else [("img", mk_img), ("cap", mk_cap)]
+    made = []
+    for kind, fn in order:
+        if kind == "img":
+            if img is not None:
+                made.append(fn())
+            elif charts:
+                # 图表主体：逐个 diagram 容器下钻（各自成段），首段带对齐
+                for ci, c in enumerate(charts):
+                    p = doc.add_paragraph()
+                    if ci == 0 and fig_al is not None:
+                        p.alignment = fig_al
+                    _walk(c, doc, md_path, ctx)
+                    made.append(p)
+        elif kind == "cap" and cap is not None:
+            made.append(fn())
+    if len(made) == 2:
+        made[0].paragraph_format.keep_with_next = True
+    ctx["para"] = None
+
+
+def _add_tabwrap(node, doc, md_path, ctx):
+    """@@ caption 生成的表格包裹：题注段 + 表格。题注位置由
+    data-tab-side 定（t=表上、b=表下，默认 t）；表格宽 = 版心，
+    题注不缩窄，只按 data-tab-align 对齐。"""
+    cap = None
+    tbl = None
+    for ch in _children(node):
+        t = etree.QName(ch).localname
+        if t == "table" and tbl is None:
+            tbl = ch
+        elif t == "div" and cap is None:
+            cap = ch
+    if tbl is None and cap is None:
+        return
+    side = (node.get("data-tab-side") or "t").strip().lower()
+    try:
+        gap = float(node.get("data-tab-gap") or 0.3)
+    except (TypeError, ValueError):
+        gap = 0.3
+    cap_al = _align(_style_dict(cap.get("style", ""))) if cap is not None else None
+
+    def mk_cap():
+        p = doc.add_paragraph()
+        try:
+            p.style = doc.styles["Caption"]
+        except KeyError:
+            pass
+        if cap_al is not None:
+            p.alignment = cap_al
+        gap_pt = _cap_pt(cap) * gap
+        if side == "b":
+            p.paragraph_format.space_after = Pt(gap_pt)
+        else:
+            p.paragraph_format.space_before = Pt(gap_pt)
+        _fill_inline(cap, p, doc, md_path, max_in=ctx.get("max_in"))
+        return p
+
+    def mk_tbl():
+        _add_table(doc, tbl, md_path, max_in=ctx.get("max_in"))
+        return None
+
+    order = [("tbl", mk_tbl), ("cap", mk_cap)] if side == "b" \
+        else [("cap", mk_cap), ("tbl", mk_tbl)]
+    made = []
+    for kind, fn in order:
+        if (kind == "tbl" and tbl is None) or (kind == "cap" and cap is None):
+            continue
+        made.append((kind, fn()))
+    # 题注在上时与表格同页；表格不得与题注分页拆开
+    if side != "b" and made and made[0][1] is not None:
+        made[0][1].paragraph_format.keep_with_next = True
+    ctx["para"] = None
+
+
+def _add_table(doc, table, md_path, max_in=None):
     # 真实前端结构为 <table><thead><tr><th>… 与 <tbody><tr><td>…（历史缺陷：
     # 只认 table 直接子级 tr，thead/tbody 包装下行收集为空，表格整块丢弃）
     trs = table.xpath(".//*[local-name()='tr']")
@@ -1145,9 +1337,12 @@ def _add_table(doc, table, md_path):
         for j, cell in enumerate(row):
             if j >= ncols:
                 continue
-            text = cell.text_content()
-            dt.cell(i, j).text = text
-    # 表头加粗首行
+            # 直接在单元格预建的首段里填充 run：颜色/加粗/字号/上下标/公式
+            # 才能进 Word。历史缺陷：cell.text_content() 只取纯文本，
+            # 整张表的行内格式（含 @@ color）全部丢失。
+            _fill_inline(cell, dt.cell(i, j).paragraphs[0], doc, md_path,
+                         max_in=max_in)
+    # 表头加粗首行（th 语义；单元格内已带 bold 时重复设置无害）
     for j in range(ncols):
         for r in dt.rows[0].cells[j].paragraphs[0].runs:
             r.font.bold = True
@@ -1196,11 +1391,56 @@ def _apply_page_section(doc, page_cfg):
         pass
 
 
+# ---------------------------------------------------------------------------
+# 内置样式净化（标题 / 题注的主题蓝）
+# ---------------------------------------------------------------------------
+# python-docx 默认模板里这些样式自带主题色 + 加粗：
+#   Title 17365D / Heading 1 365F91 / Heading 2~6 与 Caption 4F81BD，
+#   全部带 w:themeColor="accent1"。add_heading() 套上 Heading 样式后，
+#   段落与 run 上都没有 color 槽位（作者没显式上色时 inlineStylesInto
+#   不再抄主题色——见 v2.9.0「导出字色」修复）→ Word 取样式值，
+#   于是整篇标题和题注都是蓝的。
+# 这里把颜色钉死为黑并删掉主题色属性（OOXML 里 themeColor 存在时 Word
+# 优先用主题色，只改 val 无效），题注另摘掉加粗。
+# 作者显式上色的标题（@@ color）不受影响：那是 run 级 w:color，优先级
+# 高于样式级。
+_BLUISH_STYLES = ("Title", "Heading 1", "Heading 2", "Heading 3",
+                  "Heading 4", "Heading 5", "Heading 6", "Caption")
+
+
+def _sanitize_builtin_styles(doc):
+    """返回被处理的样式个数（自测/验收可断言）。"""
+    clean = 0
+    for name in _BLUISH_STYLES:
+        try:
+            st = doc.styles[name]
+        except KeyError:
+            continue
+        rpr = st.element.find(qn("w:rPr"))
+        if rpr is None:
+            continue
+        col = rpr.find(qn("w:color"))
+        if col is not None:
+            for attr in ("themeColor", "themeShade", "themeTint"):
+                key = qn("w:" + attr)
+                if key in col.attrib:
+                    del col.attrib[key]
+            col.set(qn("w:val"), "000000")
+            clean += 1
+        if name == "Caption":
+            for t in ("w:b", "w:bCs"):
+                b = rpr.find(qn(t))
+                if b is not None:
+                    rpr.remove(b)
+    return clean
+
+
 def build_docx(md_path, body_html, ts_css=None, page_cfg=None):
     """body_html: 已内联样式的 HTML 片段（含 .markdown-body 根）。
     page_cfg: 排版面板 page 节（纸张/页边距），None 用 A4 默认。
     返回 .docx 字节。"""
     doc = Document()
+    _sanitize_builtin_styles(doc)
     _apply_page_section(doc, page_cfg)
     _prep_list_abstract(doc)
     root = lxml_html.fromstring(body_html)

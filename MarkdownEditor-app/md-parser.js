@@ -262,6 +262,59 @@ function mdeDpSpan(body,hidden,alias,parsed){
     ' data-dp-alias="'+escAttr(alias||'')+'"'+valAttr+'>'+escapeHtml(disp)+refBtn+'</span>';
 }
 
+/* 图题 / 表题参数组解析（v2.10.0）：一套 token 表同时服务两者。
+   l/c/r = 水平对齐　t/b = 题注在图/表之上·之下　w/n = 按宽度裁剪·按宽度换行
+   s<n> = 间距，单位是题注字号的 n 倍（字是 t 就落到下间距，b 落到上间距）。
+   空格（或逗号）分隔、顺序自由；认不出的 token 忽略。
+   参数组整体不闭合时正则不匹配 → 语法原文可见（fail-closed 在语法层）。 */
+function _figCap(s){
+  var o={al:'',side:'',mode:'',gap:''};
+  if(!s)return o;
+  var t=String(s).split(/[\s,]+/);
+  for(var i=0;i<t.length;i++){
+    var x=t[i];
+    if(!x)continue;
+    var ms=/^s([\d.]+)$/.exec(x);
+    if(ms){o.gap=ms[1];continue;}
+    if(x==='l'||x==='c'||x==='r'){o.al=x;continue;}
+    if(x==='t'||x==='b'){o.side=x;continue;}
+    if(x==='w'||x==='n'){o.mode=x;continue;}
+  }
+  return o;
+}
+function _alCss(a){return a==='c'?'center':(a==='r'?'right':'left');}
+/* 独占段的「图片 + 题注」→ <figure>（<p> 不能合法包含 figure）。
+   判据：去掉 figcaption 后段落里只剩一个带 data-fig 的 <img>。 */
+function _asFigure(h){
+  if(h.indexOf('data-fig="1"')<0)return null;
+  var noCap=h.replace(/<figcaption[\s\S]*?<\/figcaption>/g,'');
+  if(!/^\s*<img\b[^>]*>\s*$/.test(noCap))return null;
+  var m=/data-fig-side="([tb])"/.exec(h);
+  var g=/data-fig-gap="([\d.]*)"/.exec(h);
+  var w=/data-fig-w="([^"]*)"/.exec(h);
+  var md=/data-fig-mode="([wn]?)"/.exec(h);
+  var pct=(w&&w[1]&&w[1]!=='auto')?w[1]:'';
+  var gap=(g&&g[1])?g[1]:'0.3';
+  var sty='--figw:'+(pct?pct+'%':'auto')+';--figgap:'+gap;
+  return '<figure class="mde-fig" data-fig-side="'+(m?m[1]:'b')
+    +'" data-fig-gap="'+gap
+    +'" data-fig-w="'+(w?w[1]:'auto')
+    +'" data-fig-mode="'+(md?md[1]:'')+'" style="'+sty+'">'+h+'</figure>';
+}
+/* v2.10.0 表格题注包裹：题注与表格装进同一个 div，先后由 t/b 定。
+   这里按 side 直接拼 DOM 顺序（不用 flex —— 表格变成 flex item 会被
+   压宽），docx 侧再按 data-tab-side 独立决定段落先后，两边一致。 */
+function _wrapTabCap(tbl,c){
+  var o=_figCap(c.tok);
+  var side=o.side||'t';
+  var gap=o.gap||'0.3';
+  var capSty=o.al?(' style="text-align:'+_alCss(o.al)+' !important"'):'';
+  var capEl='<div class="mde-tabcap" data-tab-cap="1"'+capSty+'>'
+    +parseInline(c.txt)+'</div>';
+  return '<div class="mde-tblwrap" data-tab-wrap="1" data-tab-side="'+side
+    +'" data-tab-gap="'+gap+'" style="--tabgap:'+gap+';">'
+    +(side==='b'?tbl+capEl:capEl+tbl)+'</div>';
+}
 function parseInline(text,noMde){
   var codes=[];
   text=text.replace(/`([^`]+)`/g,function(m,c){codes.push(c);return '@@C'+(codes.length-1)+'@@';});
@@ -369,13 +422,18 @@ function parseInline(text,noMde){
      [1-9]\d{0,2} 捕获，>100 钳到 100；对齐后缀独立可选（仅 {c} 也合法）；
      非法整体不进参数组（后缀原样留在正文可见，fail-closed）。
      参数组在 `)` 之外，保存时的路径改写只动括号内路径，天然不触碰后缀。 */
-  text=text.replace(/!\[([^\]]*)\]\(([^)]+?)(?:\s+"([^"]*)")?\)(?:\s*\{([1-9]\d{0,2})?([clr])?\})?/g,function(m,alt,src,title,wpct,algn){
+  text=text.replace(/!\[([^\]]*)\]\(([^)]+?)(?:\s+"([^"]*)")?\)(?:\s*\{([1-9]\d{0,2})?([clr])?(?::([^{}\n]*))?\})?/g,function(m,alt,src,title,wpct,algn,captoks){
     /* 对齐内联进 img 自身 style（display:block + margin auto）而非
        p 的 text-align——ts-style 面板档 !important 按源序后置会盖掉
        主 CSS 的 p:has() 选择器规则；img 自身 margin 与 p text-align
        优先级链独立，语法级天然覆盖全局档 */
     var decls=[];
-    if(wpct)decls.push('width:'+Math.min(parseInt(wpct,10),100)+'%');
+    /* v2.10.0 有题注（"title" 非空）时宽度归 <figure>，img 填满它——
+       否则 figure 宽 N% 里 img 再宽 N%，图只剩 N%×N%。无题注维持原
+       语义：{N} 直接落在 img 上 */
+    var hasCap=!!title;
+    var fc=hasCap?_figCap(captoks):null;
+    if(wpct)decls.push(hasCap?'width:100%':'width:'+Math.min(parseInt(wpct,10),100)+'%');
     /* !important：面板全局档规则带 !important（同级按源序），内联不带
        important 会被盖（CSS 规范：作者 important > 内联普通）。
        三值全写覆盖而非叠加——全局档 center 会写 margin-left/right auto，
@@ -385,7 +443,24 @@ function parseInline(text,noMde){
     else if(algn==='l')decls.push('display:block !important;margin-right:auto !important;margin-left:0 !important');
     var st=decls.length?(' style="'+decls.join(';')+'"'):'';
     var a=algn?(' data-img-align="'+(algn==='c'?'center':algn==='l'?'left':'right')+'"'):'';
-    toks.push('<img src="'+escAttr(src)+'" alt="'+escAttr(alt)+'"'+(title?' title="'+escAttr(title)+'"':'')+st+a+'>');
+    /* 题注参数桥接成 data-fig-*（class 会在导出内联样式流程被剥掉，
+       figure 容器由块级层按这些属性重建）；题注文字取 "title" */
+    var figA=hasCap?(' data-fig="1"'
+      +' data-fig-side="'+(fc.side||'b')
+      +'" data-fig-gap="'+(fc.gap||'0.3')
+      +'" data-fig-mode="'+(fc.mode||'')
+      +'" data-fig-w="'+(wpct?Math.min(parseInt(wpct,10),100):'auto')+'"'):'';
+    var inner='<img src="'+escAttr(src)+'" alt="'+escAttr(alt)+'"'
+      +(title?' title="'+escAttr(title)+'"':'')+st+a+figA+'>';
+    if(hasCap){
+      /* 题注在框内的对齐：单独给了 l/c/r 就用，否则跟随图的水平位置
+         （图居中→题注居中，与出版惯例一致） */
+      var cal=fc.al||algn;
+      inner+='<figcaption class="mde-figcap"'
+        +(cal?' style="text-align:'+_alCss(cal)+' !important"':'')+'>'
+        +escapeHtml(title)+'</figcaption>';
+    }
+    toks.push(inner);
     return '\x00T'+(toks.length-1)+'\x00';
   });
   text=text.replace(/\[([^\]]+)\]\(([^)]+?)(?:\s+"([^"]*)")?\)/g,function(m,txt,href,title){
@@ -501,8 +576,26 @@ function parseTable(lines,start){
   return ['<table>'+thead+'<tbody>'+body+'</tbody></table>',i];
 }
 /* 围栏语言行解析：```lang {N} —— N=版面百分比，与图片 {N} 同一规矩（空白可选、>100 钳 100）。
-   非法形态（{0}/非数字/多余词）→ 整体视为 lang 原样返回、width=0（fail-closed：字面可见不吞错）。 */
+   非法形态（{0}/非数字/多余词）→ 整体视为 lang 原样返回、width=0（fail-closed：字面可见不吞错）。
+   v2.10.0 图题：```mermaid "图 1　流程"{40l:c t s0.5} —— "…" 为题注（有题注才包装 figure），
+   参数组用 : 分段（前图参 / 后题参），与图片 {图参:题参} 完全同一套口径。无 "…" 时
+   维持旧正则（含题注引号则整行走新解析），旧文档零变化。 */
 function parseFenceLang(raw){
+  /* 新形态先行：lang + 可选 "题注" + 可选 {参数}。认出 " 才按图题口径走 */
+  var m2=raw.match(/^([A-Za-z][\w-]*)\s*"([^"\n]*)"\s*(?:\{([^{}\n]*)\})?\s*$/);
+  if(m2){
+    var o={lang:m2[1],width:0,align:'',title:m2[2],cap:null};
+    var seg=(m2[3]||'').split(':');
+    /* 图参段：数字 + 对齐单字符（同旧口径；非法 token 忽略——图表侧口径比图片宽，
+       题注照常生效，不在围栏行上做字面回显） */
+    var pm=seg[0].match(/^\s*([1-9]\d{0,2})?\s*([clr])?\s*$/);
+    if(pm){
+      if(pm[1])o.width=Math.min(100,parseInt(pm[1],10));
+      if(pm[2])o.align=(pm[2]==='c')?'center':(pm[2]==='r')?'right':'left';
+    }
+    o.cap=_figCap(seg[1]||'');
+    return o;
+  }
   /* 宽度+对齐参数：```mermaid {30} / mermaid{30} / {30c} / {c}（图 {N} 同规矩）。
      对齐进 data-diagram-align（渲染后应用容器）。lang 与 { 可无空格直连 */
   var m=raw.match(/^([A-Za-z][\w-]*)(?:\s*\{([1-9]\d{0,2})?([clr])?\})?\s*$/);
@@ -522,11 +615,24 @@ function parseMarkdown(src, opts){
      闭合时 += 块内容器级子块叠加（列表/引用档，取 max）。段内 text-indent 永不进链。 */
   var IPX=(opts&&opts.indents)||(typeof window!=='undefined'&&window.__IND_PX__)||{p:0,quote:0,li:0};
   var curInd=0;
+  var pendCap=null;   /* v2.10.0 @@ caption 暂存：只作用于紧随其后的那一个表格 */
   while(i<lines.length){
     var line=lines[i];
+    /* v2.10.0 表格题注：@@ caption{l c t n s0.3} 表 1　标题
+       必须先于竖线/表格/段落判断消费掉，否则整行会被当普通段落渲染。
+       只认「下一行起就是表格」这一种位置——后面不是表格则整行按普通
+       文本露出（fail-closed 可见，不静默吞掉用户的字）。 */
+    var _capM=/^[ ]{0,3}@@\s*caption\b[ \t]*(?:\{([^{}\n]*)\})?[ \t]*(.*)$/.exec(line);
+    if(_capM){
+      var _t1=lines[i+1]||'',_t2=lines[i+2]||'';
+      if(_t1.indexOf('|')>=0&&/^[ ]*\|?[-|: ]+\|?[ ]*$/.test(_t2)&&_t2.indexOf('-')>=0){
+        pendCap={tok:_capM[1]||'',txt:(_capM[2]||'').trim(),at:i+1};
+        i++;continue;
+      }
+    }
     if(/^```/.test(line)){
       var rawLang=line.slice(3).trim();
-       var fl=parseFenceLang(rawLang);   /* 图表围栏支持 ```mermaid {30} 版面百分比宽度 + c/l/r 对齐 */
+       var fl=parseFenceLang(rawLang);   /* 图表围栏支持 ```mermaid {30} 版面百分比宽度 + c/l/r 对齐；v2.10.0 再加 "题注"{图参:题参} */
        var lang=fl.lang, fW=fl.width, fA=fl.align;
       i++;
       var code='';
@@ -541,7 +647,28 @@ function parseMarkdown(src, opts){
         if(lang==='dot'||lang==='graphviz'||lang==='viz')kind='dot';
         else if(lang==='wavedrom'||lang==='wavejson')kind='wavedrom';
         else if(lang==='vega'||lang==='vega-lite'||lang==='vegalite')kind='vega';
-        html+='<div class="diagram" data-diagram="'+kind+'"'+(fA?' data-diagram-align="'+fA+'"':'')+(fW?' style="width:'+fW+'%"':'')+' data-code="'+encodeURIComponent(code)+'"><div class="diagram-pending">图表渲染中…</div></div>';
+        var dHtml='<div class="diagram" data-diagram="'+kind+'"'+(fA?' data-diagram-align="'+fA+'"':'')+(fW?' style="width:'+fW+'%"':'')+' data-code="'+encodeURIComponent(code)+'"><div class="diagram-pending">图表渲染中…</div></div>';
+        /* v2.10.0 图题：围栏带 "题注" 时包成与图片同款 <figure.mde-fig>——
+           宽度 {N} 归 figure（diagram 撑满 figure），题参 t/b/w/n/s<n> 与图片
+           完全同一套；题注对齐未单独给时跟随图的对齐（fA→l/c/r 映射）。
+           无 "题注" 时维持原样输出，旧文档零变化。 */
+        if(fl.title){
+          var fc=fl.cap||{};
+          var _fa2=(fA==='center')?'c':(fA==='right')?'r':(fA==='left')?'l':'';
+          var cal=fc.al||_fa2;
+          var capSty=cal?(' style="text-align:'+_alCss(cal)+' !important"'):'';
+          html+='<figure class="mde-fig" data-fig-side="'+(fc.side||'b')
+            +'" data-fig-gap="'+(fc.gap||'0.3')
+            +'" data-fig-mode="'+(fc.mode||'')
+            +'" data-fig-w="'+(fW?fW:'auto')
+            +'" data-fig-chart="1" style="--figw:'+(fW?(fW+'%'):'auto')+';--figgap:'+(fc.gap||'0.3')+'">'
+            +'<div class="diagram" data-diagram="'+kind+'"'
+            +(fA?' data-diagram-align="'+fA+'"':'')
+            +' style="width:100%" data-code="'+encodeURIComponent(code)+'"><div class="diagram-pending">图表渲染中…</div></div>'
+            +'<figcaption class="mde-figcap"'+capSty+'>'+escapeHtml(fl.title)+'</figcaption></figure>';
+        }else{
+          html+=dHtml;
+        }
       }else{
         html+='<pre><code'+(rawLang?' class="lang-'+rawLang+'"':'')+'>'+escapeHtml(code).replace(/</g,'&lt;')+'</code></pre>';
       }
@@ -752,7 +879,10 @@ function parseMarkdown(src, opts){
     }
     if(line.indexOf('|')>=0 && i+1<lines.length && /^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1]) && lines[i+1].indexOf('-')>=0){
       var t=parseTable(lines,i);
-      html+=t[0];i=t[1];olSeq=0;curInd=0;continue;
+      var _tb=t[0];
+      if(pendCap&&pendCap.at===i){_tb=_wrapTabCap(_tb,pendCap);}
+      pendCap=null;
+      html+=_tb;i=t[1];olSeq=0;curInd=0;continue;
     }
     if(/^[ ]*([-+]|[0-9]+\.)[ ]+/.test(line)){
       var ind=/^([ ]*)([-+]|[0-9]+\.)/.exec(line)[1].length;
@@ -771,7 +901,9 @@ function parseMarkdown(src, opts){
        文件即卡死，文末未闭合数据点必中）。这里保证每轮至少吃掉一行，该行按普通
        文本 fail-closed 渲染。 */
     if(!para.length){para.push(lines[i]);i++;}
-    html+='<p>'+parseInline(para.join('\n')).replace(/\n/g,'<br>')+'</p>';
+    var _pd=parseInline(para.join('\n'));
+    var _fg=_asFigure(_pd);
+    html+=_fg?_fg:('<p>'+_pd.replace(/\n/g,'<br>')+'</p>');
     olSeq=0;curInd=IPX.p;
   }
   return html;

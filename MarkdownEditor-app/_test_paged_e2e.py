@@ -114,7 +114,7 @@ from PIL import Image as _Image
 
 # 7a: A4 预算 297-25-25-2 = 245mm；p:has(>img) margin 0
 check("E39 img maxh 245.00", "max-height:245.00mm" in html6)
-check("E40 p:has(>img) margin0", ".markdown-body p:has(>img){margin:0;}" in html6)
+check("E40 p:has(>img) margin0", ".markdown-body p:has(>img){margin:0;text-indent:0 !important;}" in html6)
 
 # 7b: 造一张带空白行的长截图（1000x4000，黑条模拟文字行）
 _td = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "_tmp_slice_fixture")
@@ -163,8 +163,40 @@ _n_after = len({(d, n) for _, d, n in
                                                    timeout=10).read().decode("utf-8"))})
 check("E47 idempotent re-export", _n_before == _n_after, "%d vs %d" % (_n_before, _n_after))
 
+# --- Case 8: v2.10 图题/表题 CSS 进打印模板（缺陷回归：此前模板一条
+#     .mde-fig 规则都没有，题注 t 写了却恒显示在图下方、{N}/s/w 全丢） ---
+check("E48 figcap side t flex", 'figure.mde-fig[data-fig-side="t"]{display:flex;flex-direction:column-reverse;align-items:flex-start;}' in html6)
+check("E49 figcap width var(--figw)", "figure.mde-fig{margin:.9em 0;max-width:100%;width:var(--figw,auto);break-inside:avoid;}" in html6)
+check("E50 figcap gap calc", 'figure.mde-fig[data-fig-side="b"]>figcaption{margin-top:calc(1em * var(--figgap,.3));}' in html6)
+check("E51 figcap w-mode ellipsis", 'figure.mde-fig[data-fig-mode="w"]>figcaption{white-space:nowrap;text-overflow:ellipsis;}' in html6)
+check("E52 tabwrap side margins", '.mde-tblwrap[data-tab-side="t"]>.mde-tabcap{margin-bottom:calc(1em * var(--tabgap,.3));}' in html6)
+check("E53 fill img col-100", ".markdown-body .fill-col img{width:100% !important;height:auto;}" in html6)
+check("E54 fill table img restore", ".markdown-body .fill-col table img{width:auto !important;max-width:100% !important;height:auto;}" in html6)
+check("E55 fill fig auto", ".markdown-body .fill-col figure.mde-fig{width:auto !important;margin:0;}" in html6)
+check("E56 old fill auto gone", ".markdown-body .fill-col img{width:auto !important" not in html6)
+
+# --- Case 9: 导出 HTML 模板同口径（build_standalone_html） ---
+_out_html = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "_tmp_cap_export.html")
+_fig_body = ('<figure class="mde-fig" data-fig-side="t" data-fig-gap="0.5" '
+             'data-fig-w="40" data-fig-mode="" style="--figw:40%;--figgap:0.5;">'
+             '<img src="data:image/png;base64,iVBORw0KGgo=" alt="x">'
+             '<figcaption class="mde-figcap" style="text-align:center !important">题注</figcaption></figure>')
+j8 = post("/api/export-html", {"path": _out_html, "bodyHtml": _fig_body, "tsCss": ""})
+check("E57 export-html api ok", j8.get("ok") is True, str(j8))
+with io.open(_out_html, encoding="utf-8") as f:
+    html8 = f.read()
+check("E58 export-html side t flex", 'figure.mde-fig[data-fig-side="t"]{display:flex;flex-direction:column-reverse;align-items:flex-start;}' in html8)
+check("E59 export-html width var(--figw)", "width:var(--figw,auto);" in html8)
+check("E60 export-html gap calc", "var(--figgap,.3)" in html8)
+check("E61 export-html tabwrap css", ".markdown-body .mde-tblwrap{margin:.9em 0;}" in html8)
+check("E62 export-html fill col-100", ".fill-col img{width:100% !important;height:auto;}" in html8)
+check("E63 export-html figure markup passthrough", 'data-fig-side="t"' in html8 and "--figw:40%" in html8)
+check("E64 export-html old fill auto gone", ".fill-col img{width:auto !important" not in html8)
+if _os.path.exists(_out_html):
+    _os.remove(_out_html)
+
 print("---")
-print("TOTAL: %d, FAIL: %d" % (47, len(FAILS)))
+print("TOTAL: %d, FAIL: %d" % (64, len(FAILS)))
 if FAILS:
     print("FAILED: " + ", ".join(FAILS))
     raise SystemExit(1)

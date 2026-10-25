@@ -11,6 +11,37 @@
 
 ---
 
+## v2.10.0（2026-10-26）
+
+**本次改动：新增图题 / 表题 / 题注自动编号三套语法与排版面板档位；修复 docx 内置样式蓝字、表格单元格格式丢失、编号章级判定、fill 栏内图宽语义、打印与导出 HTML 丢图题参数**
+
+**新增**
+- **图题**：`![alt](src "题注"){图参:题参}` 独占一段渲染成 `<figure class="mde-fig">`（行内混排不包装）。`{}` 冒号前是图参（宽 `N`＝版面百分比、`l/c/r` 对齐），冒号后是题注参数（`t/b` 题注在上/下、`l/c/r` 对齐、`w/n` 单行裁剪/换行、`s<n>` 间距=n×题注字号；默认 `b`、对齐跟随图、`n`、`s0.3`）。宽度经 CSS 变量 `--figw`／`--figgap` 承载：带题注时 `{N}` 归 figure、img 填满；无 `{N}` 由 `fitFig()` 按图片 `naturalWidth` 定宽；不带题注的 `{N}` 维持旧语义直接落 img，零变化。
+- **表题**：`@@ caption{参数} 题目` 紧贴表格上一行，题目与表格包进 `div.mde-tblwrap`，先后由 `t/b` 定（表默认 `t`）；参数组与图题同一套 token、可整体省略。只认「下一行起就是表格」这一种位置，否则整行原文露出（fail-closed）；题目文字走完整 `parseInline`（可加粗、可着色）。
+- **围栏图题**：mermaid / dot / wavedrom / vega 四种图表围栏支持 `` ```mermaid "图 1　流程"{40l:c t s0.5} ``，`"…"` 写题注、`{图参:题参}` 与图片完全同一套 token；有题注时 diagram 撑满 figure，无题注围栏走旧正则零变化。
+- **题注编号**：排版面板「图 / 表编号」——**全篇连续**（图、表各自独立计数得 `图 1`／`表 1`）或**按章重编**（`图 1-2`），章级可选 `##`（默认）／`#`／`###`。编号为纯文本插入 `figcaption`／`.mde-tabcap`，随克隆进打印／docx／`.html` 三条导出通道，不回写源文、不使用 Word SEQ 域。排版面板同步新增图题／表题的字体、字号、对齐档（`tsCfg.figcap`／`tabcap`／`ncap`，语法 token 单条覆盖面板全局档，双写 localStorage 与 `runtime/ui-settings.json`）。
+
+**修复**
+- **docx 内置样式蓝字**：**现象**：导出 docx 后 Title／Heading 1–6／Caption 带 Word 默认模板蓝字（`#17365D`／`#365F91`／`#4F81BD`）与 `accent1` 主题色。**根因**：python-docx 默认模板内置样式自带 `themeColor` 的 `w:color`（Caption 另带加粗），run 级未显式上色时回落样式级。**修法**：`_sanitize_builtin_styles()` 对 8 个内置样式清主题色、字色钉黑，Caption 去加粗；作者 run 级显式上色（`@@ color`）优先级更高，不受影响。
+- **docx 表格单元格格式丢失**：**现象**：单元格内加粗、着色等行内格式导出后全部丢失。**根因**：`_add_table` 用 `text_content()` 取纯文本。**修法**：改为逐行内节点写入 run，格式随 run 进 Word。
+- **编号章级**：**现象**：按章重编只认 `h1`，无 `#` 一级标题的文档全部落「1-x」（`#` 通常是文章大标题不是章）；且全篇连续模式下图/表计数也被章标题清零，实测同一文档三张图全部编「图 1」。**修法**：章级可配置（见新增）；计数清零只在按章重编时发生，语义为每进入一个章级标题图/表序号重新从 1 起；章级标题命中排除引用块／列表／表格单元格内标题。
+- **fill 栏内图宽**：**现象**：`@@ begin fill` 分栏内，无题注图 `{N}` 只作上限（小图保持自然尺寸不放大），带题注图 `"题"{30}` 宽度位却照算——预览按「栏宽×N%」嵌套计算（40% 栏里的 30%=版面 12%），docx 把栏内有题注图 img 的 `width:100%` 抄成 `data-x-pct=100`、版心全宽塞窄栏溢出单元格；同一宽度语义两套处理。**根因**：图题产出的 figure＋`--figw` 从 fill 只覆盖 `img`／`.diagram` 的失效规则底下漏过；docx `_img_width_in` 不感知 fill 上下文。**修法**：统一为**栏内图一律相对栏 100%**（撑满栏，小图同样放大；分栏的栏比例就是宽度参数，栏内不再二次百分比，与不分栏 `{N}` 相对版心同一语义）。预览 `.fill-col` 内 img/figure/diagram 定宽 100%（栏内表格内图恢复 auto）；克隆层在 `data-x-pct` 定格前清掉栏内宽度声明、直接图打 `data-x-fill="1"`；docx `_walk`／`_fill_inline`／`_add_image`／`_add_table` 链路传 `max_in`（按栏比例算栏宽），见标直接取栏宽。题注对齐/上下/裁剪/间距参数照常生效。
+- **打印/导出 HTML 丢图题参数**：**现象**：图题 `t`（题注在上）在打印版里题注仍显示在图下方，`{N}` 宽度、`s<n>` 间距、`w` 裁剪同丢。**根因**：t/b 靠 CSS `flex-direction:column-reverse` 生效、宽度经内联 `--figw`＋`width:var(--figw,auto)` 承载——打印（paged）与导出 HTML 的模板 CSS 是服务端独立拷贝，其中没有 `.mde-fig` 规则，克隆保留的 class 与内联 style 无规则可套（docx 按 `data-fig-side` 属性排段落，不受影响）；两模板的 fill 规则同为旧语义（`width:auto`）。**修法**：抽 `FIGCAP_BASE_CSS` 共享块（figure/figcaption/表题包裹/题注编号全套 + fill figure 定宽）注入两个模板，fill 规则同步为「栏内图撑满栏」。
+
+**变更**
+- **docx 图表渲染侧**：`_walk` 增 `figure`／`div[data-tab-wrap]` 分支。`_add_figure` 按 `data-fig-side` 定题注与图的先后，题注段用 Caption 样式（已钉黑）、`w:jc` 对齐、`w:spacing` 间距、`w:ind` 缩窄到图宽、keepNext 防分页拆开；figure 主体可为图表容器（栅格化 PNG 或 svg 占位，对齐沿用 `data-diagram-align`）。`_add_tabwrap` 按 `data-tab-side` 定题注与表格先后，表格宽=版心。字号取排版面板 `figcap`／`tabcap` 档（`_cap_pt`，缺省 9pt）。docx 对 `w/n` 与题注折行不强制干预，按 Word 自然行为。
+
+**测试**
+- **`Temp/_test_caption.py` 74 条**（playwright 驱动真服务 + 真实 docx 导出）：图题 figure 包装、`t/b` 与 flex 顺序、`w` 模式 nowrap+ellipsis、`s<n>` 间距按题注字号换算（0.5×13.8px=6.9px）、`fitFig` 自然宽、无题注图与纯 `{N}` 回归；围栏图题 9 条（含 mermaid 渲染出 svg、无题注围栏仍是裸 diagram）；表题包裹/上下/对齐/`--tabgap`；`@@ caption` 后面不是表格时原文露出；编号 seq／chapter 三档章级／关闭清空；fill 栏 figure 撑满（宽比≈1）、克隆无 `data-x-pct`／`--figw` 残留、docx 栏内图宽=栏宽（40%/60% 栏实测 2.74/4.11in，旧缺陷为版心全宽或自然尺寸）；docx 题注段 Caption 样式、8 个内置样式钉黑、`w:ind`/`w:spacing`/`w:jc`、表格单元格红字与 `<w:b/>` 保留。
+- **`_test_paged_e2e.py` 47→64 条**：打印与导出 HTML 模板含 side-t flex／`--figw` 宽度／`--figgap` 间距／`w` 裁剪／表题包裹／fill 新语义 16 条；playwright 打开真实打印版 HTML 量几何位置——`t` 题注在图上方、`b` 在下方。
+- **全量回归**：`md-parser.test.cjs` 95/95、`_test_parser_sync` 字节一致、`_test_autonum` 16、`_test_color` 26、`_test_math_code` 12、`_test_guide` 11、`_test_docx_export` 40（3.11）、`_test_export_ui`、`_test_routes`、`_test_dist_verify` 22/22 全 PASS。
+
+**说明**
+- `MD_SERVER_VERSION` 97 → 99（解析器能力 + 模板 CSS 能力，`md_launch` 依此自愈换代）；`md-parser.js` 重抽、`_test_parser_sync` 字节级校验通过。使用指南新增「表格 · 表格题目」「图片 · （三）图题」两节，排版章补「图题 / 表题」「图 / 表编号（含章级）」，速查表补三行。
+
+
+---
+
 ## v2.9.0（2026-10-25）
 
 - **新增**：排版面板新增「标题自动序号」。一个开关管启用、一个下拉管形式（中文体／层级体），default 关闭、打开时为中文体。作用范围 `##`～`#####`；`h1` 不编号，且 `h1` 出现即清零全部计数（视为新章）。引用块、列表项、表格单元格内的标题一律跳过。只作用于预览与三条导出通道，不回写编辑区源文。

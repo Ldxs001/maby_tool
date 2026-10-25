@@ -518,6 +518,10 @@ def ui_tests():
 
     if httpd is not None:
         httpd.shutdown()
+        # 只 shutdown 不 close：socket 仍 LISTEN，内核继续替它完成 TCP 握手，
+        # 后续段落的 port_in_use() 会误判「有服务」而 HTTP 无人应答、goto 挂满
+        # 30s 超时。close 掉让下一段 _ensure_server 正确重新起服务。
+        httpd.server_close()
 
 
 # ---------- F 上下标渲染（v2.6.10） ----------
@@ -556,6 +560,8 @@ def markup_tests():
     finally:
         if httpd:
             httpd.shutdown()
+            # 同上：shutdown 只停循环，socket 仍 LISTEN 会挂住后面的 goto
+            httpd.server_close()
 
 
 def docx_markup_tests():

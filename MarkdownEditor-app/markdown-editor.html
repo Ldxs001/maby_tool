@@ -182,13 +182,42 @@
   .markdown-body .diagram[data-diagram-align="center"]{margin-left:auto;margin-right:auto;}
   .markdown-body .diagram[data-diagram-align="right"]{margin-left:auto;}
   .markdown-body .diagram[data-diagram-align="left"]{margin-right:auto;}
-  /* @@ fill 图片分栏：flex 行、各栏比例宽；栏内 {N} 失效（宽度全权栏比例，
-     图等比缩入栏宽，小图保持原尺寸）；跨栏防断裂（打印/分页） */
+  /* v2.10.0 图题 / 表题。
+     figure 宽 = 图宽：{N} 写百分比；无 {N} 由 fitFig() 按 naturalWidth 写
+     px（max-width:100% 兜住窄屏）。t（题注在上）用 column-reverse 做视觉
+     倒序，DOM 恒为 img→figcaption（导出侧另按 data-fig-side 定段落先后）。
+     s<n> 用 --figgap/--tabgap + em 实现「题注字号 × n」；t 落下间距、b 落
+     上间距（1em 在 figcaption 上就是它自己的字号）。 */
+  .markdown-body figure.mde-fig{margin:.9em 0;max-width:100%;width:var(--figw,auto);}
+  .markdown-body figure.mde-fig[data-fig-side="t"]{display:flex;flex-direction:column-reverse;align-items:flex-start;}
+  .markdown-body figure.mde-fig>img{max-width:100%;height:auto;margin:0;}
+  /* v2.10.0 围栏图题：figure 里的图表容器撑满 figure（宽度归 figure），
+     对齐由 figure 宽 + figcaption 承担，diagram 自身不再 margin auto */
+  .markdown-body figure.mde-fig>.diagram{width:100%;max-width:100%;margin:0;}
+  .markdown-body figcaption.mde-figcap{width:100%;max-width:100%;overflow:hidden;font-size:.92em;line-height:1.5;}
+  .markdown-body figure.mde-fig[data-fig-side="b"]>figcaption{margin-top:calc(1em * var(--figgap,.3));}
+  .markdown-body figure.mde-fig[data-fig-side="t"]>figcaption{margin-bottom:calc(1em * var(--figgap,.3));}
+  .markdown-body figure.mde-fig[data-fig-mode="w"]>figcaption{white-space:nowrap;text-overflow:ellipsis;}
+  .markdown-body .mde-tblwrap{margin:.9em 0;}
+  .markdown-body .mde-tabcap{font-size:.92em;line-height:1.5;overflow:hidden;}
+  .markdown-body .mde-tblwrap[data-tab-side="t"]>.mde-tabcap{margin-bottom:calc(1em * var(--tabgap,.3));}
+  .markdown-body .mde-tblwrap[data-tab-side="b"]>.mde-tabcap{margin-top:calc(1em * var(--tabgap,.3));}
+  .markdown-body .mde-cnum{margin-right:.35em;}
+  /* @@ fill 图片分栏：flex 行、各栏比例宽；栏内 {N} 失效——栏内图一律
+     相对栏 100%（撑满栏），与不分栏 {N} 相对版心同一语义：分栏的栏比例
+     就是宽度参数（版心百分比已经"付过费"），栏内不再二次百分比，小图
+     同样放大到栏宽。跨栏防断裂（打印/分页） */
   .markdown-body .fill-row{display:flex;gap:1em;margin:.6em 0;break-inside:avoid;}
   .markdown-body .fill-col{min-width:0;}
-  .markdown-body .fill-col img{width:auto !important;max-width:100% !important;height:auto;}
-  .markdown-body .fill-col .diagram{width:auto !important;max-width:100% !important;}
+  .markdown-body .fill-col img{width:100% !important;height:auto;}
+  .markdown-body .fill-col table img{width:auto !important;max-width:100% !important;height:auto;}
+  .markdown-body .fill-col .diagram{width:100% !important;}
   .markdown-body .fill-col .diagram svg{max-width:100%;height:auto;}
+  /* 栏内有题注图（v2.10.0）：figure 宽度位在栏内同样失效（与无题注图
+     同一规则——宽度只看上下文不看有无题注），width:auto !important 压过
+     内联 width:var(--figw)（作者 important > 内联普通），figure 撑满栏，
+     img 靠上一条 .fill-col img 规则撑满栏 */
+  .markdown-body .fill-col figure.mde-fig{width:auto !important;margin:0;}
   /* low runner 执行点状态（v2.5）：跟随错误块 / ▶ 按钮 / 手动待运行 */
   .mde-run-err{color:#e06c75;font-size:.85em;margin-left:.3em;}
   body.light .mde-run-err{color:#c0392b;}
@@ -442,6 +471,8 @@
       <div class="ts-row"><label>代码</label><select data-ts="code"></select><input data-tssz="code" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="code"></select></div>
       <div class="ts-row"><label>公式（KaTeX，字体固定）</label><input data-tssz="math" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="math"></select></div>
       <div class="ts-row"><label>图片</label><select data-algn="img"></select></div>
+      <div class="ts-row"><label>图题</label><select data-ts="figcap"></select><input data-tssz="figcap" type="number" min="6" max="48" step="0.5" placeholder="磅"><select data-algn="figcap"></select></div>
+      <div class="ts-row"><label>表题</label><select data-ts="tabcap"></select><input data-tssz="tabcap" type="number" min="6" max="48" step="0.5" placeholder="磅"><select data-algn="tabcap"></select></div>
       <div class="ts-sep"><span>段落缩进（按元素独立，字符数 × 当前字号自动换算）</span></div>
       <div class="ts-row"><label>正文</label><select data-ind="p"></select><input data-indchars="p" type="number" min="0" max="8" step="0.5" value="2"></div>
       <div class="ts-row"><label>引用块</label><select data-ind="quote"></select><input data-indchars="quote" type="number" min="0" max="8" step="0.5" value="2"></div>
@@ -462,6 +493,9 @@
       <div class="ts-row"><label>目录独占一页（后续 ## 与正文强制新页，不得侵入）</label><input id="tsTocSolo" type="checkbox" checked></div>
       <div class="ts-sep"><span>标题自动序号（只作用于预览与导出，不改源文；范围 ## ~ #####）</span></div>
       <div class="ts-row"><label>自动序号</label><input id="tsNumOn" type="checkbox"><select id="tsNumStyle"><option value="cn">中文体　一、（一）1.（1）</option><option value="num">层级体　1 / 1.1 / 1.1.1</option></select></div>
+      <div class="ts-sep"><span>图表自动编号（图、表各自计数；只作用于预览与导出，不改源文）</span></div>
+      <div class="ts-row"><label>图 / 表编号</label><input id="tsCapNumOn" type="checkbox"><select id="tsCapNumMode"><option value="seq">全篇连续　图 1 / 表 1</option><option value="chapter">按章重编　图 1-1 / 表 2-1</option></select></div>
+      <div class="ts-row"><label>编号章级</label><select id="tsCapNumLvl"><option value="##">##　二级标题为章（默认）</option><option value="#">#　一级标题为章</option><option value="###">###　三级标题为章</option></select></div>
     </div>
      <div class="ts-foot"><button id="tsApply">应用</button></div>
    </div>
@@ -846,6 +880,59 @@ function mdeDpSpan(body,hidden,alias,parsed){
     ' data-dp-alias="'+escAttr(alias||'')+'"'+valAttr+'>'+escapeHtml(disp)+refBtn+'</span>';
 }
 
+/* 图题 / 表题参数组解析（v2.10.0）：一套 token 表同时服务两者。
+   l/c/r = 水平对齐　t/b = 题注在图/表之上·之下　w/n = 按宽度裁剪·按宽度换行
+   s<n> = 间距，单位是题注字号的 n 倍（字是 t 就落到下间距，b 落到上间距）。
+   空格（或逗号）分隔、顺序自由；认不出的 token 忽略。
+   参数组整体不闭合时正则不匹配 → 语法原文可见（fail-closed 在语法层）。 */
+function _figCap(s){
+  var o={al:'',side:'',mode:'',gap:''};
+  if(!s)return o;
+  var t=String(s).split(/[\s,]+/);
+  for(var i=0;i<t.length;i++){
+    var x=t[i];
+    if(!x)continue;
+    var ms=/^s([\d.]+)$/.exec(x);
+    if(ms){o.gap=ms[1];continue;}
+    if(x==='l'||x==='c'||x==='r'){o.al=x;continue;}
+    if(x==='t'||x==='b'){o.side=x;continue;}
+    if(x==='w'||x==='n'){o.mode=x;continue;}
+  }
+  return o;
+}
+function _alCss(a){return a==='c'?'center':(a==='r'?'right':'left');}
+/* 独占段的「图片 + 题注」→ <figure>（<p> 不能合法包含 figure）。
+   判据：去掉 figcaption 后段落里只剩一个带 data-fig 的 <img>。 */
+function _asFigure(h){
+  if(h.indexOf('data-fig="1"')<0)return null;
+  var noCap=h.replace(/<figcaption[\s\S]*?<\/figcaption>/g,'');
+  if(!/^\s*<img\b[^>]*>\s*$/.test(noCap))return null;
+  var m=/data-fig-side="([tb])"/.exec(h);
+  var g=/data-fig-gap="([\d.]*)"/.exec(h);
+  var w=/data-fig-w="([^"]*)"/.exec(h);
+  var md=/data-fig-mode="([wn]?)"/.exec(h);
+  var pct=(w&&w[1]&&w[1]!=='auto')?w[1]:'';
+  var gap=(g&&g[1])?g[1]:'0.3';
+  var sty='--figw:'+(pct?pct+'%':'auto')+';--figgap:'+gap;
+  return '<figure class="mde-fig" data-fig-side="'+(m?m[1]:'b')
+    +'" data-fig-gap="'+gap
+    +'" data-fig-w="'+(w?w[1]:'auto')
+    +'" data-fig-mode="'+(md?md[1]:'')+'" style="'+sty+'">'+h+'</figure>';
+}
+/* v2.10.0 表格题注包裹：题注与表格装进同一个 div，先后由 t/b 定。
+   这里按 side 直接拼 DOM 顺序（不用 flex —— 表格变成 flex item 会被
+   压宽），docx 侧再按 data-tab-side 独立决定段落先后，两边一致。 */
+function _wrapTabCap(tbl,c){
+  var o=_figCap(c.tok);
+  var side=o.side||'t';
+  var gap=o.gap||'0.3';
+  var capSty=o.al?(' style="text-align:'+_alCss(o.al)+' !important"'):'';
+  var capEl='<div class="mde-tabcap" data-tab-cap="1"'+capSty+'>'
+    +parseInline(c.txt)+'</div>';
+  return '<div class="mde-tblwrap" data-tab-wrap="1" data-tab-side="'+side
+    +'" data-tab-gap="'+gap+'" style="--tabgap:'+gap+';">'
+    +(side==='b'?tbl+capEl:capEl+tbl)+'</div>';
+}
 function parseInline(text,noMde){
   var codes=[];
   text=text.replace(/`([^`]+)`/g,function(m,c){codes.push(c);return '@@C'+(codes.length-1)+'@@';});
@@ -953,13 +1040,18 @@ function parseInline(text,noMde){
      [1-9]\d{0,2} 捕获，>100 钳到 100；对齐后缀独立可选（仅 {c} 也合法）；
      非法整体不进参数组（后缀原样留在正文可见，fail-closed）。
      参数组在 `)` 之外，保存时的路径改写只动括号内路径，天然不触碰后缀。 */
-  text=text.replace(/!\[([^\]]*)\]\(([^)]+?)(?:\s+"([^"]*)")?\)(?:\s*\{([1-9]\d{0,2})?([clr])?\})?/g,function(m,alt,src,title,wpct,algn){
+  text=text.replace(/!\[([^\]]*)\]\(([^)]+?)(?:\s+"([^"]*)")?\)(?:\s*\{([1-9]\d{0,2})?([clr])?(?::([^{}\n]*))?\})?/g,function(m,alt,src,title,wpct,algn,captoks){
     /* 对齐内联进 img 自身 style（display:block + margin auto）而非
        p 的 text-align——ts-style 面板档 !important 按源序后置会盖掉
        主 CSS 的 p:has() 选择器规则；img 自身 margin 与 p text-align
        优先级链独立，语法级天然覆盖全局档 */
     var decls=[];
-    if(wpct)decls.push('width:'+Math.min(parseInt(wpct,10),100)+'%');
+    /* v2.10.0 有题注（"title" 非空）时宽度归 <figure>，img 填满它——
+       否则 figure 宽 N% 里 img 再宽 N%，图只剩 N%×N%。无题注维持原
+       语义：{N} 直接落在 img 上 */
+    var hasCap=!!title;
+    var fc=hasCap?_figCap(captoks):null;
+    if(wpct)decls.push(hasCap?'width:100%':'width:'+Math.min(parseInt(wpct,10),100)+'%');
     /* !important：面板全局档规则带 !important（同级按源序），内联不带
        important 会被盖（CSS 规范：作者 important > 内联普通）。
        三值全写覆盖而非叠加——全局档 center 会写 margin-left/right auto，
@@ -969,7 +1061,24 @@ function parseInline(text,noMde){
     else if(algn==='l')decls.push('display:block !important;margin-right:auto !important;margin-left:0 !important');
     var st=decls.length?(' style="'+decls.join(';')+'"'):'';
     var a=algn?(' data-img-align="'+(algn==='c'?'center':algn==='l'?'left':'right')+'"'):'';
-    toks.push('<img src="'+escAttr(src)+'" alt="'+escAttr(alt)+'"'+(title?' title="'+escAttr(title)+'"':'')+st+a+'>');
+    /* 题注参数桥接成 data-fig-*（class 会在导出内联样式流程被剥掉，
+       figure 容器由块级层按这些属性重建）；题注文字取 "title" */
+    var figA=hasCap?(' data-fig="1"'
+      +' data-fig-side="'+(fc.side||'b')
+      +'" data-fig-gap="'+(fc.gap||'0.3')
+      +'" data-fig-mode="'+(fc.mode||'')
+      +'" data-fig-w="'+(wpct?Math.min(parseInt(wpct,10),100):'auto')+'"'):'';
+    var inner='<img src="'+escAttr(src)+'" alt="'+escAttr(alt)+'"'
+      +(title?' title="'+escAttr(title)+'"':'')+st+a+figA+'>';
+    if(hasCap){
+      /* 题注在框内的对齐：单独给了 l/c/r 就用，否则跟随图的水平位置
+         （图居中→题注居中，与出版惯例一致） */
+      var cal=fc.al||algn;
+      inner+='<figcaption class="mde-figcap"'
+        +(cal?' style="text-align:'+_alCss(cal)+' !important"':'')+'>'
+        +escapeHtml(title)+'</figcaption>';
+    }
+    toks.push(inner);
     return '\x00T'+(toks.length-1)+'\x00';
   });
   text=text.replace(/\[([^\]]+)\]\(([^)]+?)(?:\s+"([^"]*)")?\)/g,function(m,txt,href,title){
@@ -1085,8 +1194,26 @@ function parseTable(lines,start){
   return ['<table>'+thead+'<tbody>'+body+'</tbody></table>',i];
 }
 /* 围栏语言行解析：```lang {N} —— N=版面百分比，与图片 {N} 同一规矩（空白可选、>100 钳 100）。
-   非法形态（{0}/非数字/多余词）→ 整体视为 lang 原样返回、width=0（fail-closed：字面可见不吞错）。 */
+   非法形态（{0}/非数字/多余词）→ 整体视为 lang 原样返回、width=0（fail-closed：字面可见不吞错）。
+   v2.10.0 图题：```mermaid "图 1　流程"{40l:c t s0.5} —— "…" 为题注（有题注才包装 figure），
+   参数组用 : 分段（前图参 / 后题参），与图片 {图参:题参} 完全同一套口径。无 "…" 时
+   维持旧正则（含题注引号则整行走新解析），旧文档零变化。 */
 function parseFenceLang(raw){
+  /* 新形态先行：lang + 可选 "题注" + 可选 {参数}。认出 " 才按图题口径走 */
+  var m2=raw.match(/^([A-Za-z][\w-]*)\s*"([^"\n]*)"\s*(?:\{([^{}\n]*)\})?\s*$/);
+  if(m2){
+    var o={lang:m2[1],width:0,align:'',title:m2[2],cap:null};
+    var seg=(m2[3]||'').split(':');
+    /* 图参段：数字 + 对齐单字符（同旧口径；非法 token 忽略——图表侧口径比图片宽，
+       题注照常生效，不在围栏行上做字面回显） */
+    var pm=seg[0].match(/^\s*([1-9]\d{0,2})?\s*([clr])?\s*$/);
+    if(pm){
+      if(pm[1])o.width=Math.min(100,parseInt(pm[1],10));
+      if(pm[2])o.align=(pm[2]==='c')?'center':(pm[2]==='r')?'right':'left';
+    }
+    o.cap=_figCap(seg[1]||'');
+    return o;
+  }
   /* 宽度+对齐参数：```mermaid {30} / mermaid{30} / {30c} / {c}（图 {N} 同规矩）。
      对齐进 data-diagram-align（渲染后应用容器）。lang 与 { 可无空格直连 */
   var m=raw.match(/^([A-Za-z][\w-]*)(?:\s*\{([1-9]\d{0,2})?([clr])?\})?\s*$/);
@@ -1106,11 +1233,24 @@ function parseMarkdown(src){
      闭合时 += 块内容器级子块叠加（列表/引用档，取 max）。段内 text-indent 永不进链。 */
   var IPX=(typeof window!=='undefined'&&window.__IND_PX__)||{p:0,quote:0,li:0};
   var curInd=0;
+  var pendCap=null;   /* v2.10.0 @@ caption 暂存：只作用于紧随其后的那一个表格 */
   while(i<lines.length){
     var line=lines[i];
+    /* v2.10.0 表格题注：@@ caption{l c t n s0.3} 表 1　标题
+       必须先于竖线/表格/段落判断消费掉，否则整行会被当普通段落渲染。
+       只认「下一行起就是表格」这一种位置——后面不是表格则整行按普通
+       文本露出（fail-closed 可见，不静默吞掉用户的字）。 */
+    var _capM=/^[ ]{0,3}@@\s*caption\b[ \t]*(?:\{([^{}\n]*)\})?[ \t]*(.*)$/.exec(line);
+    if(_capM){
+      var _t1=lines[i+1]||'',_t2=lines[i+2]||'';
+      if(_t1.indexOf('|')>=0&&/^[ ]*\|?[-|: ]+\|?[ ]*$/.test(_t2)&&_t2.indexOf('-')>=0){
+        pendCap={tok:_capM[1]||'',txt:(_capM[2]||'').trim(),at:i+1};
+        i++;continue;
+      }
+    }
     if(/^```/.test(line)){
       var rawLang=line.slice(3).trim();
-       var fl=parseFenceLang(rawLang);   /* 图表围栏支持 ```mermaid {30} 版面百分比宽度 + c/l/r 对齐 */
+       var fl=parseFenceLang(rawLang);   /* 图表围栏支持 ```mermaid {30} 版面百分比宽度 + c/l/r 对齐；v2.10.0 再加 "题注"{图参:题参} */
        var lang=fl.lang, fW=fl.width, fA=fl.align;
       i++;
       var code='';
@@ -1125,7 +1265,28 @@ function parseMarkdown(src){
         if(lang==='dot'||lang==='graphviz'||lang==='viz')kind='dot';
         else if(lang==='wavedrom'||lang==='wavejson')kind='wavedrom';
         else if(lang==='vega'||lang==='vega-lite'||lang==='vegalite')kind='vega';
-        html+='<div class="diagram" data-diagram="'+kind+'"'+(fA?' data-diagram-align="'+fA+'"':'')+(fW?' style="width:'+fW+'%"':'')+' data-code="'+encodeURIComponent(code)+'"><div class="diagram-pending">图表渲染中…</div></div>';
+        var dHtml='<div class="diagram" data-diagram="'+kind+'"'+(fA?' data-diagram-align="'+fA+'"':'')+(fW?' style="width:'+fW+'%"':'')+' data-code="'+encodeURIComponent(code)+'"><div class="diagram-pending">图表渲染中…</div></div>';
+        /* v2.10.0 图题：围栏带 "题注" 时包成与图片同款 <figure.mde-fig>——
+           宽度 {N} 归 figure（diagram 撑满 figure），题参 t/b/w/n/s<n> 与图片
+           完全同一套；题注对齐未单独给时跟随图的对齐（fA→l/c/r 映射）。
+           无 "题注" 时维持原样输出，旧文档零变化。 */
+        if(fl.title){
+          var fc=fl.cap||{};
+          var _fa2=(fA==='center')?'c':(fA==='right')?'r':(fA==='left')?'l':'';
+          var cal=fc.al||_fa2;
+          var capSty=cal?(' style="text-align:'+_alCss(cal)+' !important"'):'';
+          html+='<figure class="mde-fig" data-fig-side="'+(fc.side||'b')
+            +'" data-fig-gap="'+(fc.gap||'0.3')
+            +'" data-fig-mode="'+(fc.mode||'')
+            +'" data-fig-w="'+(fW?fW:'auto')
+            +'" data-fig-chart="1" style="--figw:'+(fW?(fW+'%'):'auto')+';--figgap:'+(fc.gap||'0.3')+'">'
+            +'<div class="diagram" data-diagram="'+kind+'"'
+            +(fA?' data-diagram-align="'+fA+'"':'')
+            +' style="width:100%" data-code="'+encodeURIComponent(code)+'"><div class="diagram-pending">图表渲染中…</div></div>'
+            +'<figcaption class="mde-figcap"'+capSty+'>'+escapeHtml(fl.title)+'</figcaption></figure>';
+        }else{
+          html+=dHtml;
+        }
       }else{
         html+='<pre><code'+(rawLang?' class="lang-'+rawLang+'"':'')+'>'+escapeHtml(code).replace(/</g,'&lt;')+'</code></pre>';
       }
@@ -1336,7 +1497,10 @@ function parseMarkdown(src){
     }
     if(line.indexOf('|')>=0 && i+1<lines.length && /^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1]) && lines[i+1].indexOf('-')>=0){
       var t=parseTable(lines,i);
-      html+=t[0];i=t[1];olSeq=0;curInd=0;continue;
+      var _tb=t[0];
+      if(pendCap&&pendCap.at===i){_tb=_wrapTabCap(_tb,pendCap);}
+      pendCap=null;
+      html+=_tb;i=t[1];olSeq=0;curInd=0;continue;
     }
     if(/^[ ]*([-+]|[0-9]+\.)[ ]+/.test(line)){
       var ind=/^([ ]*)([-+]|[0-9]+\.)/.exec(line)[1].length;
@@ -1355,7 +1519,9 @@ function parseMarkdown(src){
        文件即卡死，文末未闭合数据点必中）。这里保证每轮至少吃掉一行，该行按普通
        文本 fail-closed 渲染。 */
     if(!para.length){para.push(lines[i]);i++;}
-    html+='<p>'+parseInline(para.join('\n')).replace(/\n/g,'<br>')+'</p>';
+    var _pd=parseInline(para.join('\n'));
+    var _fg=_asFigure(_pd);
+    html+=_fg?_fg:('<p>'+_pd.replace(/\n/g,'<br>')+'</p>');
     olSeq=0;curInd=IPX.p;
   }
   return html;
@@ -2153,7 +2319,7 @@ function parseMarkdown(src){
     q.t=setTimeout(function step(){
       if(!renderQueue || renderQueue!==q) return;
       var bi=q.changed[q.idx];
-      if(bi===undefined){ renderQueue=null; tagAnchorLines(q.blocks,q.startLines); applyAutoNum(); buildOutline(); scheduleRunPass(); return; }
+      if(bi===undefined){ renderQueue=null; tagAnchorLines(q.blocks,q.startLines); applyAutoNum(); applyCapNum(); fitFig(); buildOutline(); scheduleRunPass(); return; }
       q.idx++;
       var div=q.existing[bi];
       var fresh=false;
@@ -2218,6 +2384,65 @@ function parseMarkdown(src){
       s.className='mde-anum';
       s.textContent=txt;
       h.insertBefore(s,h.firstChild);
+    }
+  }
+  /* 图表题注自动编号（v2.10.0）：与标题自动序号同款——只改预览 DOM、不回写
+     源文。编号作为纯文本插进 figcaption / .mde-tabcap，于是 docx 导出天然
+     带上（不碰 Word 自己的 SEQ 域：那套要用户按 F9 更新才显示，很乱）。
+     两模式：seq=全篇连续（图、表各自独立计数）；chapter=按章重编（章号取
+     前面最近的章级标题、无则记 1，形如「图 1-2」）。
+     章级可配（v2.10.0）：# 一般是文章大标题不当章，默认 ##，可选 #/##/###
+     （#### 以下层级太深无意义）。 */
+  function applyCapNum(){
+    var body=document.getElementById('preview');
+    if(!body) return;
+    var olds=body.querySelectorAll('.mde-cnum');
+    for(var i=0;i<olds.length;i++){ if(olds[i].parentNode) olds[i].parentNode.removeChild(olds[i]); }
+    if(!tsCfg||!tsCfg.ncap||!tsCfg.ncap.on) return;
+    var mode=(tsCfg.ncap.mode==='chapter')?'chapter':'seq';
+    var lvl=tsCfg.ncap&&tsCfg.ncap.lvl, lvlTag='h'+((lvl==='#'||lvl==='##'||lvl==='###')?lvl.length:2);
+    var nodes=body.querySelectorAll('h1,h2,h3,figure.mde-fig,.mde-tblwrap');
+    var ch=0,fi=0,ti=0;
+    for(var j=0;j<nodes.length;j++){
+      var n=nodes[j],tg=n.tagName.toLowerCase();
+      if(tg.length===2&&tg.charAt(0)==='h'){
+        /* 章切换只在 chapter 模式清零图/表计数；seq 全篇连续不受标题影响 */
+        if(mode==='chapter'&&tg===lvlTag&&!n.closest('blockquote,li,td,th')){ ch++; fi=0; ti=0; }
+        continue;
+      }
+      var isFig=(tg==='figure');
+      var capEl=isFig?n.querySelector('figcaption.mde-figcap'):n.querySelector('.mde-tabcap');
+      if(!capEl) continue;
+      var no;
+      if(isFig){ fi++; no=fi; } else { ti++; no=ti; }
+      var label=(isFig?'图 ':'表 ')+(mode==='chapter'?((ch||1)+'-'+no):(''+no));
+      var sp=document.createElement('span');
+      sp.className='mde-cnum';
+      sp.textContent=label;
+      capEl.insertBefore(sp,capEl.firstChild);
+    }
+  }
+  /* 没写 {N} 的图题：figure 宽 = 图片自然宽（题注才能按图宽换行 / 裁剪）。
+     只写 naturalWidth，不读布局——不触发重排、幂等；窄屏由 CSS max-width
+     兜住。图片尚未解码（naturalWidth=0）时挂一次性 load 监听，加载完再补。 */
+  function fitFig(){
+    var body=document.getElementById('preview');
+    if(!body) return;
+    var figs=body.querySelectorAll('figure.mde-fig[data-fig-w="auto"]');
+    for(var i=0;i<figs.length;i++){
+      var f=figs[i],im=f.querySelector('img');
+      if(!im) continue;
+      /* fill 栏内不写 --figw：栏内宽度位失效（figure 撑满栏靠 CSS
+         width:auto !important），写自然宽会跟栏语义打架 */
+      if(f.closest('.fill-col')) continue;
+      if(!im.naturalWidth){
+        if(!im.__figBound){
+          im.__figBound=1;
+          im.addEventListener('load',function(){ fitFig(); });
+        }
+        continue;
+      }
+      f.style.setProperty('--figw', im.naturalWidth+'px');
     }
   }
   /* 标题锚点打标：块内 h1-h4 元素盖源行标（fence 内 # 不算），供分屏联动做像素插值锚。
@@ -2684,6 +2909,34 @@ function parseMarkdown(src){
        }
      }
     return _rasterAll(clone).then(function(){
+      /* fill 栏内宽度语义定格（v2.10.0）：栏内宽度位一律失效，图一律
+         相对栏 100%（与不分栏 {N} 相对版心同一语义）。必须在 data-x-pct
+         抄写之前清，否则：
+         - 无题注图 width:30% 会被抄成 data-x-pct → docx 按版心 30% 出图
+         - 有题注图 img 的 width:100% 会被抄成 data-x-pct=100 → docx
+           图=版心全宽塞进窄栏（实测溢出单元格）
+         figure 的 --figw/data-fig-w 同步清（docx 题注段不缩窄=按栏宽折行）。
+         栏内直接图打 data-x-fill=1（表格内图除外）：docx 侧据此直接取
+         栏宽为图宽，而非自然尺寸钳栏宽——语义=定宽不是上限 */
+      var fcl=clone.querySelectorAll('.fill-col');
+      for(var fci=0;fci<fcl.length;fci++){
+        var fimg=fcl[fci].querySelectorAll('img, .diagram');
+        for(var fj2=0;fj2<fimg.length;fj2++){
+          var fe=fimg[fj2];
+          if(fe.style){fe.style.removeProperty('width');}
+          if(fe.tagName==='IMG'){
+            fe.removeAttribute('data-x-pct');
+            fe.setAttribute('data-fig-w','auto');
+            if(!fe.closest('table')){fe.setAttribute('data-x-fill','1');}
+          }
+        }
+        var ffig=fcl[fci].querySelectorAll('figure.mde-fig');
+        for(var fj3=0;fj3<ffig.length;fj3++){
+          var ff=ffig[fj3];
+          if(ff.style){ff.style.removeProperty('--figw');}
+          ff.setAttribute('data-fig-w','auto');
+        }
+      }
       /* 宽度语义抄写：{N} 百分比（图片自身 style 或图表 .diagram 容器）→
          data-x-pct，inlineStylesInto 会把百分比换成 computed px，docx 侧的
          "版面宽度的 N%"语义须在换算前定格 */
@@ -2837,7 +3090,12 @@ function parseMarkdown(src){
     var props=["font-family","font-size","font-weight","font-style","font-variant",
       "color","background-color","text-align","line-height","text-decoration",
       "letter-spacing","vertical-align","text-indent","border-top","border-bottom",
-      "border-left","border-right","padding","padding-left","margin","margin-left"];
+      "border-left","border-right","padding","padding-left","margin","margin-left",
+      /* v2.10 图题/表题：单行裁剪（w 模式）、s<n> 间距、figure 宽度都必须进
+         导出克隆，否则打印 / HTML 导出丢裁剪与间距。宽度用自定义属性
+         --figw 承载而不是 width——自定义属性不被 getComputedStyle 换算成
+         px，{N} 的百分比能原样带到打印件；fitFig() 写的 px 也照原样带。 */
+      "white-space","overflow","text-overflow","--figw","--figgap","--tabgap"];
     /* color 不抄计算值，只抄作者显式上色的那部分：getComputedStyle 的 color
        恒有值（继承主题正文色，暗色主题是 #e6e6e8），无差别抄会把整篇刷成
        浅灰字——Word 白底上几乎看不见。判据：元素自身或祖先带内联 color
@@ -2860,7 +3118,8 @@ function parseMarkdown(src){
         for(var k=0;k<props.length;k++){
           if(props[k]==="color"&&!keepColor)continue;
           var v=cs.getPropertyValue(props[k]);
-          if(v&&v!=="none"&&v!=="normal"&&v!=="0px"&&v!=="rgba(0, 0, 0, 0)")kv.push(props[k]+":"+v);
+          if(v&&v!=="none"&&v!=="normal"&&v!=="0px"&&v!=="rgba(0, 0, 0, 0)"
+             &&v!=="visible"&&v!=="clip")kv.push(props[k]+":"+v);
         }
       }
       snap.push(kv);
@@ -3229,9 +3488,10 @@ function parseMarkdown(src){
   /* 引用/列表 v2.1：容器级「整体缩进」单档（margin/padding，可被 <<< 包围块继承链使用）；
      正文保留首行/悬挂两档（text-indent 段内装饰，不进继承链） */
   var IND_BLK_VALS=['none','block'],IND_BLK_LBLS=['无','整体缩进'];
-  var TS_KEYS=['p','h1','h2','h3','h4','quote','li','table','code','math','img'];
+  var TS_KEYS=['p','h1','h2','h3','h4','quote','li','table','code','math','img','figcap','tabcap'];
   var IND_KEYS=['p','quote','li'];
-  /* img 仅对齐档（图片无字体/字号语义；语法 {N}c/l/r 单图覆盖优先于全局档） */
+  /* img 仅对齐档（图片无字体/字号语义；语法 {N}c/l/r 单图覆盖优先于全局档）
+     figcap/tabcap：图题 / 表题（v2.10；字体字号对齐三档，语法 token 单条覆盖） */
   var TS_MAP={
     p:'#preview p, .markdown-body p',
     h1:'#preview h1, .markdown-body h1',
@@ -3242,6 +3502,8 @@ function parseMarkdown(src){
     li:'#preview li, .markdown-body li',
     table:'#preview table, .markdown-body table',
     code:'#preview pre, #preview code, .markdown-body pre, .markdown-body code',
+    figcap:'#preview figcaption.mde-figcap, .markdown-body figcaption.mde-figcap',
+    tabcap:'#preview .mde-tabcap, .markdown-body .mde-tabcap',
     img:'#preview p:has(>img), .markdown-body p:has(>img), #preview .diagram, .markdown-body .diagram'};
   var IND_SEL={
     p:'#preview p, .markdown-body p',
@@ -3289,6 +3551,9 @@ function parseMarkdown(src){
       toc:{on:(pg.toc&&pg.toc.on==='on')?'on':'off',pos:(pg.toc&&pg.toc.pos)||'top',solo:pg.toc?(pg.toc.solo!==false):true}};
     /* v2.9 标题自动序号：默认关闭、默认中文体；非法值一律回落默认，不信任旧配置 */
     o.num={on:!!(raw.num&&raw.num.on),style:(raw.num&&raw.num.style==='num')?'num':'cn'};
+    /* v2.10 图表自动编号：默认关闭、默认全篇连续；章级默认 ##（# 是文章大标题不当章） */
+    o.ncap={on:!!(raw.ncap&&raw.ncap.on),mode:(raw.ncap&&raw.ncap.mode==='chapter')?'chapter':'seq',
+      lvl:(raw.ncap&&(raw.ncap.lvl==='#'||raw.ncap.lvl==='##'||raw.ncap.lvl==='###'))?raw.ncap.lvl:'##'};
     return o;})();
   function applyTypeset(){
     var old=document.getElementById('ts-style');if(old)old.parentNode.removeChild(old);
@@ -3470,6 +3735,9 @@ function parseMarkdown(src){
     document.getElementById('tsTocSolo').checked=!!pg.toc.solo;
     document.getElementById('tsNumOn').checked=!!tsCfg.num.on;
     document.getElementById('tsNumStyle').value=tsCfg.num.style;
+    document.getElementById('tsCapNumOn').checked=!!tsCfg.ncap.on;
+    document.getElementById('tsCapNumMode').value=tsCfg.ncap.mode;
+    document.getElementById('tsCapNumLvl').value=tsCfg.ncap.lvl||'##';
     document.getElementById('tsOverlay').hidden=false;
   }
   document.getElementById('btnTypeset').addEventListener('click',tsOpen);
@@ -4144,6 +4412,10 @@ function parseMarkdown(src){
     pg.toc.solo=document.getElementById('tsTocSolo').checked;
     tsCfg.num.on=!!document.getElementById('tsNumOn').checked;
     tsCfg.num.style=(document.getElementById('tsNumStyle').value==='num')?'num':'cn';
+    tsCfg.ncap.on=!!document.getElementById('tsCapNumOn').checked;
+    tsCfg.ncap.mode=(document.getElementById('tsCapNumMode').value==='chapter')?'chapter':'seq';
+    var _ncapLvl=document.getElementById('tsCapNumLvl').value;
+    tsCfg.ncap.lvl=(_ncapLvl==='#'||_ncapLvl==='##'||_ncapLvl==='###')?_ncapLvl:'##';
     applyTypeset();applyPaperWidth();render(true);resetAutoDisk();
     document.getElementById('tsOverlay').hidden=true;
     var ss=document.getElementById('statSave');ss.textContent='排版已更新（缓存）';ss.className='saved';
