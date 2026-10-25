@@ -1,6 +1,8 @@
 # MDEditor — 本地 Markdown 编辑器
 
-由 AI 辅助生成的单机版 Markdown 编辑器：左侧写作、右侧实时渲染，支持 KaTeX 数学公式、**图表渲染**（Mermaid / Graphviz / WaveDrom / Vega-Lite，全部本地）、本地/网络图片、排版定制（字体/字号/对齐/缩进/表格样式）、**分页导出**（纸张、页边距、页码、自动目录，Ctrl+P 直接出 PDF）、**选区批注**与 **AI 润色改写**（对接本地 LM Studio / Ollama）。除 AI 推理需本地模型服务外，全部功能**离线可用**。
+**当前版本 v2.8.1**（2026-10-25）｜[更新日志](CHANGELOG.md)｜[使用指南](docs/MDEditor%20使用指南.md)
+
+由 AI 辅助生成的单机版 Markdown 编辑器：左侧写作、右侧实时渲染，支持 KaTeX 数学公式、**图表渲染**（Mermaid / Graphviz / WaveDrom / Vega-Lite，全部本地）、本地/网络图片、排版定制（字体/字号/对齐/缩进/表格样式）、**分页导出**（纸张、页边距、页码、自动目录，Ctrl+P 直接出 PDF）、**选区批注**与 **AI 润色改写**（对接本地 LM Studio / Ollama）、以及 **low runner**——在正文里写数据点，用 run 库在子进程里算，结果（文本 / 表格 / 图片）落回正文。除 AI 推理需本地模型服务外，全部功能**离线可用**。
 
 ## 第一次使用（只需一步）
 
@@ -26,10 +28,17 @@
 | 文件/目录 | 说明 |
 |---|---|
 | `markdown-editor.html` | 编辑器界面与渲染（由后端服务提供，勿直接双击） |
-| `md_server.py` | 本地后端：页面服务、文件读写、图片代理、分页导出组装、批注存取、LLM 路由 |
+| `md-parser.js` | 方言解析器独立副本（由 html 内 `/*PARSER_START*/…/*PARSER_END*/` 段抽取，`_test_parser_sync.py` 做字节级一致性校验） |
+| `md_server.py` | 本地后端：页面服务、文件读写、图片代理、run 调度、分页与 docx 导出组装、批注存取、LLM 路由 |
 | `llm_client.py` | LLM 客户端：AI 润色 / 解释对接 LM Studio、Ollama（纯 Python 标准库，零额外依赖） |
+| `rag_client.py` / `web_search.py` | 本地 RAG 检索与联网搜索客户端（可选，未配置不影响其它功能） |
 | `md_launch.pyw` | 启动器：拉起/复用后端并打开浏览器；带版本自愈 |
-| `python/` | 便携 Python 3.11.9 运行时（无需安装 Python） |
+| `md_app.pyw` / `md_assets.py` / `_smd.py` | 内嵌窗口宿主（pywebview + WebView2）、图片物化（内嵌图落盘到 `.assets/` 并改写引用）、`.smd` 容器读写 |
+| `python/` | 便携 Python 3.11.9 运行时（无需安装 Python，含 Pillow 13.0.0） |
+| `runtime/runs/` | 内置 run 库 7 个：`stats` / `wordcount` / `mergecontent` / `auto_cite` / `tablecalc` / `csvcalc` / `plotimg` |
+| `docs/` | 使用指南、low runner 数据形式规范、v2.8 发布说明、版权与开源组件声明、分发清单 |
+| `installer/` | 安装包构建脚本（`_build_installer.py`，产物不入库） |
+| `_extract_parser.py` / `md-parser.test.cjs` | 解析器抽取脚本与 77 条回归测试 |
 | `katex/` | KaTeX 0.16.21 公式渲染（本地部署，MIT） |
 | `pagedjs/` | Paged.js 0.4.3 分页引擎（本地部署，MIT） |
 | `mermaid/` | Mermaid 10.9.3 图表引擎（流程/时序/状态/甘特等，本地部署，MIT） |
@@ -54,12 +63,14 @@
 
 | 文件 | 说明 |
 |---|---|
-| `document.paged.html` | 「分页」导出的产物示例（可删，随时可重新导出） |
+| `document.paged.html` / `document.html` | 「分页」与「HTML」导出的产物示例（可删，随时可重新导出） |
+| `docs/` | 使用指南、数据形式规范、v2.8 发布说明、版权声明、分发清单 |
+| `runtime/` | 运行时目录（日志、`run_cache`、`ui-settings.json`），首次运行自动生成；唯 `runtime/runs/` 是必需内容 |
 | `LICENSES/` | 第三方组件许可证全文（分发时请一并保留） |
 
 ### 可删除（开发产物，不影响使用）
 
-`gen_icon.py`（图标生成源码）。删除任何文件前建议先整体备份。
+`__pycache__/`、`_test_*.py`、`_slice/`、`full.png` 等调试与测试产物可删。删除任何文件前建议先整体备份。
 
 ## 功能速览
 
@@ -69,10 +80,58 @@
 - **图片**：网络 URL、本地盘符路径、相对路径（相对当前 .md 所在目录）三种写法；jpg / png / webp / gif / svg
 - **排版**：「排版」面板按元素设置字体 / 字号 / 对齐；首行缩进与悬挂缩进（字符数可调、随字号换算）；三线表与表头/首列底色
 - **保存**：编辑自动存缓存；可设自动落盘间隔（0~60 分钟）；「保存」立即写回原文件
-- **导出**：`.md` / `.html`（带排版与公式）/ **分页**（纸张 A0~B5/Letter/自定义、页边距、页码模板与字号、自动目录并独占一页）
+- **导出**：`.md` / `.html`（带排版与公式）/ **分页**（纸张 A0~B5/Letter/自定义、页边距、页码模板与字号、自动目录并独占一页）/ **`.docx`**（表格导出为真 Word 表格 `w:tbl`，上下标映射为 Word 原生格式）
+- **上下标**：`^{任意内容}` 上标、`_{任意内容}` 下标，`\^` 转义保留字面，与 KaTeX 通道互不干扰
 - **批注**：选中文字加备注，正文以虚线标注呈现；标注**跟文本内容走**，编辑后自动同步；批注随文档保存（详见下节）
 - **AI 润色**：选中文字一键润色改写，预览对照、可微调、确认后才替换（需本地 LLM，详见下节）
 - **自包含文档 `.smd`**：正文与图片打包为单文件，便于同步/发送/归档（详见下节）
+- **low runner（v2.4 起，v2.8 定稿）**：正文写数据点、另起一行写执行点，run 库在子进程里计算，结果以文本 / 表格 / 图片替换执行点；数据可来自六种写法，也可直接粘贴外部文件（详见下节）
+
+## low runner（v2.4 起，v2.8 定稿）
+
+正文写数据点，另起一行写执行点，点执行点（或左下角「运行」）后 run 在子进程算完，把结果落回正文。
+
+### 数据点
+
+| 写法 | 渲染 | run 收到 |
+|---|---|---|
+| `@@ MDE_甲{文本}` | 显示原文 | `vals` += str |
+| `@@ MDE_甲{苹果 == 3}` | 显示 `3` | `kv['苹果'] = '3'`（str） |
+| `@@ MDE_甲{8%,1.5%,0.6%}` | 显示原文 | `vals` += list |
+| `@@ MDE_甲{A == 8%, B == 1.5%}` | 显示值 | `kv` 合并两键 |
+| `@@ MDE_甲{…上涨((8%))…}` | 去括号的干净句子 | 抽出片段进 `vals` |
+| `@@ MDE_甲:2(2x2){…}` | 原样一张表格 | `vals` += 嵌套 list |
+
+`MDE_` 显性 / `MDE__` 隐性（多一个下划线），与文档里的位置无关，同池多行自动合并。`vals` 里可以嵌套——纯值向量是一个 list 元素，二维表是二层嵌套，三维表三层。
+
+### 执行点
+
+| 写法 | 行为 |
+|---|---|
+| `@@ MDE import wordcount` | 跑 `runtime/runs/wordcount.py` 的 `run(data)`，吃公共池 |
+| `@@ MDE from stats import add is 甲` | 同一库的 `add` 函数，只吃 `MDE_甲` / `MDE__甲` 别名池 |
+| `@@ MDE from plotimg import bar is 月度` | 用同一份数据出柱状图（`line` / `donut` 同理） |
+| `@@ MDE from auto_cite import run{global ref}` | 全文 `'''ref` 标记按顺序替换成 `^{[1]}` `^{[2]}`… |
+
+执行失败或 run 不存在时，执行点显示原文（fail-closed，便于发现笔误）。
+
+### run 代码协议
+
+函数签名 `run(data) -> str`，返回值直接替换执行点：
+
+- 返回 GFM 表格字符串 → 渲染成真表格（`|a|a|` + `|-|:-|` 分隔行）
+- 返回 `![](x.png)` → 渲染成图片；图片由 run 自己 `save()` 到子进程当前目录（即文档资产目录），框架不改名、不生成图
+- 结果不参与数据点解析——一个 run 的输出不会反向生成另一个 run 的输入
+
+### 外部文件（v2.8）
+
+从资源管理器复制 `.xlsx` / `.pdf` / `.csv`，在编辑区 `Ctrl+V`：字节落进本文档资产目录（保留原文件名，同名不同内容加 `__<4位哈希>`，单文件 20MB 上限），并自动插入一行数据点。执行时服务端把相对路径换成绝对路径，run 里 `open(...)` 直接能读。框架不解析任何文件——xlsx 怎么解、pdf 怎么拆由 run 决定；要三方包就装到 `runtime/pylibs/`。
+
+### 运行模式
+
+「run → 运行模式」三选一：**手动**（默认，只标「▶ 待运行」）／ 立即 ／ 等待 N 秒。选一次记住，关程序重开不丢。
+
+完整规范见 [`docs/low runner 数据形式规范.md`](docs/low%20runner%20数据形式规范.md)；输入输出细节见 [`docs/MDEditor-2.8 发布说明与 low runner 规范.md`](docs/MDEditor-2.8%20发布说明与%20low%20runner%20规范.md)。
 
 ## 自包含文档格式 `.smd`（v1.2.0）
 
@@ -142,6 +201,25 @@ ZIP 格式规范由 PKWARE 公开且免费使用（无专利约束，Deflate 算
 
 本地推理需先启动 LM Studio / Ollama 并加载模型；AI 请求只发往设置中填写的后端地址（默认本机），不经过任何第三方。未配置或服务未启动时，批注等其余功能不受影响，仅润色与 AI 解释不可用。
 
+## 文档与视频
+
+| 文档 | 说明 |
+|---|---|
+| [`docs/MDEditor 使用指南.md`](docs/MDEditor%20使用指南.md) | 16 章语法与操作手册：基础语法、列表方言、表格、公式、四种图表、图片、low runner、排版、缩进块、保存导出、滚动联动、批注、AI 润色、语法速查 |
+| [`docs/low runner 数据形式规范.md`](docs/low%20runner%20数据形式规范.md) | 六种数据形式、类型契约、fail-closed 清单、全局执行、返回值渲染的设计定稿 |
+| [`docs/MDEditor-2.8 发布说明与 low runner 规范.md`](docs/MDEditor-2.8%20发布说明与%20low%20runner%20规范.md) | v2.8 更新说明 + 输入输出规范（四通道、`vals` 四形状、输出四形状、图片落点与文件名一致性边界） |
+| [`CHANGELOG.md`](CHANGELOG.md) | v1.0.0 至 v2.8.1 逐版现象 / 根因 / 修法 / 验证 |
+| [`docs/分发清单.md`](docs/分发清单.md) | 入库 / 入包 / 不入包的分界与理由 |
+
+演示视频（1600×900 / 25fps，实机录屏）：
+
+| 主题 | 时长 | 文件 |
+|---|---|---|
+| 入门总览 | 1:41 | [`MDEditor-intro.mp4`](MDEditor-intro.mp4) |
+| 语法与特殊写法 | 1:46 | [`MDEditor-syntax.mp4`](MDEditor-syntax.mp4) |
+| low runner 机制 | 2:04 | [`MDEditor-lowrunner.mp4`](MDEditor-lowrunner.mp4) |
+| v2.8 更新 | 1:55 | [`MDEditor-2.8.mp4`](MDEditor-2.8.mp4) |
+
 ## 卸载
 
 双击 `uninstall.cmd` 还原右键与 .md 关联；`pythonw.exe` 进程可用 `md_stop.cmd` 或任务管理器结束。
@@ -149,4 +227,4 @@ ZIP 格式规范由 PKWARE 公开且免费使用（无专利约束，Deflate 算
 ## 许可
 
 - 本工具由 **AI 辅助生成**（见编辑器内置文档「版权与开源组件声明」）。编辑器自身代码以 **GNU AGPL-3.0-or-later** 发布，版权归 **wUwproject** 所有，全文见 **`LICENSE`**：任何人可使用、修改、再分发，但衍生作品（包括仅以网络/本地服务形式对外提供的修改版）必须同样以 AGPL-3.0-or-later 开源。
-- 随附的第三方组件（KaTeX、Paged.js、Python）按其原始许可证分发，全文见 **`LICENSES/`**。分发本工具时请一并保留该目录。
+- 随附的第三方组件（KaTeX、Paged.js、Mermaid、viz-js / Graphviz、WaveDrom、Vega、Python 3.11.9、Pillow 等）按其原始许可证分发，版本与许可全文见 **`LICENSES/`** 与编辑器内置「版权与开源组件声明」。分发本工具时请一并保留该目录。
