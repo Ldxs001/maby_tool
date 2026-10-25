@@ -1,4 +1,6 @@
 param([string]$Here)
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 $WScript = New-Object -ComObject WScript.Shell
 $exe = Join-Path $Here 'MarkdownEditor.exe'
 $ico = Join-Path $Here 'md-editor.ico'

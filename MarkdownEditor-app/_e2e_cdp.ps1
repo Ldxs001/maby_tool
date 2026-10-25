@@ -1,4 +1,6 @@
-﻿# MDEditor contenteditable + annotations + LLM e2e (CDP over PowerShell WebSocket) - v2
+﻿# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
+# MDEditor contenteditable + annotations + LLM e2e (CDP over PowerShell WebSocket) - v2
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 

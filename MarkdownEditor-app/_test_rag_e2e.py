@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 """RAG 在线端到端验证（仅集成契约）：拉起 → 探测 → query 按协议传参返回 → 停止。
 RAG 内部检索行为（路由策略、耗时、NLI）属 rag-assistant 自身职责，不在验证范围。"""
 import threading

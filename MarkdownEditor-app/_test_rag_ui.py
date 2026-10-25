@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 """RAG 前端 UI 行为验证（playwright）：按钮初始置灰、AI 设置面板 RAG 管理区
 状态/控件、保存写盘 rag 段。settings.json 重定向到临时文件。"""
 import threading

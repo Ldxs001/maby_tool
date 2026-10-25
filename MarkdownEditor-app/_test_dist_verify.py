@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 # 分发清单实测：按"最小可用分发集"组装干净目录，从零启动，逐项验证。
 # 不带：runtime/、__pycache__/、_slice/、全部测试与诊断、安装脚本。
 import json

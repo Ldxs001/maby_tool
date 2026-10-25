@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 # run-name: plotimg
 # 数据形式：形式4 键值对（kv：5 个配置键 + 一组「标签 == 数值」），键序＝文档书写顺序
 # 数据点写法：@@ MDE__月度{标题 == 门店月度销量, 单位 == 元, 一月 == 128000, 二月 == 143500}

@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 """OpenAI 兼容后端 + 联网查询测试：
 - llm_client openai 分支（URL 拼接 / key 与 model 必填校验，不发真实请求）
 - web_search 各 backend 的参数校验与归一（离线路径，不发真实请求）

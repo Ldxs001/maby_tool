@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 """OpenAI 后端 + 联网查询 UI 行为验证（playwright）：
 backend 联动显隐、联网区块显隐、保存落盘。settings.json 重定向临时文件。"""
 import threading

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 # run-name: stats
 # 数据形式：形式4 键值对向量（样例中为 A == 3 这类写法）
 # 数据点写法：@@ MDE_甲{A == 3, B == 4, C == 5}

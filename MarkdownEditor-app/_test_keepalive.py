@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 """keepalive 会话计数测试：多开共享服务背景下，ping/bye 按 token 上下线，
 只剩一个会话下线时服务才进入待退出；待退期间新会话心跳撤销退出。
 跑完自清理（不在测试内触发看门狗 os._exit，退出判定由行为级验证覆盖）。"""

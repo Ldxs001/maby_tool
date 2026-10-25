@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 # run-name: csvcalc
 # 数据形式：外部文件引用（v2.8：kv 里一个 .csv 路径，服务端已换成绝对路径）+ 形式4 键值对（参数）
 # 数据点写法：@@ MDE_销售{表格 == MDEditor 使用指南.assets/示例销售数据.csv}

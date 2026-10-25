@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 """RAG 路由行为测试：status / 配置持久化 / 离线错误路径 / 启动参数校验。
 settings.json 重定向到临时文件，不污染真实配置；不触发真实冷启动（太重），
 若本机 8767 恰好在线则追加在线 query 分支。"""

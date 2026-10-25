@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 """_smd.py -- .smd 自包含文档格式（v1.2.0）
 
 .smd = ZIP 容器，内部结构：

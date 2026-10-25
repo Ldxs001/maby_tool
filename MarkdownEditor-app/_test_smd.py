@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 """_smd 功能测试：PASS/FAIL 二元输出，覆盖打包-解包往返、增量保存、
 compact 阈值、断电容错、路径穿越防御、外部修改重解包。"""
 import os

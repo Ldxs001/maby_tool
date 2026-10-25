@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 """_extract_parser.py -- 从 markdown-editor.html 重抽独立解释器 md-parser.js
 
 流程（与 md-parser.js 首次抽取完全一致）：

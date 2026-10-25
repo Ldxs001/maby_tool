@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 """E2E: /api/export-paged v40 - base css / table split / img fit / ref-table"""
 import io, json, urllib.request
 

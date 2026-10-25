@@ -46,7 +46,7 @@ DIST_FILES = ["md_launch.pyw", "_md_run.py", "md_server.py", "markdown-editor.ht
               "rag_client.py", "_smd.py", "md_assets.py", "_splash.py",
               "_pickdir_modern.py", "_pickfile.py", "_picksave.py",
               "docx_export.py",
-              "md_app.pyw", "LICENSE", "README.md",
+              "md_app.pyw", "LICENSE", "COPYRIGHT", "README.md",
               "install.cmd", "MarkdownEditor.cs", "MarkdownEditor.exe", "_mklnk.ps1",
               "uninstall.cmd", "UninstallMDEditor.cs", "desktop-shortcut.cmd", "md_stop.cmd"]
 

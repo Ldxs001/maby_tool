@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 # run-name: wordcount
 # 数据形式：形式1 单值文本（正文）+ 形式3 纯值向量（关键词列表）
 # 数据点写法：@@ MDE_甲{今天遇到一个外国人，他对我说"你好"，我也回应他"你好"。我们聊了一下午，最后我才发现，他说的竟然是中国话。}（这一行是正文）

@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 """md_server 新路由冒烟测试（批注读写/LLM 配置/失败路径），跑完自清理。"""
 import threading
 import time

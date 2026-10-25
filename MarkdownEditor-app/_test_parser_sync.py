@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 """_test_parser_sync.py -- md-parser.js 与 markdown-editor.html 解析器段一致性校验
 
 背景：md-parser.js 是从 markdown-editor.html 的 /*PARSER_START*/../*PARSER_END*/

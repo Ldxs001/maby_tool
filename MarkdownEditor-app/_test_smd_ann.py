@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 """批注 .smd 往返：另存为 .smd → 写批注 → 验证入包 → 重新读取。"""
 import io
 import json

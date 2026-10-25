@@ -1,0 +1,25 @@
+maby_tool（本仓库：MarkdownEditor-app 与归档目录 MarkdownEditor）
+Copyright (C) 2026 wUwproject
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+---
+
+说明（非许可条款）
+
+- 许可正文见本目录 `LICENSE`，为 FSF 发布的 GNU AGPL v3 原文，逐字节未修改。
+  版权人与「or later」的声明由本文件与源码头的 SPDX 标识给出。
+- 子目录 `MarkdownEditor-app/` 有自己的一份 `LICENSE`、`COPYRIGHT` 与
+  `LICENSES/`（第三方组件许可全文），内容与本目录一致或为其超集。
+- 归档目录 `MarkdownEditor/` 为 v1.x 历史代码，自 2026-10-17 起停止更新。

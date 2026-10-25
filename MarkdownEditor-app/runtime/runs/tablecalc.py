@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 # run-name: tablecalc
 # 数据形式：形式5 二维表格（vals 里嵌套 list，单元格一律 str）+ 形式4 键值对（参数行）
 # 数据点写法：@@ MDE_甲:2(){ 表格 | 项目 | 一月 | 二月 | / | --- | --- | --- | / | 收入 | 100 | 120 | }

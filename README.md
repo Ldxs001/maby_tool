@@ -91,15 +91,16 @@ maby_tool/
 │   ├── python/                  # 便携 Python 3.11.9（含 Pillow）
 │   ├── installer/               # 安装包构建脚本
 │   ├── CHANGELOG.md
-│   └── LICENSE（AGPL-3.0-or-later）+ LICENSES/
+│   └── LICENSE（AGPL-3.0-or-later）、COPYRIGHT、LICENSES/
 ├── MarkdownEditor/              # v1.x 归档，不再更新
 └── README.md
 ```
 
 ## 许可
 
-- **MarkdownEditor**：GNU AGPL-3.0-or-later，Copyright (C) 2026 wUwproject。任何人可使用、修改、再分发，但衍生作品（包括仅以网络或本地服务形式对外提供的修改版）须同样以 AGPL-3.0-or-later 开源。全文见 `MarkdownEditor-app/LICENSE`。
+- **MarkdownEditor**：GNU AGPL-3.0-or-later，Copyright (C) 2026 wUwproject。任何人可使用、修改、再分发，但衍生作品（包括仅以网络或本地服务形式对外提供的修改版）须同样以 AGPL-3.0-or-later 开源。许可正文见 `MarkdownEditor-app/LICENSE`（FSF 原文，逐字节未改动），版权人与「or later」声明见 `MarkdownEditor-app/COPYRIGHT`。
 - 随附第三方组件（KaTeX、Paged.js、Mermaid、viz-js / Graphviz、WaveDrom、Vega、Python、Pillow 等）按其原始许可证分发，全文见 `MarkdownEditor-app/LICENSES/` 与编辑器内置「版权与开源组件声明」。
+- 本仓库整体同样以 AGPL-3.0-or-later 发布，声明见根目录 `COPYRIGHT`；源码文件头部均带 `SPDX-License-Identifier` 标识。
 
 ## 发布方式
 

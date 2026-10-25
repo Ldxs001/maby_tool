@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 # run-name: auto_cite
 # 依据：global；利用 data['marks'] 里的标记列表，按顺序生成 ^[x] 替换文本。
 # 数据形式：global 标记（正文里写 内容'''ref 声明标记，执行点写 {global ref} 认领）

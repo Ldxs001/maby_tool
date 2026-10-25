@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 """splitRow/parseTable 行为回归：从 markdown-editor.html 抽取真实函数源码执行（非副本）。"""
 import io, re, subprocess, sys, os
 

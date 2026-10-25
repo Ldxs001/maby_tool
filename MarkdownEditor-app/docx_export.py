@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 """HTML(内联样式) -> .docx 转换器 + 自有 MathML->OMML 转换器（零微软依赖）。
 
 设计要点：

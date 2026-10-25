@@ -1,4 +1,6 @@
 @echo off
+REM SPDX-License-Identifier: AGPL-3.0-or-later
+REM Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 setlocal EnableExtensions
 set "HERE=%~dp0"
 if "%HERE:~-1%"=="\" set "HERE=%HERE:~0,-1%"
