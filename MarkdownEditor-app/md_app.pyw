@@ -24,10 +24,36 @@ PORT = 18766
 sys.path.insert(0, HERE)
 
 BUNDLED_RUNTIME = os.path.join(HERE, "runtime", "WebView2")
-USER_DATA = os.path.join(HERE, "runtime", "userdata")
-WIN_CONF = os.path.join(HERE, "runtime", "window.json")
-SETTINGS = os.path.join(HERE, "runtime", "settings.json")
-LOG = os.path.join(HERE, "runtime", "md_app.log")
+
+
+def _resolve_runtime_dir():
+    """可写 runtime 目录。与 md_server._resolve_runtime_dir 同一套判定：
+    安装目录可写 → 原地（历史行为零变化）；只读（MSIX 商城包等）→
+    %LOCALAPPDATA%\\MDEditor\\runtime。探针写测试，不猜 ACL。"""
+    rt = os.path.join(HERE, "runtime")
+    probe = os.path.join(rt, ".writable")
+    try:
+        os.makedirs(rt, exist_ok=True)
+        with io.open(probe, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(probe)
+        return rt
+    except Exception:
+        pass
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    alt = os.path.join(base, "MDEditor", "runtime")
+    try:
+        os.makedirs(alt, exist_ok=True)
+    except Exception:
+        alt = tempfile.gettempdir()
+    return alt
+
+
+RUNTIME_DIR = _resolve_runtime_dir()
+USER_DATA = os.path.join(RUNTIME_DIR, "userdata")
+WIN_CONF = os.path.join(RUNTIME_DIR, "window.json")
+SETTINGS = os.path.join(RUNTIME_DIR, "settings.json")
+LOG = os.path.join(RUNTIME_DIR, "md_app.log")
 
 
 def log(msg):
@@ -218,7 +244,7 @@ def _install_hang_watchdog():
         import sys
         import traceback
         import time as _t
-        path = os.path.join(HERE, "runtime", "hang.log")
+        path = os.path.join(RUNTIME_DIR, "hang.log")
         while True:
             try:
                 t0 = _t.time()

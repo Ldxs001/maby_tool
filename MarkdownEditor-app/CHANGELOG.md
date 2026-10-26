@@ -11,6 +11,47 @@
 
 ---
 
+## v2.11.2（2026-10-26）
+
+**本次改动：重做安装器与卸载器界面（字体 / 图标 / DPI 适配 / 版本资源），修复安装链六处缺陷（备份污染、zip-slip 绕过、卸载入口缺失、预编译产物被覆盖、payload 无完整性校验、产物堆积），应用运行时新增可写目录回退（只读安装位可用，为 Microsoft Store 分发铺路）**
+
+**新增**
+- **安装器界面重做**：改为深色顶栏 + 浅色画布结构——顶栏承载产品图标、名称与版本号，WebView2 探测结果移到独立状态条（左侧色条区分正常／降级），日志区归入分组框，底部操作右对齐。配色随系统深浅色切换（读 `AppsUseLightTheme`，只读不改），标题栏颜色经 DWM 属性与顶栏统一，标题图标取自 exe 资源。
+- **DPI 感知适配**：新增 `installer/app.manifest`（`dpiAware=true/pm` + `dpiAwareness=PerMonitorV2` + `supportedOS` 声明），构建时经 `/win32manifest` 嵌入。清单生效后进程不再被系统按位图拉伸，文字与控件边缘发虚的问题消除。控件坐标按设计稿 96 DPI 记录、运行期按实际 DPI 换算（`AutoScaleMode.None` + 自算缩放因子），跨屏拖动时经 `WM_DPICHANGED` 重新换算。
+- **安装器版本资源**：补 `AssemblyTitle` / `AssemblyProduct` / `AssemblyCompany` / `AssemblyCopyright`，版本号由构建脚本从 CHANGELOG 检出后写入独立源文件（`_setup_ver.cs`），不与 CHANGELOG 脱节。资源管理器属性面板不再显示 `0.0.0.0` 与空产品名。
+- **payload 完整性校验**：构建期计算 `payload.zip` 的 SHA256 写入 `ver.txt` 第二行，安装期解压前比对；不符即中止并提示重新下载。
+- **卸载器界面与安装器同源**：卸载器仍是最初版本——`GenericSansSerif` 硬编码字体（中文回退点阵宋体）、坐标写死 96 DPI 像素、系统默认灰底，与重做后的安装器观感割裂。改为与安装器共用同一套设计语言：同源配色（随系统深浅色切换）、同款深色顶栏 + 状态条 + 分组日志区结构、系统 UI 字体 + GB2312 字符集激活字体链接、设计稿坐标按实际 DPI 换算并响应 `WM_DPICHANGED`、DWM 标题栏着色。预编译与兜底编译均嵌入 `app.manifest`（`app.manifest` 随包分发，供 `install.cmd` 兜底路径使用）。行为不变：`uninstall.cmd` 只清集成不删文件，删文件仍仅限勾选 + 二次确认；清理阶段移到后台线程，界面保持可响应并显示跑马灯进度。
+- **运行时可写目录回退**：`md_server.py` 与 `md_app.pyw` 的全部可写状态（settings / ui-settings / runs / pylibs / run_cache / 日志 / WebView2 用户数据目录 / 窗口状态）锚定在安装目录 `runtime/` 下，安装到只读位置（`Program Files`、MSIX 包的 `WindowsApps`）时首次写入即失败。改为启动时对安装目录做写探针：可写则路径解析与原先逐字节相同；不可写则整体回退 `%LOCALAPPDATA%\MDEditor\runtime`，并从包内补种 run 库种子。`md_launch.pyw` 读配置同步两处探测。正常安装行为零变化。
+- **随文档落盘写点收口**：run 子进程工作目录原以「目录存在」短路判定——目录随包预置但只读时直接用作 cwd，子进程写图即报 `Errno 13`。新增 `_dir_writable` 写探针，run 产物在文档 `.assets/` 不可写时整体回落 `run_cache`（`/img` 代理基址链兜底显示）；粘贴图片、引用文件复制、批注落盘同探针前置，不可写时明确报错提示另存（不静默回落，避免相对引用变跨目录死链）。导出期产物（长图切片 `_slice`、`document.paged.html`、导出 HTML 兜底落点）迁至可写 runtime，`/static/` 路由改两级查找（越界防护保留）。
+
+**修复**
+- **`.md` 关联备份被污染**：`install.cmd` 每次安装都把当前 `.md` 默认值重写进 `.mdinstall.bak`。升级安装时当前值已是本程序自己写的 `MDViewer.md`，于是把自己的值当成系统原值存下，卸载后关联永远回不到原状态。改为读备份内容判定：内容等于本程序自己的 ProgID 即视为旧版本留下的污染值，丢弃并按当前注册表值重算；内容为其它值才认定为系统原关联并原样保留。备份文件不在分发清单内，解压不覆盖，可跨升级留存。
+- **zip-slip 防护可绕过**：解压路径校验用 `StartsWith` 前缀法，`...\MDEditorEvil\x.txt` 前缀匹配 `...\MDEditor` 成立，可写出安装目录之外。改为带目录分隔符的目录包含判定。
+- **卸载入口可能不存在**：`UninstallMDEditor.exe` 原本不在包内，靠 `install.cmd` 在用户机器上现场编译；目标机无 .NET Framework 编译器时「应用和功能」里的卸载项指向不存在的文件，入口点了没反应。改为构建期预编译并随包分发，`install.cmd` 只在缺失时兜底现场编译。
+- **预编译产物被覆盖**：`MarkdownEditor.exe` 虽已在包内，`install.cmd` 仍会用目标机的编译器重编译覆盖，每次安装字节都不同。改为包内已有即跳过编译、现场编译降级为兜底；两个预编译二进制不再入库（构建期生成），避免每次构建产生二进制 diff。
+- **`.cmd` 注释含中文导致解析失败**：`cmd.exe` 按 OEM 代码页读取脚本，REM 注释内的非 ASCII 字节被误解码后可能与后续行粘连成非法命令。注释块改为纯 ASCII。
+
+**变更**
+- **安装包构建产物自动清理**：`_build_installer.py` 构建后只保留当前版本与上一版本的安装包（历史包堆在同一目录易误发，且每个 30MB+ 迅速占满磁盘）。
+- **`install.cmd` 不再在用户机器上执行编译器**（除缺失预编译产物的兜底路径外）。
+
+**测试**
+- **构建自检**：`installer/_build_installer.py --smoke` 全项 PASS（1210 文件、指南与授权文档、预编译 shim 与卸载器均在内、KaTeX 字体 60、pythonnet DLL 451584 B、run 库 7 文件齐全）。
+- **卸载器取证**：重编译后的 `UninstallMDEditor.exe`（43008 B）内嵌 PerMonitorV2 清单（二进制含 `PerMonitorV2` / `asInvoker` 字节），中文字符串以 UTF-16 存于元数据（GBK 形态不存在，BOM 生效）。
+- **界面取证**：本机 125% 缩放下实测窗口 806×710 物理像素（= 640×540 设计尺寸 × 1.25），`GetDpiForWindow` 返回 120，`WM_GETICON` 的 BIG / SMALL / SMALL2 三项均非空（标题栏图标存在）。
+- **zip-slip 拦截**：构造含 `../MDEditorEvil/x.txt` 的 payload，解压抛 `IOException: zip-slip blocked`，逃逸目录未创建。
+- **完整性校验拦截**：篡改 `ver.txt` 中的摘要后运行，`InvalidDataException: payload 校验失败`，解压目录零残留；摘要正确时正常完成。
+- **备份判定**：预置污染备份（内容为 `MDViewer.md`）后运行 `install.cmd`，备份被清空；预置系统原关联（`Markdown Document`）则原样保留。安装与升级两条路径退出码均为 0。
+- **预编译产物未被覆盖**：安装后 `MarkdownEditor.exe` 与 `UninstallMDEditor.exe` 的 SHA256 与包内完全一致，修改时间未变。
+- **运行时回退双路**：icacls 拒写模拟只读安装位（deny 需带 `(OI)(CI)` 继承，否则仅挡目录本身），`RUNTIME_DIR` 正确落 `%LOCALAPPDATA%`、种子补齐、settings 写入成功；可写场景下 `RUNTIME_DIR` 与 `HERE/runtime` 逐字节相同。
+- **run 落盘双路**：文档目录拒写且 `.assets` 预置时，run 产物 png 落 `run_cache`、`.assets` 内无残留；文档可写时 png 落文档旁 `.assets/`（行为不变）。`_dir_writable` 对可写/只读目录判定均正确。
+
+**说明**
+- 应用本体新增运行时回退分支（`md_server.py` / `md_app.pyw` / `md_launch.pyw`），仅新增探针与回退路径，`MD_SERVER_VERSION` 不变；对外路由与文件格式无变化。
+- 正式产物：`MDEditor-Setup-v2.11.2.exe`（32975 KB）。
+
+---
+
 ## v2.11.1（2026-10-26）
 
 **本次改动：修复查找替换六处缺陷——滚动跳回顶部、就近定位失效、开关无视觉反馈、计数状态含糊、查找词转义语义、展开替换行按钮失效**

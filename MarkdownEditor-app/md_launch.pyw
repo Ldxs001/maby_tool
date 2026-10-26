@@ -166,15 +166,22 @@ _splash_proc = None
 
 
 def load_settings():
-    """读取 runtime/settings.json（缺失/损坏时用默认值）"""
+    r"""读取 runtime/settings.json（缺失/损坏时用默认值）。
+
+    与 md_server 的可写目录回退同一套判定：安装目录只读时（MSIX 商城包等）
+    settings 落在 %LOCALAPPDATA%\MDEditor\runtime，两处都试。
+    """
     defaults = {"embed_window": True, "disable_gpu": False}
-    try:
-        p = os.path.join(HERE, "runtime", "settings.json")
-        d = json.loads(open(p, encoding="utf-8").read())
-        if isinstance(d, dict):
-            defaults.update({k: d[k] for k in defaults if k in d})
-    except Exception:
-        pass
+    for p in (os.path.join(HERE, "runtime", "settings.json"),
+              os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
+                           "MDEditor", "runtime", "settings.json")):
+        try:
+            d = json.loads(open(p, encoding="utf-8").read())
+            if isinstance(d, dict):
+                defaults.update({k: d[k] for k in defaults if k in d})
+            break
+        except Exception:
+            continue
     return defaults
 
 

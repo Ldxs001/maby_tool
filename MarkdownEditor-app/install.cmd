@@ -14,31 +14,49 @@ if not exist "%PYW%" (
   exit /b 1
 )
 
-REM Build the launcher shim exe (FileDescription = "Markdown Editor"). The Win11
+REM The launcher shim exe (FileDescription = "Markdown Editor"). The Win11
 REM Open With picker shows the command exe's description, so pythonw.exe shows up
-REM as "Python". Our own exe fixes the name for good. csc.exe ships with Windows.
+REM as "Python". Our own exe fixes the name for good.
+REM
+REM The exe is pre-built at packaging time and shipped inside the payload, so
+REM the uninstall entry always has a real target and no compiler runs on the
+REM user's machine. csc.exe below is only a fallback for a payload built by an
+REM older version that did not ship the pre-built exe.
 set "CSC=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if not exist "%CSC%" set "CSC=%WINDIR%\Microsoft.NET\Framework\v4.0.30319\csc.exe"
-if exist "%CSC%" (
-  if exist "%HERE%\md-editor.ico" (
-    "%CSC%" /nologo /target:winexe /win32icon:"%HERE%\md-editor.ico" /out:"%HERE%\MarkdownEditor.exe" "%HERE%\MarkdownEditor.cs"
-  ) else (
-    "%CSC%" /nologo /target:winexe /out:"%HERE%\MarkdownEditor.exe" "%HERE%\MarkdownEditor.cs"
-  )
+if exist "%HERE%\MarkdownEditor.exe" (
+  echo   MarkdownEditor.exe: using pre-built copy from package.
 ) else (
-  echo [WARN] csc.exe not found, cannot build MarkdownEditor.exe
+  if exist "%CSC%" (
+    if exist "%HERE%\md-editor.ico" (
+      "%CSC%" /nologo /target:winexe /win32icon:"%HERE%\md-editor.ico" /out:"%HERE%\MarkdownEditor.exe" "%HERE%\MarkdownEditor.cs"
+    ) else (
+      "%CSC%" /nologo /target:winexe /out:"%HERE%\MarkdownEditor.exe" "%HERE%\MarkdownEditor.cs"
+    )
+  ) else (
+    echo [WARN] MarkdownEditor.exe missing and csc.exe not found
+  )
 )
 
-REM Build the uninstaller GUI (icon = pixel MD with red X badge).
-if exist "%CSC%" (
-  if exist "%HERE%\uninstall-md.ico" (
-    "%CSC%" /nologo /target:winexe /win32icon:"%HERE%\uninstall-md.ico" /out:"%HERE%\UninstallMDEditor.exe" "%HERE%\UninstallMDEditor.cs"
-  ) else (
-    "%CSC%" /nologo /target:winexe /out:"%HERE%\UninstallMDEditor.exe" "%HERE%\UninstallMDEditor.cs"
-  )
-) else (
-  echo [WARN] csc.exe not found, cannot build UninstallMDEditor.exe
+REM The uninstaller GUI (icon = pixel MD with red X badge). Pre-built at
+REM packaging time for the same reason: "Apps and features" points its
+REM UninstallString at this file, so it must exist even on a machine without
+REM a compiler.
+REM Fallback compile (top-level lines on purpose: %VAR% inside a parenthesized
+REM block expands at parse time, so the option variable would stay empty there).
+if exist "%HERE%\UninstallMDEditor.exe" (
+  echo   UninstallMDEditor.exe: using pre-built copy from package.
+  goto uninstaller_ready
 )
+if not exist "%CSC%" (
+  echo [WARN] UninstallMDEditor.exe missing and csc.exe not found
+  goto uninstaller_ready
+)
+set "UNOPT="
+if exist "%HERE%\uninstall-md.ico" set "UNOPT=/win32icon:"%HERE%\uninstall-md.ico""
+if exist "%HERE%\app.manifest" set "UNOPT=%UNOPT% /win32manifest:"%HERE%\app.manifest""
+"%CSC%" /nologo /target:winexe %UNOPT% /out:"%HERE%\UninstallMDEditor.exe" "%HERE%\UninstallMDEditor.cs"
+:uninstaller_ready
 
 echo Install path: %HERE%
 echo Python:       %PYW%
@@ -49,7 +67,23 @@ reg add "HKCU\Software\Classes\.md\shell\MDViewer" /ve /t REG_SZ /d "Open with M
 reg add "HKCU\Software\Classes\.md\shell\MDViewer\command" /ve /t REG_SZ /d "%HERE%\MarkdownEditor.exe \"%%1\"" /f
 
 echo [2/5] Set .md default association (double-click opens this editor)...
-"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command "$k='HKCU:\Software\Classes\.md'; $v=Get-ItemProperty -Path $k -Name '(default)' -ErrorAction SilentlyContinue; if($v){($v.'(default)')}else{''}" > "%HERE%\.mdinstall.bak"
+REM Backup the original .md default association.
+REM The backup file is NOT in the dist checklist, so extraction never overwrites
+REM it and it survives upgrades.
+REM
+REM Two cases must be told apart:
+REM   1) The backup holds this app's own ProgID (MDViewer.md) -- that is a stale
+REM      value left by an older build (it saved the current value on upgrade and
+REM      mistook it for the original). It must be discarded and recomputed,
+REM      otherwise .md association can never be restored on uninstall.
+REM   2) The backup holds anything else -- that is the real original value and
+REM      must be preserved untouched.
+REM
+REM Note: keep this comment block ASCII-only. cmd.exe reads .cmd as the OEM
+REM codepage; non-ASCII bytes inside REM lines get mangled and can break
+REM parsing. Chinese is fine inside echo / reg commands, not inside REM.
+set "MDE_HERE=%HERE%"
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command "$bak=Join-Path $env:MDE_HERE '.mdinstall.bak'; $cur=(Get-ItemProperty -Path 'HKCU:\Software\Classes\.md' -Name '(default)' -ErrorAction SilentlyContinue).'(default)'; $old=$null; if(Test-Path $bak){$old=(Get-Content -Raw -LiteralPath $bak -ErrorAction SilentlyContinue); if($old){$old=$old.Trim()}}; if($old -and $old -ne 'MDViewer.md'){Write-Output ('  Keeping original .md association backup: ' + $old)}else{$orig=''; if($cur -and $cur -ne 'MDViewer.md'){$orig=$cur}; Set-Content -LiteralPath $bak -Value $orig -Encoding ASCII -NoNewline; Write-Output ('  Saved original .md association backup: ' + $orig)}"
 reg add "HKCU\Software\Classes\.md" /ve /t REG_SZ /d "MDViewer.md" /f
 reg add "HKCU\Software\Classes\MDViewer.md" /ve /t REG_SZ /d "Markdown Document (MD Editor)" /f
 REM Win11 OpenWith picker shows the command exe's FileDescription ("Python") unless

@@ -26,6 +26,11 @@ _tmp_*
 /_setup_staging/
 /_setup_out/
 
+# 预编译的系统集成入口（构建期由 installer/_build_installer.py 生成，随包分发）
+# 不入库：二进制入库会让每次构建都产生无意义的二进制 diff。
+/MarkdownEditor.exe
+/UninstallMDEditor.exe
+
 # 视频合成中间产物（_video28）：合成源码/字体/示例图/静帧入库，
 # 配音 wav、录制帧、中间视频、合成音频、录制日志不入库（合计约 27MB）
 /_video28/tts/
@@ -35,3 +40,5 @@ _tmp_*
 /_video28/video_only.mp4
 /_video28/_rec.log
 /_video28/_tts.log
+/installer/_msix_identity.json
+/_setup_msix_stage/

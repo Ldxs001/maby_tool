@@ -65,15 +65,57 @@ PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
 MD_SERVER_VERSION = 99  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
-SETTINGS_PATH = os.path.join(HERE, "runtime", "settings.json")
+
+# ---------- 可写 runtime 目录 ----------
+# 普通安装（目录可写）：runtime 留在安装目录，历史行为零变化。
+# 只读安装目录（MSIX 商城包落在 WindowsApps，或其他只读位置）：runtime
+# 整体回退到 %LOCALAPPDATA%\MDEditor\runtime；包内 runtime/runs 的 run 库
+# 种子在此模式下首次运行补种到可写目录。判定方式 = 探针写测试，不猜 ACL。
+def _resolve_runtime_dir():
+    rt = os.path.join(HERE, "runtime")
+    probe = os.path.join(rt, ".writable")
+    try:
+        os.makedirs(rt, exist_ok=True)
+        with io.open(probe, "w", encoding="utf-8") as _f:
+            _f.write("ok")
+        os.remove(probe)
+        return rt
+    except Exception:
+        pass
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    alt = os.path.join(base, "MDEditor", "runtime")
+    try:
+        os.makedirs(alt, exist_ok=True)
+    except Exception:
+        alt = tempfile.gettempdir()
+    return alt
+
+RUNTIME_DIR = _resolve_runtime_dir()
+
+if RUNTIME_DIR != os.path.join(HERE, "runtime"):
+    # 回退模式：只读包内带一份 run 库种子，缺哪个补哪个（幂等）。
+    try:
+        _seed_src = os.path.join(HERE, "runtime", "runs")
+        _seed_dst = os.path.join(RUNTIME_DIR, "runs")
+        if os.path.isdir(_seed_src):
+            os.makedirs(_seed_dst, exist_ok=True)
+            for _fn in os.listdir(_seed_src):
+                if _fn.endswith(".py"):
+                    _dst = os.path.join(_seed_dst, _fn)
+                    if not os.path.exists(_dst):
+                        shutil.copy2(os.path.join(_seed_src, _fn), _dst)
+    except Exception:
+        pass
+
+SETTINGS_PATH = os.path.join(RUNTIME_DIR, "settings.json")
 
 # ---------- low runner（v2.4）：文档内参数值的自动化计算 ----------
 # run 库（编辑器级统一管理，所有文档共用；分发 = 拷 runs 目录）。
 # 三方包：pip --target runtime/pylibs 安装，执行时挂 PYTHONPATH——
 # 编辑器只管通道不管装包（集成边界）。run 代码 cwd=run_cache（作图落此处）。
-RUNS_DIR = os.path.join(HERE, "runtime", "runs")
-PYLIBS_DIR = os.path.join(HERE, "runtime", "pylibs")
-RUN_CACHE_DIR = os.path.join(HERE, "runtime", "run_cache")
+RUNS_DIR = os.path.join(RUNTIME_DIR, "runs")
+PYLIBS_DIR = os.path.join(RUNTIME_DIR, "pylibs")
+RUN_CACHE_DIR = os.path.join(RUNTIME_DIR, "run_cache")
 PORTABLE_PY = os.path.join(HERE, "python", "python.exe")
 
 # 子进程一律不带控制台（v2.9.0 修）：本服务跑在 pythonw.exe 里（GUI 子系统、
@@ -95,7 +137,7 @@ for _d in (RUNS_DIR, RUN_CACHE_DIR):
 # 排版/主题/视图/跟随/最近文件/草稿等 UI 状态单一来源 = 本文件；前端启动时
 # 同步拉取回放进 localStorage（后续代码照旧读 LS，零侵入），写入经 lsSet
 # 节流后 POST 增量合并到此。原子写（tmp+replace）+ 线程锁防多窗口并发竞态。
-UI_SETTINGS_PATH = os.path.join(HERE, "runtime", "ui-settings.json")
+UI_SETTINGS_PATH = os.path.join(RUNTIME_DIR, "ui-settings.json")
 _UI_LOCK = threading.Lock()
 
 
@@ -126,8 +168,8 @@ try:
 except Exception as _e:  # embedded Python 下兜底，与 md_assets 同模式
     _smd = None
     try:
-        os.makedirs(os.path.join(HERE, "runtime"), exist_ok=True)
-        with io.open(os.path.join(HERE, "runtime", "_smd.err"), "w", encoding="utf-8") as _f:
+        os.makedirs(RUNTIME_DIR, exist_ok=True)
+        with io.open(os.path.join(RUNTIME_DIR, "_smd.err"), "w", encoding="utf-8") as _f:
             _f.write(repr(_e))
     except Exception:
         pass
@@ -680,6 +722,27 @@ def _drop_empty_dir(d):
         pass
 
 
+def _dir_writable(d):
+    """目录存在 ≠ 可写（只读安装位里的文档：.assets 目录随包预置）。
+    探针写测试，与 _resolve_runtime_dir 同一判定哲学：不猜 ACL。"""
+    try:
+        os.makedirs(d, exist_ok=True)
+        probe = os.path.join(d, ".writable")
+        with io.open(probe, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(probe)
+        return True
+    except Exception:
+        return False
+
+
+# 文档所在目录只读（只读安装位/只读介质）时，随文档落盘的三条路
+# （粘贴图/引用文件/批注）都无处可写——如实报错，不静默回落：
+# 回落到 run_cache 会让文档里的相对引用变成跨目录死链。
+_DOC_RO_ERR = ("文档所在目录不可写，无法随文档保存——请把文档另存到可写位置"
+               "（或改用 .smd 自包含格式）后重试")
+
+
 def _safe_asset_name(name):
     """外部引用文件名清洗（v2.8）：去路径、替换数据点分隔符
     （, = { } 与换行会让 @@ MDE 那一行解析错），保留扩展名与原名主干。"""
@@ -746,7 +809,13 @@ def _lr_run(mod, fn, data, doc_path=None):
             if not os.path.isdir(assets_dir):
                 os.makedirs(assets_dir, exist_ok=True)
                 created = True
-            cwd = assets_dir
+            # 探针确认可写才用（商城包内示例文档：目录在但只读），
+            # 不可写整体回落 run_cache——图照出，_lr_rewrite_imgs 的
+            # 基址链里有 run_cache，/img 代理照样回显。
+            if _dir_writable(assets_dir):
+                cwd = assets_dir
+            else:
+                cwd = RUN_CACHE_DIR
         except Exception:
             cwd = RUN_CACHE_DIR
     code = _lr_driver_code(mod, fn)
@@ -1215,11 +1284,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if u.path.startswith("/static/"):
             rel = urllib.parse.unquote(u.path[len("/static/"):])
-            root = os.path.normpath(HERE)
-            full = os.path.normpath(os.path.join(HERE, rel))
-            if not (full == root or full.startswith(root + os.sep)):
-                self._send(403, "forbidden")
-                return
+            # 两级查找：工具目录优先；导出期产物（document.paged.html、
+            # /api/export 的 html、_slice/ 切片缓存）落可写 runtime——
+            # 商城包安装目录只读，写不了 HERE。越界一律拒绝。
+            full = None
+            for base_dir in (HERE, RUNTIME_DIR):
+                r = os.path.normpath(base_dir)
+                cand = os.path.normpath(os.path.join(r, rel))
+                if not (cand != r and cand.startswith(r + os.sep)):
+                    continue
+                if os.path.isfile(cand):
+                    full = cand
+                    break
             ctypes_map = {
                 ".css": "text/css; charset=utf-8",
                 ".js": "application/javascript; charset=utf-8",
@@ -1318,7 +1394,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             q = urllib.parse.parse_qs(u.query)
             msg = q.get("msg", [""])[0][:500]
             try:
-                rt = os.path.join(HERE, "runtime")
+                rt = RUNTIME_DIR
                 os.makedirs(rt, exist_ok=True)
                 with io.open(os.path.join(rt, "ui.log"), "a",
                              encoding="utf-8") as f:
@@ -1735,7 +1811,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     # .smd：图片落解包工作目录的 assets/，引用为 assets/<fname>
                     base = _smd.base_dir_for(doc_path)
                     assets = os.path.join(base, "assets")
-                    os.makedirs(assets, exist_ok=True)
+                    if not _dir_writable(assets):
+                        self._send(500, json.dumps(
+                            {"ok": False, "error": _DOC_RO_ERR},
+                            ensure_ascii=False))
+                        return
                     fname = "%s_%s%s" % (time.strftime("%Y%m%d_%H%M%S"),
                                          str(int(time.time() * 1000))[-4:], ext)
                     with open(os.path.join(assets, fname), "wb") as f:
@@ -1745,7 +1825,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return
                 stem = os.path.splitext(os.path.basename(doc_path))[0]
                 assets = os.path.join(os.path.dirname(doc_path), stem + ".assets")
-                os.makedirs(assets, exist_ok=True)
+                if not _dir_writable(assets):
+                    self._send(500, json.dumps(
+                        {"ok": False, "error": _DOC_RO_ERR},
+                        ensure_ascii=False))
+                    return
                 fname = "%s_%s%s" % (time.strftime("%Y%m%d_%H%M%S"),
                                      str(int(time.time() * 1000))[-4:], ext)
                 with open(os.path.join(assets, fname), "wb") as f:
@@ -1792,7 +1876,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         "error": "文件超过 20MB 上限（当前 %.1fMB）"
                                  % (len(blob) / 1048576.0)}, ensure_ascii=False))
                     return
-                os.makedirs(assets, exist_ok=True)
+                if not _dir_writable(assets):
+                    self._send(500, json.dumps(
+                        {"ok": False, "error": _DOC_RO_ERR},
+                        ensure_ascii=False))
+                    return
                 target = os.path.join(assets, fname)
                 if not _within(target, assets):
                     self._send(400, json.dumps({"ok": False,
@@ -1944,8 +2032,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                               obj.get("bodyHtml", ""),
                                               obj.get("tsCss", ""),
                                               obj.get("page") or None)
-                # 优先写到用户"另存为"所选路径；未提供时回退应用目录（兼容老调用）
-                out = obj.get("path") or os.path.join(HERE, "document.html")
+                # 优先写到用户"另存为"所选路径；未提供时回退可写 runtime
+                # （兼容老调用；商城包安装目录只读，不能落 HERE）
+                out = obj.get("path") or os.path.join(RUNTIME_DIR, "document.html")
                 d = os.path.dirname(out)
                 if d:
                     os.makedirs(d, exist_ok=True)
@@ -1967,8 +2056,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                               obj.get("bodyHtml", ""),
                                               obj.get("tsCss", ""),
                                               obj.get("page") or None)
-                # 优先写到用户"另存为"所选路径；未提供时回退应用目录（兼容老调用）
-                out = obj.get("path") or os.path.join(HERE, "document.docx")
+                # 优先写到用户"另存为"所选路径；未提供时回退可写 runtime
+                # （兼容老调用；商城包安装目录只读，不能落 HERE）
+                out = obj.get("path") or os.path.join(RUNTIME_DIR, "document.docx")
                 d = os.path.dirname(out)
                 if d:
                     os.makedirs(d, exist_ok=True)
@@ -1989,10 +2079,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 ts_css = obj.get("tsCss", "")
                 page_cfg = obj.get("cfg", {}) or {}
                 html = build_paged_html(md_path, body_html, ts_css, page_cfg)
-                # /static/ 路由会把前缀剥掉后映射到工具目录（/static/x -> HERE/x），
-                # 因此文件写在 HERE 下、URL 用 /static/<name> 即可正确访问
+                # /static/ 路由两级查找（HERE → RUNTIME_DIR），产物落可写
+                # runtime 即可用 /static/<name> 取回——商城包安装目录只读
                 name = "document.paged.html"
-                with open(os.path.join(HERE, name), "w", encoding="utf-8") as f:
+                with open(os.path.join(RUNTIME_DIR, name), "w", encoding="utf-8") as f:
                     f.write(html)
                 self._send(200, json.dumps({"ok": True, "url": "/static/" + name},
                                            ensure_ascii=False))
@@ -2009,7 +2099,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not re.match(r"^[A-Za-z0-9._-]+\.html$", name):
                     self._send(400, json.dumps({"ok": False, "error": "bad name"}, ensure_ascii=False))
                     return
-                with open(os.path.join(HERE, name), "w", encoding="utf-8") as f:
+                # 落可写 runtime（/static/ 两级查找能取回；商城包 HERE 只读）
+                with open(os.path.join(RUNTIME_DIR, name), "w", encoding="utf-8") as f:
                     f.write(content)
                 self._send(200, json.dumps({"ok": True, "url": "/static/" + name}, ensure_ascii=False))
             except Exception as e:
@@ -2038,7 +2129,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if len(clean) > 2000:
                     clean = clean[:2000]
                 apath = _annotations_path(p)
-                _save_json(apath, clean)
+                try:
+                    _save_json(apath, clean)
+                except PermissionError:
+                    self._send(500, json.dumps(
+                        {"ok": False, "error": _DOC_RO_ERR},
+                        ensure_ascii=False))
+                    return
                 if _smd is not None and _smd.is_smd(p):
                     # .smd：批注随包分发——写解包目录后增量追加进包，
                     # 否则包内 annotations.json 停留在旧版（仅存于临时目录）
@@ -2606,7 +2703,7 @@ PAGED_BASE_CSS = """
 # 规则：渲染高 ≤ 版心的图整图原子一页；高 > 版心的长截图按小条带竖切
 # 续排（像表格跨页一样流入剩余空间），条带渲染高 = 版心高/3（3 条正好满页）。
 # 切点吸附静默行（截图里的空白行/段间距），不切断文字行、不重叠不遗漏。
-# 切片落 HERE/_slice/<sha1>/，同字节图幂等复用；PIL 缺失或读图失败原样保留（fail-closed）。
+# 切片落 RUNTIME_DIR/_slice/<sha1>/（可写 runtime；商城包只读安装位也能写），同字节图幂等复用；PIL 缺失或读图失败原样保留（fail-closed）。
 _SLICE_SNAP_MM = 8.0  # 切点吸附搜索窗口（半宽）
 
 
@@ -2677,7 +2774,7 @@ def _slice_tall_images(body_html, icb_w_mm, img_maxh_mm):
                 break  # 剩余不足小条，并入末条
             cuts.append(c)
         cuts.append(h)
-        out_dir = os.path.join(HERE, "_slice", digest)
+        out_dir = os.path.join(RUNTIME_DIR, "_slice", digest)
         try:
             os.makedirs(out_dir, exist_ok=True)
         except OSError:
@@ -3110,7 +3207,7 @@ try:
 except Exception:
     import traceback as _tb
     try:
-        with open(os.path.join(HERE, "runtime", "md_assets.err"), "a",
+        with open(os.path.join(RUNTIME_DIR, "md_assets.err"), "a",
                   encoding="utf-8") as _ef:
             _ef.write(_tb.format_exc() + "\n")
     except Exception:
@@ -3182,7 +3279,7 @@ def _keepalive_bye(tok):
     """会话卸载：只下线本会话；仅当【最后一个】会话下线才进入待退出倒计时。"""
     _LIVE_SESSIONS.pop(tok, None)
     try:
-        with io.open(os.path.join(HERE, "runtime", "lifecycle.log"),
+        with io.open(os.path.join(RUNTIME_DIR, "lifecycle.log"),
                      "a", encoding="utf-8") as _f:
             _f.write("%s bye tok=%s live=%d bye_at=%s\n"
                      % (time.strftime("%H:%M:%S"), tok, len(_LIVE_SESSIONS),
@@ -3297,7 +3394,7 @@ def _pick_dir_subprocess():
 def _pickdir_log(msg):
     try:
         import time as _t
-        with io.open(os.path.join(HERE, "runtime", "pickdir.log"), "a",
+        with io.open(os.path.join(RUNTIME_DIR, "pickdir.log"), "a",
                      encoding="utf-8") as f:
             f.write("%s %s\n" % (_t.strftime("%H:%M:%S"), msg))
     except Exception:
@@ -3332,7 +3429,7 @@ def _idle_watchdog(grace=None, check=0.5):
 
     def _do_stop(reason):
         try:
-            with io.open(os.path.join(HERE, "runtime", "lifecycle.log"),
+            with io.open(os.path.join(RUNTIME_DIR, "lifecycle.log"),
                          "a", encoding="utf-8") as f:
                 f.write("%s %s -> stop service\n"
                         % (time.strftime("%H:%M:%S"), reason))
@@ -3373,7 +3470,7 @@ def _auto_stop_enabled():
     """runtime/settings.json 里的 auto_stop（默认开启）。"""
     try:
         import json as _json
-        p = os.path.join(HERE, "runtime", "settings.json")
+        p = os.path.join(RUNTIME_DIR, "settings.json")
         d = _json.loads(io.open(p, encoding="utf-8").read())
         return bool(d.get("auto_stop", True))
     except Exception:
