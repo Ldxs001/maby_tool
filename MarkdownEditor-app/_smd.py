@@ -74,9 +74,38 @@ def _sig(smd_path):
     return {"mtime_ns": st.st_mtime_ns, "size": st.st_size}
 
 
+def _dir_writable(d):
+    """写探针：目录可创建且可写入（与 md_server 的 _dir_writable 同哲学，不猜 ACL）。"""
+    try:
+        os.makedirs(d, exist_ok=True)
+        p = os.path.join(d, ".smd_wtest")
+        with io.open(p, "w") as f:
+            f.write("1")
+        os.remove(p)
+        return True
+    except Exception:
+        return False
+
+
 def _tmp_root():
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "runtime", "tmp")
+    # 探针缓存：同一进程只判一次
+    global _TMP_RESOLVED
+    if _TMP_RESOLVED:
+        return _TMP_RESOLVED
+    legacy = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "runtime", "tmp")
+    if _dir_writable(legacy):
+        _TMP_RESOLVED = legacy
+        return _TMP_RESOLVED
+    # 安装位只读（MSIX 商城包的 WindowsApps / Program Files）：解包工作目录
+    # 回退用户可写区，与 md_server 的 RUNTIME_DIR 回退同一落点
+    la = os.environ.get("LOCALAPPDATA") or os.path.join(
+        os.path.expanduser("~"), "AppData", "Local")
+    _TMP_RESOLVED = os.path.join(la, "MDEditor", "runtime", "tmp")
+    return _TMP_RESOLVED
+
+
+_TMP_RESOLVED = None
 
 
 def base_dir_for(smd_path):
