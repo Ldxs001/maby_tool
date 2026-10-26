@@ -11,6 +11,27 @@
 
 ---
 
+## v2.11.3（2026-10-26）
+
+**本次改动：修复带题注图片的水平对齐失效（v2.10.0 宽度归位遗留缺陷）**
+
+**现象**
+- **带题注时前缀 l/c/r 只作用于题注**：`![…](… "题注"){50c:}` 中图保持靠左，仅题注居中；同一语法去掉 `"题注"` 后 `{50c}` 图即正确居中。
+
+**根因**
+- **v2.10.0 把 `{N}` 宽度从 img 搬到 `<figure>`（`--figw`）时对齐未随迁**：带题注时 img 改拿 `width:100%` 填满 figure，img 内联的 `margin-left/right:auto` 在全宽下恒等于 0；真正决定图水平位置的 `<figure>` 容器没有任何对齐处理——`_asFigure` 不写、预览 CSS 也无对应规则，`p:has(>img[data-img-align])` 三条规则因 img 已非 p 直接子元素而落空。题注对齐逻辑为「题注自带 c/l/r 优先、否则继承前缀」，故题注仍随前缀居中。
+
+**修法**
+- **对齐上移到 figure**：`_asFigure` 从 img 的 `data-img-align` 读出对齐落到 figure 内联 margin——`c` 追加 `margin-left:auto;margin-right:auto`，`r` 追加 `margin-left:auto;margin-right:0`，`l` 不写（块级默认左）。img 内联与 `data-img-align` 原样保留，docx 导出与打印导出按既有属性取对齐不受影响；打印件克隆内联 style 时 figure 的 margin 自动带入。预览 CSS `.markdown-body figure.mde-fig{margin:.9em 0}` 为 shorthand，内联长手属性仅覆盖左右、垂直间距保留；`fill-col` 的 `margin:0 !important` 优先级更高，拼版场景不变。`md-parser.js` 经 `_extract_parser.py` 重抽同步。
+
+**测试**
+- **`_test_parser_sync.py` PASS**：md-parser.js core 与 markdown-editor.html 解析器段一致（895 行）。
+- **`node md-parser.test.cjs` 95 条 PASS**：核心回归全绿。
+- **对齐 8 case 矩阵实测**：`{50c:}`/`{50c:c}` figure 落双边 auto 且题注居中；`{50c:r}` 图居中且题注右对齐（题注自带 token 优先）；`{50r:}` figure 落左 auto 右 0；`{50l:}`/`{50:}` figure 无 margin 追加；无题注 `{50c}`/`{50:}` 输出与修复前逐字节一致。
+- **`_test_paged_e2e.py`**：figure 相关断言（E50/E51 figcap CSS、E63 figure 透传）PASS；另 9 条失败（E11/E16/E18/E20/E35/E42–E45）为存量漂移——断言写于导出接口 v40 期，v2.11.2 切片迁 runtime 等服务端变更未同步断言，与本修复无关，另行处理。
+
+---
+
 ## v2.11.2（2026-10-26）
 
 **本次改动：重做安装器与卸载器界面（字体 / 图标 / DPI 适配 / 版本资源），修复安装链六处缺陷（备份污染、zip-slip 绕过、卸载入口缺失、预编译产物被覆盖、payload 无完整性校验、产物堆积），应用运行时新增可写目录回退（只读安装位可用，为 Microsoft Store 分发铺路）**

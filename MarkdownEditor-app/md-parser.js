@@ -296,6 +296,19 @@ function _asFigure(h){
   var pct=(w&&w[1]&&w[1]!=='auto')?w[1]:'';
   var gap=(g&&g[1])?g[1]:'0.3';
   var sty='--figw:'+(pct?pct+'%':'auto')+';--figgap:'+gap;
+  /* v2.11.3 水平对齐上移到 figure：带题注时 {N} 宽度归 figure、img 拿
+     width:100% 填满——img 自身 margin:auto 恒等于 0，前缀 l/c/r 对图失效
+     （只剩题注还在响应）。对齐从 img 的 data-img-align 读出后落到 figure
+     内联 margin（c=双边 auto、r=左 auto 右 0、l=默认不写），img 内联与
+     data-img-align 原样保留（docx/打印导出仍按它取对齐）。CSS 侧
+     .markdown-body figure.mde-fig{margin:.9em 0} 是 shorthand，内联长手
+     属性只覆盖左/右，垂直间距不受影响；fill-col 的 margin:0 !important
+     优先级更高，拼版场景照旧。 */
+  var al=/data-img-align="(center|left|right)"/.exec(h);
+  if(al){
+    if(al[1]==='center')sty+=';margin-left:auto;margin-right:auto';
+    else if(al[1]==='right')sty+=';margin-left:auto;margin-right:0';
+  }
   return '<figure class="mde-fig" data-fig-side="'+(m?m[1]:'b')
     +'" data-fig-gap="'+gap
     +'" data-fig-w="'+(w?w[1]:'auto')
