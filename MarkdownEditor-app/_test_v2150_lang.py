@@ -4,18 +4,23 @@
 覆盖：
 1  默认中文态：语言为 zh、工具栏中文标签在位、body[data-lang]=zh
 2  切 EN：工具栏/状态栏/排版面板无中文残留（字体名与语言按钮除外）
-3  切回 zh：工具栏 innerHTML 与切换前逐字节一致（可逆）
+3  切回 zh：工具栏/状态栏/预览 innerHTML 与切换前逐字节一致（可逆）
 4  EN 下重开页面仍保持 EN（持久化）
-5  打印产物：cfg.lang=zh 目录标题「目 录」；cfg.lang=en 为 Contents
-6  题注前缀：EN 下 figcaption 以 Figure 开头，zh 下以「图」开头
+5  题注前缀：EN 下 Figure/Table，zh 下「图/表」
+6  打印产物：cfg.lang=zh 目录标题「目 录」；cfg.lang=en 为 Contents
+
+端口说明：固定 18766 会被已安装的 MSIX 实例占住（它常驻监听），此时新起的
+服务绑定失败、页面来自安装目录的旧 HTML，测试会「通过」却测的不是当前代码。
+故本测试在 18799 起一个独立实例（临时启动器写入 runtime/，跑完删除）。
 
 运行：cd MarkdownEditor-app && python _test_v2150_lang.py
 """
 import io, json, os, subprocess, sys, time, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PORT = 18766
+PORT = 18799
 BASE = "http://127.0.0.1:%d" % PORT
+RUNNER = os.path.join(HERE, "runtime", "_test_run_server.py")
 fails = []
 n = 0
 
@@ -30,7 +35,7 @@ def check(name, ok, detail=""):
 
 def kill():
     subprocess.run(["powershell", "-NoProfile", "-Command",
-                    "Get-CimInstance Win32_Process | Where-Object { ($_.CommandLine -like '*md_server.py*') -and $_.Name -like '*python*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+                    "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*_test_run_server*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
                    capture_output=True)
 
 
@@ -69,7 +74,14 @@ RESET = ("()=>{['svOverlay','tsOverlay','lrOverlay','fmOverlay','llmOverlay',"
          "var e=document.getElementById(i); if(e) e.hidden=true;});}")
 
 kill(); time.sleep(0.3)
-srv = subprocess.Popen([os.path.join(HERE, "python", "python.exe"), "md_server.py"],
+# 独立端口的临时启动器（不改产品端口，也不与已安装实例抢 18766）
+io.open(RUNNER, "w", encoding="utf-8", newline="\n").write(
+    "import os, sys\n"
+    "sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))\n"
+    "import md_server\n"
+    "md_server.PORT = %d\n"
+    "md_server.main()\n" % PORT)
+srv = subprocess.Popen([os.path.join(HERE, "python", "python.exe"), RUNNER],
                        cwd=HERE, creationflags=0x08000000)
 t0 = time.time()
 while not alive() and time.time() - t0 < 25:
@@ -200,6 +212,10 @@ try:
     check("en 产物不含中文目录标题", "目 录" not in got.get("en", ""))
 finally:
     srv.terminate()
+    try:
+        os.remove(RUNNER)
+    except Exception:
+        pass
 
 print("\n%d 项，失败 %d" % (n, len(fails)))
 if fails:
