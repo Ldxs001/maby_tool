@@ -340,9 +340,32 @@ def _style_abstract_num(doc, style_id):
     return None
 
 
-def _prep_list_abstract(doc):
-    """清理列表编号定义的悬挂底座，落成 inside 语义（与预览
-    list-style-position:inside 同构）：
+def _list_hang_from_css(ts_css):
+    """从 ts-style 里读 v2.14.0「列表标记外凸」开关与 marker 槽宽。
+
+    返回 (hang, slot_ol_pt, slot_ul_pt)。ts_css 由前端 applyTypeset 生成，
+    开态会写出 `:root{--mde-mark-ol:22.5px;--mde-mark-ul:16.5px;}` 与
+    `list-style-position:outside`。两端必须共用同一组数值，否则就是
+    「Word 与预览两套几何」——用户反复吃过这类亏，故以 CSS 为单一来源，
+    docx 只做 px→pt 换算（×0.75，与全文 `_px` 同口径）。"""
+    if not ts_css or "list-style-position:outside" not in ts_css:
+        return False, 0.0, 0.0
+
+    def _slot(name, dflt):
+        m = re.search(r"--%s:\s*([\d.]+)px" % name, ts_css)
+        try:
+            return float(m.group(1)) * 0.75
+        except Exception:
+            return dflt
+
+    # 回落值 = 15px 字号下的 1.5em / 1.1em（与前端 _lBase=15 的缺省一致）
+    return True, _slot("mde-mark-ol", 22.5 * 0.75), _slot("mde-mark-ul", 16.5 * 0.75)
+
+
+def _prep_list_abstract(doc, hang=False):
+    """清理列表编号定义的悬挂底座，落成与预览同构的编号语义。
+
+    inside（默认，hang=False）与预览 list-style-position:inside 同构：
 
     模板 abstractNum lvl0 自带 <w:ind left="360" hanging="360"/> +
     <w:tabs><w:tab w:val="num" w:pos="360"/></w:tabs>，且无 w:suff
@@ -357,7 +380,12 @@ def _prep_list_abstract(doc):
     ② 删 w:ind：去掉悬挂底座，编号起点 = 段落 left（全权由段落定位）；
     ③ 删 w:tabs：去掉悬挂布局的 tab stop 干扰。
     本导出文档的所有 li 段落都显式写 left_indent，改共享定义安全。
-    hollow 克隆发生在 prep 之后，自动继承干净定义。"""
+    hollow 克隆发生在 prep 之后，自动继承干净定义。
+
+    hang=True（v2.14.0 外凸态）时改为 ①' `<w:suff w:val="tab"/>`：编号后
+    用 tab 顶到段落 left（= 档位 + 槽宽），段落侧再写 hanging=槽宽，编号
+    就站在文字块外面的槽里，与预览 outside 同构；②③ 与 above 相同。"""
+    suff_val = "tab" if hang else "space"
     for style_id in ("ListNumber", "ListBullet"):
         an = _style_abstract_num(doc, style_id)
         if an is None:
@@ -371,14 +399,15 @@ def _prep_list_abstract(doc):
                     ppr.remove(ind)
                 for tabs in ppr.findall(qn("w:tabs")):
                     ppr.remove(tabs)
-            if lvl.find(qn("w:suff")) is None:
+            suff = lvl.find(qn("w:suff"))
+            if suff is None:
                 suff = OxmlElement("w:suff")
-                suff.set(qn("w:val"), "space")
                 lt = lvl.find(qn("w:lvlText"))
                 if lt is not None:
                     lt.addprevious(suff)
                 else:
                     lvl.append(suff)
+            suff.set(qn("w:val"), suff_val)
 
 
 def _bullet_num(doc, hollow, ctx):
@@ -576,6 +605,12 @@ def _fill_inline(node, para, doc, md_path, max_in=None):
             continue
         if ctag == "br":
             para.add_run().add_break()
+        elif ctag == "input":
+            # v2.14.0：- [ ] / - [x] 的 <input type=checkbox> 在 Word 里没有
+            # 对应物，原实现静默丢弃 → 导出的清单只剩文字、框消失。改成
+            # 输出与预览同形的字符（checked 是布尔属性，lxml_html 读作 ''）。
+            _checked = child.get("checked") is not None
+            _add_run(para, "☑" if _checked else "□", child)
         elif ctag == "img":
             _add_image(para, child, md_path, doc, max_in=max_in)
         elif ctag == "svg":
@@ -930,28 +965,48 @@ def _walk(node, doc, md_path, ctx):
         sd = _style_dict(node.get("style", ""))
         own_ml = (_px("margin-left", sd) or 0) * 0.75
         base = float(ctx.setdefault("ind", 0.0)) + own_ml
+        # v2.14.0 外凸：槽宽随有序/无序分档，来自 ts-style 的 --mde-mark-*
+        _lhang = ctx.get("lhang") or (False, 0.0, 0.0)
+        hang_on = bool(_lhang[0])
+        slot = float(_lhang[1] if tag == "ol" else _lhang[2])
         ol_num = None
         if tag == "ol":
             ol_num = _new_ol_num(doc, node.get("start") or 1)
         hollow_num = None   # 按需懒建：遇 data-li-marker=hollow 才取
         for li in _children(node):
             if etree.QName(li).localname == "li":
-                p = doc.add_paragraph(
-                    style="List Bullet" if tag == "ul" else "List Number")
-                if ol_num is not None:
-                    _bind_num(p, ol_num)
-                elif tag == "ul" and li.get("data-li-marker") == "hollow":
-                    if hollow_num is None:
-                        hollow_num = _bullet_num(doc, True, ctx)
-                    if hollow_num is not None:
-                        _bind_num(p, hollow_num)
-                p.paragraph_format.left_indent = Pt(base)
+                is_task = "task" in (li.get("class") or "").split()
+                if is_task:
+                    # v2.14.0：- [ ] / - [x] 在预览里没有 marker（方框自己
+                    # 就是标记），Word 侧同样不绑编号，否则会多出一个圆点。
+                    p = doc.add_paragraph()
+                else:
+                    p = doc.add_paragraph(
+                        style="List Bullet" if tag == "ul" else "List Number")
+                    if ol_num is not None:
+                        _bind_num(p, ol_num)
+                    elif tag == "ul" and li.get("data-li-marker") == "hollow":
+                        if hollow_num is None:
+                            hollow_num = _bullet_num(doc, True, ctx)
+                        if hollow_num is not None:
+                            _bind_num(p, hollow_num)
                 # 压掉编号级悬挂：ListNumber/ListBullet 的 abstractNum lvl0
                 # 自带 <w:ind left="360" hanging="360"/>，段落只写 left 时
                 # hanging 继承 → Word 把编号悬挂在 left-360 处（比块内
                 # 正文浅一层半，"列表没继承缩进"）。显式 firstLine=0 让
-                # 编号与文本都从容器左缘起（inside 语义，与预览同几何）
-                p.paragraph_format.first_line_indent = Pt(0)
+                # 编号与文本都从容器左缘起（inside 语义，与预览同几何）。
+                # 外凸态反过来：left = 档 + 槽、firstLine = −槽，编号站进
+                # 槽里（Word 的悬挂列表标准写法），文字块整体右移一槽。
+                if hang_on and not is_task:
+                    p.paragraph_format.left_indent = Pt(base + slot)
+                    p.paragraph_format.first_line_indent = Pt(-slot)
+                elif hang_on and is_task:
+                    # task 项无 marker，不悬挂：与兄弟项文字同一左沿
+                    p.paragraph_format.left_indent = Pt(base + slot)
+                    p.paragraph_format.first_line_indent = Pt(0)
+                else:
+                    p.paragraph_format.left_indent = Pt(base)
+                    p.paragraph_format.first_line_indent = Pt(0)
                 _fill_inline(li, p, doc, md_path, max_in=ctx.get("max_in"))
                 # li 内嵌套列表：嵌套层缩进 = 本层容器档 + 嵌套自身档
                 for sub in _children(li):
@@ -1442,7 +1497,9 @@ def build_docx(md_path, body_html, ts_css=None, page_cfg=None):
     doc = Document()
     _sanitize_builtin_styles(doc)
     _apply_page_section(doc, page_cfg)
-    _prep_list_abstract(doc)
+    # 列表编号定义要在建 li 段落之前定稿：外凸态编号后走 tab，inside 态走空格
+    hang, slot_ol, slot_ul = _list_hang_from_css(ts_css)
+    _prep_list_abstract(doc, hang)
     root = lxml_html.fromstring(body_html)
     # 找到正文根（兼容传 outerHTML 含 article.markdown-body，或裸片段）
     mb = root
@@ -1454,7 +1511,7 @@ def build_docx(md_path, body_html, ts_css=None, page_cfg=None):
         found = root.xpath(".//*[@class='markdown-body']")
         if found:
             mb = found[0]
-    ctx = {"para": None, "ind": 0.0}
+    ctx = {"para": None, "ind": 0.0, "lhang": (hang, slot_ol, slot_ul)}
     for child in _children(mb):
         _walk(child, doc, md_path, ctx)
     buf = io.BytesIO()

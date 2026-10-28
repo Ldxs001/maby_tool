@@ -11,6 +11,38 @@
 
 ---
 
+## v2.14.0（2026-10-28）
+
+**本次改动：列表标记外凸开关（续行悬挂）、任务项归队、docx 三条同构**
+
+**新增**
+
+- **列表标记外凸**（排版面板「段落缩进 · 列表」上方新增勾选，**默认关闭**）：`ol/ul` 由 `list-style-position:inside` 切到 `outside`，容器让出一个 marker 槽，序号/圆点站进槽里、文字块整体右移一槽，**多行列表项的续行与首行文字左沿对齐**（`1. □xxxx` 下的 `□zzzz` 落在首行 □ 的位置）。关闭时回到 v2.1 起的老口径（marker 站在内容流首位、续行顶格）。
+- **槽宽按有序/无序分档**：`ol` 1.5em、`ul` 1.1em（随面板「列表」字号换算，缺省 15px → 22.5 / 16.5px）。统一值会让圆点项的文字离 marker 过远；`ol` 需要给两位数编号留位。两个值以 `--mde-mark-ol/ul` 写进 `#ts-style`，docx 侧解析同一组变量做 px→pt 换算，两端不留第二套几何。
+- **docx 外凸同构**：`_prep_list_abstract()` 增加 hang 分支，编号定义 `w:suff` 由 `space` 改 `tab`；li 段落 `left_indent = 档位 + 槽`、`first_line_indent = −槽`（Word 标准悬挂写法），编号落在槽内、文字从 `left` 起排。
+- **`- [ ]` / `- [x]` 在 docx 里出真字符**：`<input type=checkbox>` 无 Word 对应物，原实现静默丢弃（导出件里只剩文字、框消失）。改为按 `checked` 输出 `□` / `☑`，且任务项不再绑 `List Bullet`（Word 里不会多出一个圆点）。
+
+**变更**
+
+- **`li.task` 删掉 `margin-left:-1.4em`**：该值是 inside 时代按肉眼估的补偿，使任务项成为所有列表里唯一不听缩进档的离群项（同时也是「紧贴列表的块被连带缩进」一类现象的来源）。方框自身即标记，只保留 `list-style:none`，几何交给 `ol/ul` 容器。
+- **开态下嵌套列表首次出现水平缩进**：容器换成 outside 后每层多一个槽（此前 `padding-left` 被统一归零，嵌套仅靠 `+`/`-` 的圆点与圆圈形状区分）。属预期行为，非回归。
+- **`MD_SERVER_VERSION` 104 → 105**：docx 导出能力变更（悬挂几何 + 任务项字符），按自愈换代规则 +1。
+
+**说明**
+
+- **关态零影响**：`#ts-style` 的列表两分支仍按原字符串拼接（有档写 `margin-left:Npx`、无档写 `margin-left:0`，不引入 `0px`），开关关闭时不产生任何新规则。实测 `个人工作简历2026.md` 的两态 `#ts-style`（1634 字节）与 `#preview` innerHTML（15801 字节）逐字节一致。
+- **档位与槽宽是两把尺（有意为之）**：档位按正文字号（px，`indBase`）换算，保证跨元素同一把尺；槽宽跟列表自身字号，因为槽必须包住 marker 字形本身。
+- `<<<` 缩进包围块与正文首行/悬挂缩进不受影响：前者是容器级 `margin`，后者是 `text-indent` / `padding+负缩进` 的段内装饰。
+
+**测试**
+
+- 新增 `_test_v2140_hang.py`（19 项，playwright）：关态 inside/padding 0/档位 37.33px、关态续行偏左复现原缺陷、开态 outside + 22.5/16.5px 槽、两行 □ 对齐 ±1px、续行右移=槽宽、首行位移=槽宽−marker 宽、任务项贴内容左沿、嵌套层级缩进、ts-style 变量与规则、开关可逆。
+- 新增 `_test_v2140_docx.py`（18 项）：关态 left/firstLine/suff=space、开态 ol/ul 两档槽宽与 `suff=tab`、任务项走 Normal 且以 □/☑ 起头、无 ts_css 回落 inside。
+- 新增 `_test_v2140_parity.py`：同文档同设置下与 v2.13.5(718f90c) 对拍 `#ts-style` 与 `#preview` innerHTML；自造语法文档与真实简历各一轮，均逐字节一致。
+- 回归：`_test_v2132_rules.cjs` 46/46、`_test_splitblocks_wrap.cjs` 全过、`_test_v213_matrix.cjs` 全过、`_test_list_parse.py` 20/20、`_test_parser_sync.py` PASS（解析器段未触碰）、`_test_indent_align.py` ALL PASS、`_test_indent_block.py` 10/10、`_test_docx_export.py` 40/40、`_test_v213_docx.py` 全过、`_test_list_ui.py` / `_test_export_ui.py` ALL PASS。
+
+---
+
 ## v2.13.5（2026-10-28）
 
 **本次改动：举报收件邮箱移出源码，改为构建期注入**
