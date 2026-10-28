@@ -2,7 +2,7 @@
 
 **本工具由 AI 辅助生成**：零依赖单文件 Markdown 编辑器，左侧写作、右侧实时渲染，全程本地运行。
 
-> 本指南对应 **v2.15.0**。语法有增补时，先看文末「语法速查」；每条写法后面的章节名指向详细说明。
+> 本指南对应 **v2.16.0**。语法有增补时，先看文末「语法速查」；每条写法后面的章节名指向详细说明。
 
 ## English at a glance
 
@@ -16,6 +16,7 @@ The interface is bilingual. The small **EN / 中** button in the status bar swit
 | Print / PDF | **Print** builds a paged HTML (paper, page numbers, contents, figures and tables numbered) and opens it; press `Ctrl+P` there to print or save as PDF. |
 | Export | `.html` for a styled single file; `.docx` for an editable Word file with styles and real formulas. |
 | Typesetting | **TS** opens fonts and sizes, table style, paragraph indent, paragraph gap, hanging list markers, page setup and autosave. |
+| Image output | **TS → Image output**: *Original* (default, untouched), *300 dpi* or *150 dpi*. Export copies are downscaled to each image's real printed width (`width_mm ÷ 25.4 × dpi`), never upscaled, and only when it actually saves bytes. Print/PDF, `.html` and `.docx` all follow; the files on disk are never modified and the preview always uses thumbnails. |
 | Language | Status bar **EN / 中**, remembered on this machine. |
 | Offline | KaTeX, Paged.js and the four diagram engines (Mermaid, Graphviz, WaveDrom, Vega-Lite) are bundled; only remote images and links need the network. |
 | Extensions | `@@ begin fill {50\|50}` … `@@ end fill` (columns), `@@ blank{n}` (exact vertical space), `@@ begin full` (own page on print), `@@ MDE_…` (Python data points). The cheat sheet at the end carries an English note on every row. |
@@ -681,6 +682,14 @@ run 库里的 `plotimg` 用工具自带的 Pillow 直接把编辑区的数据画
   - 序号只加在预览层，**不回写源文**；左侧大纲与源文一律不带序号
   - 不检测手写序号：标题本来写着 `一、` 时会显示成「一、一、总则」，需自己保证标题不带号
   - 导出：打印／PDF、docx、`.html` 三条通道都带序号
+- **图片输出**（v2.16.0，面板「页边距」下面一节）：一个下拉框三档，**只管输出件，不动你的原图**
+  - **原图输出**（默认）：打印／PDF、`.html`、docx 全部使用原图，与旧版本行为完全一致
+  - **实图输出 · 300dpi（印刷）** / **实图输出 · 150dpi（电子交付）**：导出时**按每张图在版面上的实际显示宽度**换算目标像素（`显示宽度mm ÷ 25.4 × dpi`），只在原图比目标更大时降采样，**绝不放大**
+  - 三条通道吃同一套口径：打印／PDF 与 `.html` 改写为派生的降采样图；docx 把降采样件塞进包内但**显示宽度仍按原图长宽比锁定**，所以版面尺寸和原图档位**分毫不差**（几百像素的降采样件不会撑成满页）
+  - 典型收益：一张 1920×2744 的照片排版成 24% 栏宽（约 40mm），300dpi 只需 493px、150dpi 只需 247px——同一份文档打印成 PDF，体积从 6527.7KB 降到 573.7KB（8.8%）／172.2KB（2.6%），页面上图占的尺寸一模一样
+  - 三道闸（fail-closed）：**只缩不放**、**缩比 ≤ 0.84 才动手**（缩一点点重编码反而更大）、**编码后不比原图小就回滚**；任何一步出错都退回原图，不会给你一张糊图
+  - 编码选型：带透明通道、或抽样色数 < 4096 的图（截图、线稿、图表）走 PNG 无损；其余走 JPEG q92
+  - **预览不受此项影响**：预览栏始终按栏宽要缩略图（`宽 × DPR`）＋懒加载，切档位不会让预览变糊或变慢
 
 ## 十、独占一页 `@@ begin full` 与硬控空白 `@@ blank`
 
@@ -754,6 +763,7 @@ run 库里的 `plotimg` 用工具自带的 Pillow 直接把编辑区的数据画
 - 打开 `.smd` 后点「保存」写回包内（不是导出），「另存为」可换格式另存一份（`.smd` → `.md` 会把图片解到同名 `.assets/`，反之收进包内）
 - 打开文档时若含 base64 内嵌图或本机绝对路径图，保存/另存**会自动把图片收进同名 `.assets/` 并把引用改写为相对路径**
 - 导出三件套：**.md**（纯文本）、**.html**（带排版与公式）、**分页**（纸张 / 页边距 / 页码 / 自动目录，Ctrl+P 直接出 PDF）
+- 导出件里图片用多大，由「排版 → **图片输出**」三档决定（原图 / 实图 300dpi / 实图 150dpi；见第九章）；**磁盘上的原图任何时候都不动**
 
 ## 十三、分屏滚动联动
 

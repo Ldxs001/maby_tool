@@ -16,6 +16,7 @@ import base64
 import io
 import os
 import re
+import threading
 import urllib.parse
 
 from lxml import etree, html as lxml_html
@@ -541,10 +542,14 @@ def _resolve_img_src(src, md_path):
         return src[len("file:///"):].replace("/", os.sep)
     if src.startswith("file://"):
         return src[len("file://"):].replace("/", os.sep)
-    m = re.match(r"/img\?path=(.+)$", src)
+    m = re.match(r"/img\?(.+)$", src)
     if m:
-        p = urllib.parse.unquote(m.group(1)).replace("\\", os.sep)
-        return p
+        # v2.16.0：src 可能带 &w=（预览缩略图参数），只取 path，别把参数拼进路径
+        _q = urllib.parse.parse_qs(m.group(1))
+        _p = (_q.get("path") or [""])[0]
+        if not _p:
+            return None
+        return urllib.parse.unquote(_p).replace("\\", os.sep)
     if src.startswith("http://") or src.startswith("https://"):
         return None  # 外部图不内嵌
     # 相对路径：相对当前 md 文件目录
@@ -708,6 +713,73 @@ def _img_width_in(doc, img, natural_px, max_in=None):
     return None
 
 
+# ===== v2.16.0「实图输出」=====
+# 导出期的目标 dpi 放线程局部：_add_image 被 _walk/_fill_inline 多层调用，
+# 贯穿传参会污染一整串签名；md_server 是 ThreadingHTTPServer，模块级变量
+# 又会串味，故用 threading.local。
+_CTX = threading.local()
+
+
+def _out_img_dpi():
+    return getattr(_CTX, "img_dpi", 0) or 0
+
+
+def _shrink_to_stream(path, need_px, min_ratio=0.84):
+    """把图降到宽 need_px 并编码进内存，返回 BytesIO；不需要缩/没收益/出错 -> None。
+
+    只在导出时用，产物不落盘（add_picture 直接吃 file-like），所以没有临时
+    文件要清，也不会在只读的商城安装目录里写东西。
+
+    三道闸与打印链路同口径：只缩不放 / 缩比 <= min_ratio 才动手 /
+    编码后不小于原图就放弃。编码选型：带 alpha 或少色（截图、线稿、图表）
+    走 PNG（JPEG 会把文字边缘压糊），其余 JPEG q92。
+    """
+    if not need_px or need_px < 16:
+        return None
+    if not path or not os.path.isfile(path) or path.lower().endswith(".svg"):
+        return None
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    try:
+        im = Image.open(path)
+        im.load()
+    except Exception:
+        return None
+    w, h = im.size
+    if w <= 1 or h <= 1 or w <= need_px:
+        return None
+    if need_px / float(w) > min_ratio:
+        return None
+    has_a = im.mode in ("RGBA", "LA") or "transparency" in im.info
+    few = False
+    if not has_a:
+        try:
+            probe = im.convert("RGB").copy()
+            probe.thumbnail((120, 120))
+            cols = probe.getcolors(maxcolors=1 << 16)
+            few = bool(cols) and len(cols) < 4096
+        except Exception:
+            few = False
+    use_png = has_a or few
+    try:
+        small = im.resize((int(need_px),
+                           max(1, int(round(need_px * h / float(w))))),
+                          Image.LANCZOS)
+        buf = io.BytesIO()
+        if use_png:
+            small.save(buf, "PNG", optimize=True)
+        else:
+            small.convert("RGB").save(buf, "JPEG", quality=92, optimize=True)
+        if buf.tell() >= os.path.getsize(path):
+            return None
+    except Exception:
+        return None
+    buf.seek(0)
+    return buf
+
+
 def _add_image(para, img, md_path, doc=None, max_in=None):
     src = img.get("src", "") or ""
     # 前端栅格化的图表 PNG（data URL）：直接解码嵌入
@@ -742,10 +814,20 @@ def _add_image(para, img, md_path, doc=None, max_in=None):
         except Exception:
             pass
         w_in = _img_width_in(doc, img, natural_px, max_in) if doc else None
+        # v2.16.0 实图输出：按「显示宽(in) × 目标 dpi」降采样，字节只在内存里。
+        # 关键：w_in 必须由【原图】的 natural_px 算出，并显式 width= 传给
+        # python-docx。若图换成降采样件后让它自己算宽（natural_px/96），
+        # 472px 的图会塌成满页：实测显示宽从 40mm 变 166.5mm，版面全毁
+        # ——虽然 docx 体积确实能省 97.6%。所以宽度口径与原图死死绑定。
+        _dpi = _out_img_dpi()
+        _stream = None
+        if w_in and _dpi:
+            _stream = _shrink_to_stream(path, int(round(w_in * _dpi)))
+        _target = _stream if _stream is not None else path
         if w_in:
-            para.add_run().add_picture(path, width=Inches(w_in))
+            para.add_run().add_picture(_target, width=Inches(w_in))
         else:
-            para.add_run().add_picture(path)
+            para.add_run().add_picture(_target)
     except Exception:
         para.add_run("[图片:%s]" % os.path.basename(path))
 
@@ -1494,6 +1576,9 @@ def build_docx(md_path, body_html, ts_css=None, page_cfg=None):
     """body_html: 已内联样式的 HTML 片段（含 .markdown-body 根）。
     page_cfg: 排版面板 page 节（纸张/页边距），None 用 A4 默认。
     返回 .docx 字节。"""
+    # v2.16.0 实图输出档位：orig（默认，全用原图）/ 300 / 150
+    _mode = str((page_cfg or {}).get("img") or "orig")
+    _CTX.img_dpi = 300 if _mode == "300" else (150 if _mode == "150" else 0)
     doc = Document()
     _sanitize_builtin_styles(doc)
     _apply_page_section(doc, page_cfg)

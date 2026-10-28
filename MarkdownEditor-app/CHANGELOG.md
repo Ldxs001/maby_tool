@@ -11,6 +11,45 @@
 
 ---
 
+## v2.16.0（2026-10-29）
+
+**本次改动：新增「实图输出」——打印与导出按每张图的实际显示宽度降像素**
+
+**新增**
+
+- **排版面板「图片输出」三档**：原图输出（默认，行为与 v2.15.x 逐字节一致）／实图输出·300dpi（印刷）／实图输出·150dpi（电子交付）。档位落 `page.img`，随既有 `md-editor-typeset-v3` 存档；非法值回落 `orig`，旧配置无需迁移。
+- **打印按渲染宽降采样**：`build_paged_html` 对正文每张 `/img` 代理图按 `need_px = eff_w_mm / 25.4 × dpi` 补 `&w=`。`eff_w_mm` 复用既有的 `_fill_col_image_widths`（已含 `width:N%` 与分栏宽），不新建几何计算：A4 满页 174mm@300dpi → 2055px，40mm 小图位 → 472px。
+- **预览缩略图与懒加载**：`fixLocalImages` 统一给 `/img` 追加 `&w=`（预览栏宽 × min(DPR, 2)，钳 320~2400）并置 `loading="lazy"` / `decoding="async"`。此路与输出档位无关，恒生效——卡顿来自像素数，与容器格式无关。
+- **`/img` 路由支持 `w` 参数**：`_shrink_image()` 按目标像素宽降采样并落 `RUNTIME_DIR/_out/`，`/static/` 两级查找直接可用，零新增路由。
+- **docx 也吃降采样**：`_add_image` 按 `w_in × dpi` 生成内存流（`_shrink_to_stream`，不落盘）交给 `add_picture`，`w_in` 仍由**原图**的 `natural_px` 算出并显式传入。
+
+**变更**
+
+- **长图切片改「先缩后切」**：`_slice_tall_images` 增加 `dpi` 参数，在取尺寸后先缩放再算 `strip_px` 与切点。一次缩放定形，条带生来即目标像素，接缝天然连续；缓存键由 `sha1 + strip_px` 扩为 `sha1 + strip_px + dpi`，避免 300/150 互串。
+- **`/img` 的 ETag 并入 `w`**：由 `mtime-size` 改为 `mtime-size-w`，否则不同档位会互相命中对方的缓存。
+- **`/static/` 补 `image/jpeg` 与 `image/webp`**：此前只有 `.png`，降采样产物若落 `.jpg` 会被当二进制下载。
+- **`_proxy`（导出 HTML）与 `_resolve_img_src`（docx）改 `parse_qs` 取 `path`**：src 带 `&w=` 后，原 `split("path=")` / `re.match(r"/img\?path=(.+)$")` 会把参数拼进文件路径导致取图失败。
+- **`build_standalone_html` 的版心宽计算提前**：`_w_mm` 原在 `_proxy` 之后求得，实图输出需要它先就位。
+
+**说明**
+
+- **降采样的三道闸**：只缩不放（`need_px` 不小于原宽即返回原图）／缩比 ≤ 0.84 才动手（实测 4180→4000 重编码后反而 +31%，小幅缩放是净亏损）／编码后不小于原图就回滚。任何异常一律 fail-closed 返回原图，压缩失败不会丢图。
+- **编码选型**：带 alpha 或抽样色数 < 4096（截图、线稿、图表）走 PNG —— JPEG 会把文字边缘压糊；其余走 JPEG q92。
+- **不做 WebP**：同像素下 WebP 无损比 PNG 小 44%~96%，但收益只落在「最终存的容器是 WebP」上；「转成 WebP 再转回原格式」体积回到原样（实测截图 12.4KB → 28.1KB，像素逐点相同），等于绕一圈白忙。而产物体积由像素数决定——实测同一张图用 PNG 或 WebP 无损喂浏览器，打出的 PDF 字节级相同（6501.2KB，且显示 40mm 与 170mm 的 PDF 也完全相同）。故省体积的唯一杠杆是降像素，不是换格式；换容器还要额外承担 docx 不认 WebP 的兼容成本，收益不足以抵。
+- **源文件不动**：三档只作用于产物，磁盘上的 `.assets` 与源图一个字节都不改，切档重导即可回滚。
+
+**测试**
+
+- `_test_v2160_img.py` 14 项：三档 `w` 值（493 / 247 / 2055）、剥掉预览带来的旧 `w`、切片缓存键随 dpi 分离、导出 HTML 指向 `_out` 派生件。
+- `_test_v2160_docx.py` 6 项：docx 体积 orig 6564.5KB → 300dpi 654.1KB（9.96%）→ 150dpi 194.5KB（2.96%），显示尺寸 41.77×59.69mm 三档一致（容差 0.1mm，差值来自像素取整）；原图不够宽时不放大。
+- `_test_v2160_http.py` 7 项：无 `w` 直供原图、带 `w` 体积显著更小、`w=800` 与 `w=1600` 的 ETag 不同、带相同 ETag 回 304 空体、`w` 超原宽不放大。
+- `_test_v2160_ui.py` 9 项：预览 `src` 带 `&w=658`、`loading=lazy`、`decoding=async`、浏览器解码尺寸由 1920×2744 降为 658×940；面板三档齐全、默认 `orig`、切换后落盘正确、无 page error。
+- **端到端**：同一份文档（1920×2744 图按 24% 宽排版）打印成 PDF，原图 6527.7KB / 300dpi 573.7KB（8.8%）/ 150dpi 172.2KB（2.6%），页面上的图分别为 1920×2744、493×705、247×353。
+- **回归**：`_test_docx_export` 40/40、`_test_v2150_lang` 27/27、`_test_img_features` ALL PASS、`_test_v2140_hang` ALL PASS、`_test_v2140_docx` ALL PASS、`_test_v213_docx` 全过、`_test_list_parse` 20/20、`_test_indent_block` 10/10。
+- **已知既有失败（非本次引入）**：`_test_img_width.py` 第 2 条 `![a](x.png "t"){45}` 期望 `width:45%`，实际是 v2.10 图题模式下的 `width:100% + data-fig-w="45"`。该用例断言未随图题功能更新；`/*PARSER_START*/…/*PARSER_END*/` 段与 v2.15.1 逐字节一致（md5 `99eef1d3f790`），本次未改解析器。
+
+---
+
 ## v2.15.1（2026-10-28）
 
 **本次改动：英文界面工具栏溢出、大纲标题与预览产物的随语言重算**

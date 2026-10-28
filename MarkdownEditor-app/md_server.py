@@ -64,7 +64,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 106  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 107  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 # MSIX 商城版判定（微软商店政策 11.16 的"报告 AI 生成内容"入口用）：
 # 商城包与侧载包恒落在 WindowsApps 之下，Release 安装包/便携形态不会。
@@ -1332,6 +1332,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 ".js": "application/javascript; charset=utf-8",
                 ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf",
                 ".html": "text/html; charset=utf-8", ".png": "image/png",
+                ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
                 ".svg": "image/svg+xml", ".ico": "image/x-icon",
             }
             ctype = ctypes_map.get(os.path.splitext(full)[1].lower(),
@@ -1383,17 +1384,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
             exts = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
                     ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml",
                     ".bmp": "image/bmp"}
-            ext = os.path.splitext(p)[1].lower()
+            # v2.16.0 缩略图：w=目标像素宽。预览按栏宽×DPR、打印按渲染宽×dpi 传入。
+            # 原图本来就不宽于 w、或压缩没收益时 _shrink_image 返回 None -> 原图直供。
             try:
-                st = os.stat(p)
-                with open(p, "rb") as f:
+                _wtxt = (q.get("w", [""])[0] or "").strip()
+                want_w = int(round(float(_wtxt))) if _wtxt else 0
+            except (TypeError, ValueError):
+                want_w = 0
+            served = p
+            if want_w > 0:
+                _url, _abs = _shrink_image(p, want_w)
+                if _abs:
+                    served = _abs
+            ext = os.path.splitext(served)[1].lower()
+            try:
+                st = os.stat(served)
+                with open(served, "rb") as f:
                     data = f.read()
             except Exception:
                 self._send(404, "image not found")
                 return
-            # 协商缓存：ETag=mtime-size，浏览器每次请求都回源校验，
-            # 文件没变回 304（不重传），变了立刻拿到新图 —— F5 即见效
-            etag = '"%d-%d"' % (int(st.st_mtime), st.st_size)
+            # 协商缓存：ETag=mtime-size-w，浏览器每次请求都回源校验，
+            # 文件没变回 304（不重传），变了立刻拿到新图 —— F5 即见效。
+            # w 必须并进 ETag：否则 300dpi 与 150dpi 会互相命中对方的缓存。
+            etag = '"%d-%d-%d"' % (int(st.st_mtime), st.st_size, want_w)
             if self.headers.get("If-None-Match") == etag:
                 self.send_response(304)
                 self.send_header("Cache-Control", "no-cache")
@@ -2797,7 +2811,150 @@ def _fill_col_image_widths(html):
                 out[seg_start + im.start()] = pct
     return out
 
-def _slice_tall_images(body_html, icb_w_mm, img_maxh_mm):
+# ===== v2.16.0「实图输出」：按实际渲染宽度降采样 =====
+# 产物体积由像素数决定，不由源编码格式决定（实测：同一张图用 PNG 或 WebP 无损
+# 喂浏览器，打出的 PDF 字节级相同）。所以省体积的唯一杠杆是把像素降到
+# 「该图在该版面下真正需要的像素」，而不是换容器格式。
+_SHRINK_MIN_RATIO = 0.84   # 缩比大于此值不动手：小幅缩放后重编码常反而变大
+                           # （实测 4180->4000 涨 31%），只做真有肉的那一批
+_SHRINK_MAX_PX = 8000      # 单边上限兜底：A4 及以下任何排版吃不到更多
+
+
+def _shrink_image(src_path, need_px):
+    """把 src_path 降到宽 need_px，返回 (url, abs_path)。
+
+    不需要缩 / 没收益 / 任何异常 -> (None, None)，调用方继续用原图。
+    这是刻意的 fail-closed：压不动就不压，绝不因为压缩失败丢图。
+
+    三道闸：
+      ① 只缩不放 —— need_px 不小于原宽时直接返回；
+      ② 缩比 <= _SHRINK_MIN_RATIO 才动手 —— 挡掉「缩 3% 编码后反而 +45%」；
+      ③ 编码后字节数不小于原图就回滚 —— 保证产物只会更小。
+
+    编码选型：带 alpha 或色数少（截图 / 线稿 / 图表）走 PNG —— JPEG 会把文字
+    边缘压糊；其余走 JPEG q92 —— 照片类在 92 上肉眼无差，体积远小于 PNG。
+    """
+    if not need_px or need_px < 16:
+        return None, None
+    need_px = int(min(need_px, _SHRINK_MAX_PX))
+    p = src_path
+    if not p or not os.path.isfile(p) or p.lower().endswith(".svg"):
+        return None, None
+    try:
+        from PIL import Image
+    except ImportError:
+        return None, None
+    try:
+        im = Image.open(p)
+        im.load()
+    except Exception:
+        return None, None
+    w, h = im.size
+    if w <= 1 or h <= 1 or w <= need_px:
+        return None, None                        # ① 只缩不放
+    if need_px / float(w) > _SHRINK_MIN_RATIO:
+        return None, None                        # ② 缩得太少，收益不足
+    has_a = im.mode in ("RGBA", "LA") or "transparency" in im.info
+    few_colors = False
+    if not has_a:
+        try:
+            probe = im.convert("RGB").copy()
+            probe.thumbnail((120, 120))
+            cols = probe.getcolors(maxcolors=1 << 16)
+            few_colors = bool(cols) and len(cols) < 4096
+        except Exception:
+            few_colors = False
+    use_png = has_a or few_colors
+    try:
+        st = os.stat(p)
+    except Exception:
+        return None, None
+    key = "%x-%x-%d-%s" % (int(st.st_mtime), st.st_size, need_px,
+                           "p" if use_png else "j")
+    out_dir = os.path.join(RUNTIME_DIR, "_out", key)
+    out_path = os.path.join(out_dir, "img" + (".png" if use_png else ".jpg"))
+    url = "/static/_out/%s/img%s" % (key, ".png" if use_png else ".jpg")
+    if os.path.exists(out_path):
+        try:
+            if os.path.getsize(out_path) > 0:
+                return url, out_path
+        except Exception:
+            pass
+    th = max(1, int(round(need_px * h / float(w))))
+    tmp = None
+    try:
+        small = im.resize((int(need_px), th), Image.LANCZOS)
+        os.makedirs(out_dir, exist_ok=True)
+        tmp = out_path + ".part"
+        if use_png:
+            small.save(tmp, "PNG", optimize=True)
+        else:
+            small.convert("RGB").save(tmp, "JPEG", quality=92, optimize=True)
+        if os.path.getsize(tmp) >= st.st_size:   # ③ 没变小就不换
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+            return None, None
+        os.replace(tmp, out_path)
+    except Exception:
+        if tmp:
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+        return None, None
+    return url, out_path
+
+
+def _img_target_px(mm_width, dpi):
+    """把渲染宽（mm）换算成目标像素宽。dpi 为 0 表示原图输出，返回 0。"""
+    try:
+        if not dpi:
+            return 0
+        return max(16, int(round(float(mm_width) / 25.4 * float(dpi))))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _rewrite_img_width(body_html, icb_w_mm, dpi):
+    """给正文里 /img 代理图补 `&w=<目标像素宽>`，交给 /img 路由按需降采样。
+
+    只对短图实际生效：会被 _slice_tall_images 换成条带的长图，src 整条被替换，
+    这里的 w 自然废弃（切片函数内部自己先缩后切）。
+    """
+    if not dpi:
+        return body_html
+    col_w_by_pos = _fill_col_image_widths(body_html)
+    # 必须匹配整条标签：width:N% 写在 src 之后，只匹配到 src 的引号会读不到它
+    img_re = re.compile(r'<img[^>]*>')
+
+    def _repl(m):
+        tag = m.group(0)
+        sm = re.search(r'src="/img\?path=([^"]+)"', tag)
+        if not sm:
+            return tag
+        qs = re.sub(r"&w=\d+", "", sm.group(1))
+        # 预览渲染时已按栏宽带过 &w=（缩略图宽），打印要按 mm×dpi 重算，
+        # 先剥掉旧值再拼，否则会沿用预览的像素宽度、白白浪费 dpi 档位。
+        pm = re.search(r'width:\s*([\d.]+)\s*%', tag)
+        pct = 1.0
+        if pm:
+            try:
+                pct = min(max(float(pm.group(1)), 0.0), 100.0) / 100.0
+            except ValueError:
+                pct = 1.0
+            if pct <= 0.001:
+                pct = 1.0
+        pct *= col_w_by_pos.get(m.start(), 1.0)
+        need = _img_target_px(icb_w_mm * pct, dpi)
+        new_src = 'src="/img?path=%s"' % (qs + ("&w=%d" % need if need else ""))
+        return tag[:sm.start()] + new_src + tag[sm.end():]
+
+    return img_re.sub(_repl, body_html)
+
+
+def _slice_tall_images(body_html, icb_w_mm, img_maxh_mm, dpi=0):
     col_w_by_pos = _fill_col_image_widths(body_html)
     img_re = re.compile(r'<img[^>]*?src="(/img\?path=[^"]+)"[^>]*?>')
 
@@ -2817,7 +2974,9 @@ def _slice_tall_images(body_html, icb_w_mm, img_maxh_mm):
             from PIL import Image
         except ImportError:
             return tag
-        path = urllib.parse.unquote(m.group(1).split("path=", 1)[1])
+        path = urllib.parse.unquote(
+            urllib.parse.parse_qs(urllib.parse.urlparse(m.group(1)).query
+                                  ).get("path", [""])[0])
         if not os.path.isfile(path):
             return tag
         try:
@@ -2842,6 +3001,17 @@ def _slice_tall_images(body_html, icb_w_mm, img_maxh_mm):
         # 分栏内的图：宽度还受栏宽约束，判定基准按栏宽折算
         pct *= col_w_by_pos.get(m.start(), 1.0)
         eff_w_mm = icb_w_mm * pct
+        # v2.16.0 实图输出：先缩后切。一次缩放定形，条带生来就是目标像素，
+        # 接缝天然连续（先切后缩会在条带边界产生半像素错位），也省一次编码。
+        need_px = _img_target_px(eff_w_mm, dpi)
+        if need_px and need_px < w and need_px / float(w) <= _SHRINK_MIN_RATIO:
+            try:
+                im = im.resize((int(need_px),
+                                max(1, int(round(need_px * h / float(w))))),
+                               Image.LANCZOS)
+                w, h = im.size
+            except Exception:
+                pass
         # 调整后渲染高不超版心 → 整图原子，不切
         if eff_w_mm * h / w <= img_maxh_mm:
             return tag
@@ -2851,8 +3021,8 @@ def _slice_tall_images(body_html, icb_w_mm, img_maxh_mm):
         # 条带像素高：渲染高 = 版心高/6（细条带续排，页面剩余留白上限 = 一条高）。
         # 1/3 版心实测留白过大（吸附后 3 条塞不进一页即剩 ~80mm 空白），故取 1/6
         strip_px = max(1, int(round(max(20.0, img_maxh_mm / 6.0) / eff_w_mm * w)))
-        # 缓存键 = 内容 sha1 + 条带几何（strip_px）——几何参数变更时旧切片不复用
-        digest = "%s-%d" % (digest, strip_px)
+        # 缓存键 = 内容 sha1 + 条带几何（strip_px）+ dpi —— 任一参数变更旧切片不复用
+        digest = "%s-%d-%d" % (digest, strip_px, dpi)
         n = (h + strip_px - 1) // strip_px
         gap = max(1, strip_px // 4)
         # 静默行亮度剖面：宽度压成 1px 即每行平均亮度（BILINEAR 均值）
@@ -2969,22 +3139,11 @@ def build_standalone_html(md_path, body_html, ts_css, page_cfg=None):
     if os.path.exists(kp):
         katex_css = io.open(kp, encoding="utf-8").read().replace(
             "url(fonts/", "url(/static/katex/fonts/")
-    def _proxy(m):
-        p = urllib.parse.unquote(m.group(1)).replace("\\", "/")
-        return 'src="file:///' + p + '"'
-    body = re.sub(r'src="/img\?path=([^"]+)"', _proxy, body_html)
-    if md_path:
-        mdir = os.path.dirname(md_path).replace("\\", "/")
-        # 排除 data:（内嵌图/栅格化图表；历史缺陷：data: 被当相对路径拼上
-        # 目录前缀，成 file:///dir/data:image/png;base64,... 垃圾 src）
-        body = re.sub(r'src="(?!https?:|file:|data:|/|#)([^"]+)"',
-                      lambda m: 'src="file:///%s/%s"' % (mdir, m.group(1)), body)
-    m1 = re.search(r"<h1[^>]*>([\s\S]*?)</h1>", body)
-    title = re.sub(r"<[^>]+>", "", m1.group(1)).strip() if m1 else "未命名文档"
-    ts = ts_css.replace("#preview", ".markdown-body")
-    # 版心宽（mm）：纸宽−左右边距（与预览栏 applyPaperWidth 同口径）
+    # 版心宽（mm）：纸宽−左右边距（与预览栏 applyPaperWidth 同口径）。
+    # v2.16.0 起提前到这里：实图输出要按版心宽算每张图的目标像素。
     _pc = page_cfg or {}
     _paper = _pc.get("paper", "A4")
+    _pwv = 0.0
     if _paper == "custom":
         try:
             _pwv = float(_pc.get("pw") or 0)
@@ -3002,6 +3161,46 @@ def build_standalone_html(md_path, body_html, ts_css, page_cfg=None):
     except Exception:
         _mlv, _mrv = 18.0, 18.0
     _w_mm = max(50.0, _w_mm - _mlv - _mrv)
+    _img_mode = str(_pc.get("img") or "orig")
+    out_dpi = 300 if _img_mode == "300" else (150 if _img_mode == "150" else 0)
+
+    def _proxy(m):
+        tag = m.group(0)
+        sm = re.search(r'src="(/img\?[^"]+)"', tag)
+        if not sm:
+            return tag
+        # group(1) 是完整的 /img?path=...&w=N，交给 parse_qs 解析（它自带 unquote；
+        # 再手动 unquote 一次会把路径里的 % 二次解码）
+        p = urllib.parse.parse_qs(
+            urllib.parse.urlparse(sm.group(1)).query).get("path", [""])[0]
+        p = p.replace("\\", "/")
+        if out_dpi:
+            pm = re.search(r'width:\s*([\d.]+)\s*%', tag)
+            pct = 1.0
+            if pm:
+                try:
+                    pct = min(max(float(pm.group(1)), 0.0), 100.0) / 100.0
+                except ValueError:
+                    pct = 1.0
+                if pct <= 0.001:
+                    pct = 1.0
+            _u, _abs = _shrink_image(p, _img_target_px(_w_mm * pct, out_dpi))
+            if _abs:
+                # 派生件落 runtime 缓存：与 _slice/ 同策略，导出的 html 引绝对路径
+                # （搬机器断图是既有行为，源图本来也是 file:// 绝对路径）
+                p = _abs.replace("\\", "/")
+        return tag[:sm.start()] + 'src="file:///' + p + '"' + tag[sm.end():]
+
+    body = re.sub(r'<img[^>]*?src="/img\?path=[^"]+"[^>]*>', _proxy, body_html)
+    if md_path:
+        mdir = os.path.dirname(md_path).replace("\\", "/")
+        # 排除 data:（内嵌图/栅格化图表；历史缺陷：data: 被当相对路径拼上
+        # 目录前缀，成 file:///dir/data:image/png;base64,... 垃圾 src）
+        body = re.sub(r'src="(?!https?:|file:|data:|/|#)([^"]+)"',
+                      lambda m: 'src="file:///%s/%s"' % (mdir, m.group(1)), body)
+    m1 = re.search(r"<h1[^>]*>([\s\S]*?)</h1>", body)
+    title = re.sub(r"<[^>]+>", "", m1.group(1)).strip() if m1 else "未命名文档"
+    ts = ts_css.replace("#preview", ".markdown-body")
     html = ('<!DOCTYPE html>\n<html lang="zh-CN"><head><meta charset="UTF-8"><title>__TITLE__</title>'
         "<style>__KATEX__</style><style>div.md-math-block{overflow-x:auto;margin:.8em 0;}"
         "span.md-math-inline{white-space:nowrap;}__TS__</style>"
@@ -3222,8 +3421,14 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
         r'<th[^>]*>\s*引用\s*</th>\s*<th[^>]*>\s*出处\s*</th>)',
         r'<table class="ref-table">\1', body)
 
+    # v2.16.0 实图输出：orig（默认）/ 300 / 150 三档，只影响产物，不动源文件
+    _img_mode = str(page_cfg.get("img") or "orig")
+    out_dpi = 300 if _img_mode == "300" else (150 if _img_mode == "150" else 0)
+    if out_dpi:
+        body = _rewrite_img_width(body, icb_w, out_dpi)
+
     # 超高长图切片：高 > 版心的图切小条带续排（切点吸附静默行）
-    body = _slice_tall_images(body, icb_w, img_maxh)
+    body = _slice_tall_images(body, icb_w, img_maxh, out_dpi)
 
     # 图片 src 保持 /img 代理原样：打印版由系统浏览器打开的是服务端
     # http URL（/static/document.paged.html），http 页面按浏览器安全策略
