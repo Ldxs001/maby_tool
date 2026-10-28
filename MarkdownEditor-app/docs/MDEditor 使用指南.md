@@ -2,7 +2,23 @@
 
 **本工具由 AI 辅助生成**：零依赖单文件 Markdown 编辑器，左侧写作、右侧实时渲染，全程本地运行。
 
-> 本指南对应 **v2.14.0**。语法有增补时，先看文末「语法速查」；每条写法后面的章节名指向详细说明。
+> 本指南对应 **v2.15.0**。语法有增补时，先看文末「语法速查」；每条写法后面的章节名指向详细说明。
+
+## English at a glance
+
+The interface is bilingual. The small **EN / 中** button in the status bar switches the whole UI language; the document itself is never translated. English labels are kept short so the toolbar still fits, and every rule below still applies.
+
+| Task | How |
+| --- | --- |
+| Open | Double-click a `.md` file, or use **Open**. File association is created by the installer. |
+| Save / Save as | **Save** writes back to the original file; **As…** picks a folder and a format (`.md` with a sibling `.assets` folder, or a single-file `.smd`). |
+| Split / follow | **Split** cycles editor-only, split, preview-only. **Follow** keeps the preview scrolled to the cursor. |
+| Print / PDF | **Print** builds a paged HTML (paper, page numbers, contents, figures and tables numbered) and opens it; press `Ctrl+P` there to print or save as PDF. |
+| Export | `.html` for a styled single file; `.docx` for an editable Word file with styles and real formulas. |
+| Typesetting | **TS** opens fonts and sizes, table style, paragraph indent, paragraph gap, hanging list markers, page setup and autosave. |
+| Language | Status bar **EN / 中**, remembered on this machine. |
+| Offline | KaTeX, Paged.js and the four diagram engines (Mermaid, Graphviz, WaveDrom, Vega-Lite) are bundled; only remote images and links need the network. |
+| Extensions | `@@ begin fill {50\|50}` … `@@ end fill` (columns), `@@ blank{n}` (exact vertical space), `@@ begin full` (own page on print), `@@ MDE_…` (Python data points). The cheat sheet at the end carries an English note on every row. |
 
 ## 一、基础语法
 
@@ -776,41 +792,41 @@ AI 解释（批注弹窗内一键按钮）可请 AI 解读当前标注片段。�
 
 ### （一）与标准 Markdown 不同的地方
 
-| 写法 | 本工具行为 | 标准社区惯例 |
-| --- | --- | --- |
-| `+` 无序列表 | 渲染**实心圆点** | 与 `-` 无区别 |
-| `-` 无序列表 | 渲染**空心圆圈** | 与 `+` 无区别 |
-| 无序标记与缩进的关系 | 样式跟标记符走，缩进只决定嵌套层级 | 空心圈通常是嵌套二级的默认外观 |
-| 缩进嵌套子项 | **兼容语法**：仅承接外部 Markdown 粘贴，本工具层级表达的标准写法是 `<<<` 包围块 | 嵌套子列表是标准层级写法 |
-| `*` 星号 | 只作行内斜体 / 加粗，**不作列表标记**（行首 `* 内容` 按普通段落） | `* 内容` 是合法无序列表 |
-| 有序列表编号 | **编号接力**：显示编号 = 渲染器按区域顺序生成，输入数字只是标记（写 `5.` 也按顺序显示）；只有空行会结束列表并重新从 1 编号 | 显示编号 = `<ol start>` + 逐项递增 |
-| 块级语法落位 | **必须独占一行**即可（紧贴上一段/列表项都生效），不要求前后空行 | 多数实现要求块级语法前后空行 |
-| 分隔线判据 | 只认 `-` `*` `_`：整行三个以上同一字符 | 同（但本工具**不把** `xxxx`、`。。。` 这类占位符当横线） |
-| 连续空行 | 与一个空行等价，不产生额外空白（要留白用 `@@ blank{n}`） | 多数实现同样折叠，但无法精确控高 |
+| 写法 | 本工具行为 | 标准社区惯例 | EN |
+| --- | --- | --- | --- |
+| `+` 无序列表 | 渲染**实心圆点** | 与 `-` 无区别 | Solid bullet |
+| `-` 无序列表 | 渲染**空心圆圈** | 与 `+` 无区别 | Hollow bullet |
+| 无序标记与缩进的关系 | 样式跟标记符走，缩进只决定嵌套层级 | 空心圈通常是嵌套二级的默认外观 | Marker picks the shape |
+| 缩进嵌套子项 | **兼容语法**：仅承接外部 Markdown 粘贴，本工具层级表达的标准写法是 `<<<` 包围块 | 嵌套子列表是标准层级写法 | Paste compatibility only |
+| `*` 星号 | 只作行内斜体 / 加粗，**不作列表标记**（行首 `* 内容` 按普通段落） | `* 内容` 是合法无序列表 | Inline emphasis only |
+| 有序列表编号 | **编号接力**：显示编号 = 渲染器按区域顺序生成，输入数字只是标记（写 `5.` 也按顺序显示）；只有空行会结束列表并重新从 1 编号 | 显示编号 = `<ol start>` + 逐项递增 | Sequential; a blank line restarts |
+| 块级语法落位 | **必须独占一行**即可（紧贴上一段/列表项都生效），不要求前后空行 | 多数实现要求块级语法前后空行 | Alone on its own line |
+| 分隔线判据 | 只认 `-` `*` `_`：整行三个以上同一字符 | 同（但本工具**不把** `xxxx`、`。。。` 这类占位符当横线） | `-` `*` `_`, three or more |
+| 连续空行 | 与一个空行等价，不产生额外空白（要留白用 `@@ blank{n}`） | 多数实现同样折叠，但无法精确控高 | One blank line; use `@@ blank{n}` |
 
 ### （二）本工具特有的写法
 
-| 写法 | 作用 | 详见 |
-| --- | --- | --- |
-| `![说明](图片路径){30}` | 图片宽度 = 版面宽度的 30%、等比缩放（基准是版面不是原图，不改原图文件）；写成列表项内独占一行时基准是该**项内容宽** | 「图片 · 图片宽度参数」 |
-| `![说明](图片路径){30c}` | 宽度 + 单图对齐（c 居中 / l 左 / r 右，覆盖排版面板图片全局档；`{c}` 纯对齐也合法） | 「图片 · 宽度参数与对齐」 |
-| ` ```mermaid {30} ` 等图表围栏带 `{N}` | 图表宽度 = 版面宽度的 N%，规矩与图片 `{N}` 完全一致（空格可省、钳制 100、非法字面保留；对齐后缀同图） | 「图表作图」 |
-| ` ```mermaid "图题"{40l:c t} ` | 图表围栏带图题：`"…"` 题注 + `{图参:题参}` 同图片一套；无 `"题注"` 的围栏行为不变 | 「图片 · 图题」 |
-| ` ```mermaid ` / ` ```dot ` / ` ```wavedrom ` / ` ```vega ` | 四种本地图表引擎围栏，离线渲染 | 「图表作图」 |
-| `@@ begin fill {50\|50}` … `@@ end fill` | 图片/图表/文字分栏并排（2~4 栏、比例为版面宽度百分比、相加须 =100；**参数可省略 = 等分**；栏内 `{N}` 与图题宽度位失效、栏内图一律撑满栏；紧贴列表不继承列表缩进；docx 以无边框表格渲染） | 「图片 · 分栏」 |
-| `@@ begin full{t\|m\|b}` … `@@ end full` | 独占一页：分页导出时前后强制断页、块撑满版心，`t/m/b` = 居上/居中/居下（缺省 m）；预览与 `.html` 无页概念，按普通块渲染 | 「独占一页与硬控空白」 |
-| `@@ blank{n}` | 硬控段间空白：n = 正文行数（可小数，上限 50），与段间距**不叠加**、压过排版面板的全局段间距；必须独占一行 | 「独占一页与硬控空白」 |
-| `![说明](路径 "图题"){50l:c t s0.3}` | 图题：题注写 `()` 内末尾 `"…"`，图片须独占一段；`:` 前图参、后题参（l/c/r 对齐、t/b 上/下、w/n 裁剪/换行、s<n> 间距 = n×题注字号；图默认 b、间距默认 s0.3） | 「图片 · 图题」 |
-| `@@ caption{c t s0.3} 表题` | 表题：紧贴表格上一行；参数与图题同一套（表默认 t、间距默认 s0.3；`{}` 可省略）；后面不是表格则整行按普通文本露出 | 「表格」 |
-| `@@ MDE_{键 == 值}` / `@@ MDE__{…}` | low runner 数据点（显性显示值 / 隐性不渲染；`==` 剥离进 kv，原文进 raw；带别名 `@@ MDE_甲{…}` 只喂 `is 甲` 执行点） | 「low runner」 |
-| `@@ MDE import 名 [is 别名]` / `@@ MDE from 文件 import 函数 [is 别名]` | low runner 执行点：按别名吃对应数据池（无 is = 公共池），调 Python run（便携解释器）替换执行点 | 「low runner」 |
-| `- [x]` / `- [ ]` | 任务列表（可勾选样式的待办项） | 「列表与任务」 |
-| `~~文字~~` | 删除线 | 「基础语法」 |
-| `^{内容}` / `_{内容}` | 上标 / 下标（角标）：正文直写、不用 `$`；须紧跟花括号，不跨行、不嵌套 | 「基础语法 · 上下标」 |
-| `@@ color x{内容}` | 行内文字着色；x = 简写字母（`r g b y o p c m k w a`）或 3/6/8 位 HEX（不带 `#`，8 位末两位是透明度） | 「基础语法 · 文字颜色」 |
-| `@@ begin color x` … `@@ end color` | 块级着色，块内可再用行内写法局部覆盖（花括号写法 `@@ begin color {x}` 等价） | 「基础语法 · 文字颜色」 |
-| `$...$` / `$$...$$` | 行内 / 块级 LaTeX 公式 | 「数学公式」 |
-| `<<< ... <<<` | 缩进包围块：块内容以上一段的缩进位置为起点整体右移；紧邻连续块逐级递进，空行/其他块打断 | 「缩进包围块」 |
+| 写法 | 作用 | 详见 | EN |
+| --- | --- | --- | --- |
+| `![说明](图片路径){30}` | 图片宽度 = 版面宽度的 30%、等比缩放（基准是版面不是原图，不改原图文件）；写成列表项内独占一行时基准是该**项内容宽** | 「图片 · 图片宽度参数」 | Width = N% of the text block |
+| `![说明](图片路径){30c}` | 宽度 + 单图对齐（c 居中 / l 左 / r 右，覆盖排版面板图片全局档；`{c}` 纯对齐也合法） | 「图片 · 宽度参数与对齐」 | Add c/l/r to align |
+| ` ```mermaid {30} ` 等图表围栏带 `{N}` | 图表宽度 = 版面宽度的 N%，规矩与图片 `{N}` 完全一致（空格可省、钳制 100、非法字面保留；对齐后缀同图） | 「图表作图」 | Same rule for diagram fences |
+| ` ```mermaid "图题"{40l:c t} ` | 图表围栏带图题：`"…"` 题注 + `{图参:题参}` 同图片一套；无 `"题注"` 的围栏行为不变 | 「图片 · 图题」 | Caption in quotes |
+| ` ```mermaid ` / ` ```dot ` / ` ```wavedrom ` / ` ```vega ` | 四种本地图表引擎围栏，离线渲染 | 「图表作图」 | Mermaid, dot, wavedrom, vega |
+| `@@ begin fill {50\|50}` … `@@ end fill` | 图片/图表/文字分栏并排（2~4 栏、比例为版面宽度百分比、相加须 =100；**参数可省略 = 等分**；栏内 `{N}` 与图题宽度位失效、栏内图一律撑满栏；紧贴列表不继承列表缩进；docx 以无边框表格渲染） | 「图片 · 分栏」 | 2-4 columns side by side |
+| `@@ begin full{t\|m\|b}` … `@@ end full` | 独占一页：分页导出时前后强制断页、块撑满版心，`t/m/b` = 居上/居中/居下（缺省 m）；预览与 `.html` 无页概念，按普通块渲染 | 「独占一页与硬控空白」 | Own page on print |
+| `@@ blank{n}` | 硬控段间空白：n = 正文行数（可小数，上限 50），与段间距**不叠加**、压过排版面板的全局段间距；必须独占一行 | 「独占一页与硬控空白」 | Exact vertical space |
+| `![说明](路径 "图题"){50l:c t s0.3}` | 图题：题注写 `()` 内末尾 `"…"`，图片须独占一段；`:` 前图参、后题参（l/c/r 对齐、t/b 上/下、w/n 裁剪/换行、s<n> 间距 = n×题注字号；图默认 b、间距默认 s0.3） | 「图片 · 图题」 | Figure caption with options |
+| `@@ caption{c t s0.3} 表题` | 表题：紧贴表格上一行；参数与图题同一套（表默认 t、间距默认 s0.3；`{}` 可省略）；后面不是表格则整行按普通文本露出 | 「表格」 | Table caption line above |
+| `@@ MDE_{键 == 值}` / `@@ MDE__{…}` | low runner 数据点（显性显示值 / 隐性不渲染；`==` 剥离进 kv，原文进 raw；带别名 `@@ MDE_甲{…}` 只喂 `is 甲` 执行点） | 「low runner」 | Python data point |
+| `@@ MDE import 名 [is 别名]` / `@@ MDE from 文件 import 函数 [is 别名]` | low runner 执行点：按别名吃对应数据池（无 is = 公共池），调 Python run（便携解释器）替换执行点 | 「low runner」 | Python exec point |
+| `- [x]` / `- [ ]` | 任务列表（可勾选样式的待办项） | 「列表与任务」 | Task list |
+| `~~文字~~` | 删除线 | 「基础语法」 | Strikethrough |
+| `^{内容}` / `_{内容}` | 上标 / 下标（角标）：正文直写、不用 `$`；须紧跟花括号，不跨行、不嵌套 | 「基础语法 · 上下标」 | Super / subscript |
+| `@@ color x{内容}` | 行内文字着色；x = 简写字母（`r g b y o p c m k w a`）或 3/6/8 位 HEX（不带 `#`，8 位末两位是透明度） | 「基础语法 · 文字颜色」 | Inline text colour |
+| `@@ begin color x` … `@@ end color` | 块级着色，块内可再用行内写法局部覆盖（花括号写法 `@@ begin color {x}` 等价） | 「基础语法 · 文字颜色」 | Block colour |
+| `$...$` / `$$...$$` | 行内 / 块级 LaTeX 公式 | 「数学公式」 | Inline / block LaTeX |
+| `<<< ... <<<` | 缩进包围块：块内容以上一段的缩进位置为起点整体右移；紧邻连续块逐级递进，空行/其他块打断 | 「缩进包围块」 | Indent block |
 
 ### （三）约定
 

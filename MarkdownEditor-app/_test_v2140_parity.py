@@ -129,7 +129,8 @@ def snapshot(doc):
             pg = b.new_page()
             errs = []
             pg.on("pageerror", lambda e: errs.append(str(e)))
-            pg.goto("http://127.0.0.1:%d/?file=" % PORT)
+            # 不带 ?file=（空参数会让文档加载分支静默失败，编辑区与预览都为空）
+            pg.goto("http://127.0.0.1:%d/" % PORT)
             pg.wait_for_timeout(900)
             pg.evaluate(SET_TS)
             pg.wait_for_timeout(500)

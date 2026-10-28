@@ -64,7 +64,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 105  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 106  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 # MSIX 商城版判定（微软商店政策 11.16 的"报告 AI 生成内容"入口用）：
 # 商城包与侧载包恒落在 WindowsApps 之下，Release 安装包/便携形态不会。
@@ -3163,6 +3163,9 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
         icb_w = 174.0
     pn = page_cfg.get("pn", {}) or {}
     toc_cfg = page_cfg.get("toc", {}) or {}
+    # v2.15.0：界面语言决定产物里的固定文案（目录标题）；正文与用户内容不受影响
+    lang = page_cfg.get("lang") or "zh"
+    toc_title = "Contents" if lang == "en" else "目 录"
 
     # @page：纸张 + 边距 + 页码 margin box（占位空白，正文文本由填充脚本写入；
     # 页码形态照抄书册规范 STRUCTURE_GUIDE 6.4：默认外侧奇右偶左、纯数字、9pt 灰）
@@ -3207,7 +3210,7 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
             for i, (lvl, txt) in enumerate(heads, 1))
         solo = "break-before:page;break-after:page;" if toc_cfg.get("solo", True) else "break-after:page;"
         toc_html = ('<div class="md-toc-wrap" style="%s"><nav class="md-toc">'
-                    '<div class="md-toc-title">目 录</div>%s</nav></div>') % (solo, items)
+                    '<div class="md-toc-title">%s</div>%s</nav></div>') % (solo, toc_title, items)
         if toc_cfg.get("pos", "top") == "afterh1":
             body = re.sub(r"(<h1[\s\S]*?</h1>)", lambda m: m.group(1) + toc_html, body, count=1)
         else:
