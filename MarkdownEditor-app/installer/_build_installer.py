@@ -41,6 +41,7 @@ DIST_RUNS = sorted(f for f in os.listdir(_RUNS_SRC)
                    if f.endswith(".py") and os.path.isfile(os.path.join(_RUNS_SRC, f)))
 if not DIST_RUNS:
     raise SystemExit("FAIL no run library files found in %s" % _RUNS_SRC)
+_MAIL_SEED = "_report_mail.txt"   # 举报收件邮箱种子（不入库，随包分发）
 DIST_FILES = ["md_launch.pyw", "_md_run.py", "md_server.py", "markdown-editor.html",
               "md-editor.ico", "uninstall-md.ico", "llm_client.py", "web_search.py",
               "rag_client.py", "_smd.py", "md_assets.py", "_splash.py",
@@ -125,6 +126,14 @@ def make_staging(ver):
         shutil.copytree(os.path.join(SRC, "docs", d), os.path.join(docs, d), dirs_exist_ok=True)
     for f in DIST_FILES:
         shutil.copy2(os.path.join(SRC, f), os.path.join(STAGING, f))
+    # 举报收件邮箱种子：不入库（.gitignore 排除），只随构建产物分发。
+    # 缺失不影响构建，但商店包会失去「打开邮件客户端」路径、只剩复制。
+    _mail_seed_src = os.path.join(SRC, _MAIL_SEED)
+    if os.path.exists(_mail_seed_src):
+        shutil.copy2(_mail_seed_src, os.path.join(STAGING, _MAIL_SEED))
+        print("mail seed: %s 已打入" % _MAIL_SEED)
+    else:
+        print("mail seed: 缺 %s → 举报入口只保留复制路径" % _MAIL_SEED)
     # 预编译二进制：构建期产出，随包分发（见 make_prebuilt_exes）
     for f in PREBUILT_EXES:
         shutil.copy2(os.path.join(SRC, f), os.path.join(STAGING, f))
@@ -154,6 +163,8 @@ def make_staging(ver):
                 expect.add("docs/" + rel.replace(os.sep, "/"))
     for f in DIST_FILES:
         expect.add(f)
+    if os.path.exists(os.path.join(SRC, _MAIL_SEED)):
+        expect.add(_MAIL_SEED)
     for f in PREBUILT_EXES:
         expect.add(f)
     expect.add("app.manifest")

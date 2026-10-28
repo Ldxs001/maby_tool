@@ -1,6 +1,6 @@
 # MDEditor — 本地 Markdown 编辑器
 
-**当前版本 v2.8.1**（2026-10-25）｜[更新日志](CHANGELOG.md)｜[使用指南](docs/MDEditor%20使用指南.md)
+**当前版本 v2.13.4**（2026-10-28）｜[更新日志](CHANGELOG.md)｜[使用指南](docs/MDEditor%20使用指南.md)
 
 由 AI 辅助生成的单机版 Markdown 编辑器：左侧写作、右侧实时渲染，支持 KaTeX 数学公式、**图表渲染**（Mermaid / Graphviz / WaveDrom / Vega-Lite，全部本地）、本地/网络图片、排版定制（字体/字号/对齐/缩进/表格样式）、**分页导出**（纸张、页边距、页码、自动目录，Ctrl+P 直接出 PDF）、**选区批注**与 **AI 润色改写**（对接本地 LM Studio / Ollama）、以及 **low runner**——在正文里写数据点，用 run 库在子进程里算，结果（文本 / 表格 / 图片）落回正文。除 AI 推理需本地模型服务外，全部功能**离线可用**。
 
@@ -207,10 +207,10 @@ ZIP 格式规范由 PKWARE 公开且免费使用（无专利约束，Deflate 算
 
 | 文档 | 说明 |
 |---|---|
-| [`docs/MDEditor 使用指南.md`](docs/MDEditor%20使用指南.md) | 16 章语法与操作手册：基础语法、列表方言、表格、公式、四种图表、图片、low runner、排版、缩进块、保存导出、滚动联动、批注、AI 润色、语法速查 |
+| [`docs/MDEditor 使用指南.md`](docs/MDEditor%20使用指南.md) | 18 章语法与操作手册：基础语法（含块级语法与换行规则）、列表方言、表格、公式、四种图表、图片、low runner、排版、独占一页与硬控空白、缩进块、保存导出、滚动联动、批注、AI 润色、语法速查 |
 | [`docs/low runner 数据形式规范.md`](docs/low%20runner%20数据形式规范.md) | 六种数据形式、类型契约、fail-closed 清单、全局执行、返回值渲染的设计定稿 |
 | [`docs/MDEditor-2.8 发布说明与 low runner 规范.md`](docs/MDEditor-2.8%20发布说明与%20low%20runner%20规范.md) | v2.8 更新说明 + 输入输出规范（四通道、`vals` 四形状、输出四形状、图片落点与文件名一致性边界） |
-| [`CHANGELOG.md`](CHANGELOG.md) | v1.0.0 至 v2.8.1 逐版现象 / 根因 / 修法 / 验证 |
+| [`CHANGELOG.md`](CHANGELOG.md) | v1.0.0 至 v2.13.4 逐版现象 / 根因 / 修法 / 验证 |
 | [`docs/分发清单.md`](docs/分发清单.md) | 入库 / 入包 / 不入包的分界与理由 |
 
 演示视频（1600×900 / 25fps，实机录屏）：

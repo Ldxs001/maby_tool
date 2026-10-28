@@ -69,11 +69,11 @@ var CASES = [
   ["task 列表", "- [x] done\n- [ ] todo",
    '<ul><li class="task"><input type="checkbox" disabled checked> done</li><li class="task"><input type="checkbox" disabled> todo</li></ul>'],
   ["三标记混切(星号出列)", "1. a\n- b\n2. c\n* d",
-   "<ol><li>a</li></ol><ul><li class=\"u-hollow\">b</li></ul><ol start=\"2\"><li>c</li></ol><p>* d</p>"],
-  ["标题打断重置编号", "1. a\n# T\n2. b",
-   "<ol><li>a</li></ol><h1>T</h1><ol><li>b</li></ol>"],
-  ["列表后段落不吞", "1. a\npara",
-   "<ol><li>a</li></ol><p>para</p>"],
+   "<ol><li>a</li></ol><ul><li class=\"u-hollow\">b</li></ul><ol start=\"2\"><li>c<br>* d</li></ol>"],
+  ["标题打断但编号延续(v2.13)", "1. a\n# T\n2. b",
+   "<ol><li>a</li></ol><h1>T</h1><ol start=\"2\"><li>b</li></ol>"],
+  ["列表后段落吞并为延续(v2.13)", "1. a\npara",
+   "<ol><li>a<br>para</li></ol>"],
 ];
 var fails = 0;
 for (var i = 0; i < CASES.length; i++) {

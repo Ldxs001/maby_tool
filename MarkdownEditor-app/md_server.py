@@ -64,7 +64,34 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 99  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 104  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+
+# MSIX 商城版判定（微软商店政策 11.16 的"报告 AI 生成内容"入口用）：
+# 商城包与侧载包恒落在 WindowsApps 之下，Release 安装包/便携形态不会。
+# 判定结果只用于给 <body> 注 data-msix 属性（前端据此渲染举报按钮），
+# 不改变任何其他行为。
+_IS_MSIX = ('windowsapps' in HERE.lower()
+            or 'windowsapps' in (sys.executable or '').lower())
+
+# 举报收件邮箱（微软商店政策 11.16「报告 AI 生成内容」入口用）：
+# 真地址只存在于构建产物——安装目录下的 _report_mail.txt（不入库），
+# 源码仓库恒不含明文。缺文件 / 格式不合法 → 空串，前端隐藏「打开邮件
+# 客户端」按钮、只留复制路径，不报错、不降级其它功能。
+def _read_report_mail():
+    p = os.path.join(HERE, "_report_mail.txt")
+    try:
+        with io.open(p, "r", encoding="utf-8") as f:
+            for ln in f:
+                v = ln.strip()
+                if v:
+                    if "@" in v and " " not in v and len(v) <= 120:
+                        return v
+                    return ""
+    except Exception:
+        pass
+    return ""
+
+_REPORT_MAIL = _read_report_mail()
 
 # ---------- 可写 runtime 目录 ----------
 # 普通安装（目录可写）：runtime 留在安装目录，历史行为零变化。
@@ -1109,7 +1136,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(500, "read editor failed: %s" % e)
                 return
             build = hashlib.md5(html.encode("utf-8")).hexdigest()[:10]
-            html = html.replace("<body>", '<body data-build="%s">' % build, 1)
+            _attrs = ' data-msix="1"' if _IS_MSIX else ''
+            if _REPORT_MAIL:
+                _attrs += ' data-report-mail="%s"' % _REPORT_MAIL.replace('"', '')
+            html = html.replace("<body>", '<body data-build="%s"%s>'
+                                % (build, _attrs), 1)
             self._send(200, html, "text/html; charset=utf-8",
                        {"Cache-Control": "no-store"})
             return
@@ -2647,6 +2678,14 @@ FIGCAP_BASE_CSS = """
 .markdown-body .mde-tblwrap[data-tab-side="b"]>.mde-tabcap{margin-top:calc(1em * var(--tabgap,.3));}
 .markdown-body .mde-cnum{margin-right:.35em;}
 .markdown-body .fill-col figure.mde-fig{width:auto !important;margin:0;}
+/* v2.13.2 @@ blank{n} 硬控段间空白：高度由元素内联 style 给（calc(n * 行高)），
+   这里只锁「不叠加」——相邻块 margin 归零，实际空白恰为 n 行，并压过排版
+   面板的全局段间距。--mde-lh 是行高的单一来源，与编辑器预览同值。
+   一份规则两路共用：分页导出（拼在 PAGED_BASE_CSS 之后）与 HTML 导出（__FIGCAP__）。 */
+.markdown-body{--mde-lh:1.7;}
+.markdown-body .mde-blank{margin:0 !important;padding:0;border:0;overflow:hidden;break-inside:avoid;}
+.markdown-body *:has(+ .mde-blank){margin-bottom:0 !important;}
+.markdown-body .mde-blank + *{margin-top:0 !important;}
 """
 
 PAGED_BASE_CSS = """
@@ -2689,6 +2728,12 @@ PAGED_BASE_CSS = """
 .markdown-body .diagram[data-diagram-align="left"]{margin-right:auto;}
 .markdown-body .fill-row{display:flex;gap:1em;margin:.6em 0;break-inside:avoid;}
 .markdown-body .fill-col{min-width:0;}
+/* v2.13 @@ begin full 独占一页块：前后强制分页 + 撑满页心（__PAGECH__ =
+   纸高-上下边距-1mm 舍入余量），flex 纵向按 data-full-pos 垂直定位；
+   左右不定位——块内元素按排版面板既有对齐档走 */
+.markdown-body .full-page{break-before:page;break-after:page;height:__PAGECH__mm;display:flex;flex-direction:column;justify-content:center;width:100%;}
+.markdown-body .full-page[data-full-pos="t"]{justify-content:flex-start;}
+.markdown-body .full-page[data-full-pos="b"]{justify-content:flex-end;}
 .markdown-body .fill-col img{width:100% !important;height:auto;}
 .markdown-body .fill-col table img{width:auto !important;max-width:100% !important;height:auto;}
 .markdown-body .fill-col .diagram{width:100% !important;}
@@ -2701,13 +2746,59 @@ PAGED_BASE_CSS = """
 
 # ---------- 超高长图切片（导出渲染期产物，源资产 SSOT 不动） ----------
 # 规则：渲染高 ≤ 版心的图整图原子一页；高 > 版心的长截图按小条带竖切
+#      渲染高按【实际落地宽度】折算——分栏内的图以栏宽为基准，不按满版心。
 # 续排（像表格跨页一样流入剩余空间），条带渲染高 = 版心高/3（3 条正好满页）。
 # 切点吸附静默行（截图里的空白行/段间距），不切断文字行、不重叠不遗漏。
 # 切片落 RUNTIME_DIR/_slice/<sha1>/（可写 runtime；商城包只读安装位也能写），同字节图幂等复用；PIL 缺失或读图失败原样保留（fail-closed）。
 _SLICE_SNAP_MM = 8.0  # 切点吸附搜索窗口（半宽）
 
 
+# ---------- 分栏上下文宽度（长图切片判定用） ----------
+# 分栏内的图片宽度由 CSS（.fill-col img{width:100%}）决定，img 标签自身没有
+# width:N% 样式；切片判定若按满版心宽计算，会把栏内小图误判成超高长图切片。
+# 这里用 div 深度匹配取每个 fill-col 的实际栏宽比例，供 _slice_tall_images 乘算。
+_TAG_DIV_RE = re.compile(r"<(/?)div\b[^>]*>", re.I)
+_FILL_ROW_OPEN_RE = re.compile(r'<div[^>]*class="fill-row"[^>]*>', re.I)
+_FILL_COL_OPEN_RE = re.compile(r'<div[^>]*class="fill-col"[^>]*>', re.I)
+_COL_WIDTH_RE = re.compile(r"width:\s*([\d.]+)\s*%")
+
+
+def _div_end(html, start):
+    """返回从 start 处 <div 起，配对 </div> 之后的偏移；未闭合返回 len(html)。"""
+    depth = 0
+    for m in _TAG_DIV_RE.finditer(html, start):
+        if m.group(1):
+            depth -= 1
+            if depth == 0:
+                return m.end()
+        else:
+            depth += 1
+    return len(html)
+
+
+def _fill_col_image_widths(html):
+    """{img 起始偏移: 所在 fill-col 的栏宽比例}；不在分栏内的图不出现（默认 1.0）。"""
+    out = {}
+    for rm in _FILL_ROW_OPEN_RE.finditer(html):
+        row_end = _div_end(html, rm.start())
+        for cm in _FILL_COL_OPEN_RE.finditer(html, rm.end(), row_end):
+            col_end = _div_end(html, cm.start())
+            pct = 1.0
+            wm = _COL_WIDTH_RE.search(cm.group(0))
+            if wm:
+                try:
+                    pct = min(max(float(wm.group(1)), 0.0), 100.0) / 100.0
+                except ValueError:
+                    pct = 1.0
+                if pct <= 0.001:
+                    pct = 1.0
+            seg_start = cm.end()
+            for im in re.finditer(r"<img\b", html[seg_start:col_end]):
+                out[seg_start + im.start()] = pct
+    return out
+
 def _slice_tall_images(body_html, icb_w_mm, img_maxh_mm):
+    col_w_by_pos = _fill_col_image_widths(body_html)
     img_re = re.compile(r'<img[^>]*?src="(/img\?path=[^"]+)"[^>]*?>')
 
     def _quiet_cuts(bright, h, nominal, win):
@@ -2748,6 +2839,8 @@ def _slice_tall_images(body_html, icb_w_mm, img_maxh_mm):
                 pct = 1.0
             if pct <= 0.001:
                 pct = 1.0  # 宽度为 0 的样式不当真，回满宽
+        # 分栏内的图：宽度还受栏宽约束，判定基准按栏宽折算
+        pct *= col_w_by_pos.get(m.start(), 1.0)
         eff_w_mm = icb_w_mm * pct
         # 调整后渲染高不超版心 → 整图原子，不切
         if eff_w_mm * h / w <= img_maxh_mm:
@@ -2931,6 +3024,9 @@ def build_standalone_html(md_path, body_html, ts_css, page_cfg=None):
         '.diagram[data-diagram-align="right"]{margin-left:auto;}'
         '.diagram[data-diagram-align="left"]{margin-right:auto;}'
         '.fill-row{display:flex;gap:1em;margin:.6em 0;}'
+        '.full-page{break-before:page;break-after:page;min-height:250mm;display:flex;flex-direction:column;justify-content:center;}'
+        '.full-page[data-full-pos="t"]{justify-content:flex-start;}'
+        '.full-page[data-full-pos="b"]{justify-content:flex-end;}'
         '.fill-col{min-width:0;}'
         '.fill-col img{width:100% !important;height:auto;}'
         '.fill-col table img{width:auto !important;max-width:100% !important;height:auto;}'
@@ -3052,6 +3148,12 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
         img_maxh = max(20.0, float(paper_h) - float(mt) - float(mb) - 2.0)
     except (TypeError, ValueError):
         img_maxh = 245.0
+    # v2.13 @@ begin full 页心高：纸高-上下边距-1mm 舍入余量（Paged.js
+    # 元素高度恰好等于版心时会因舍入溢出推页；1mm 视觉不可察）。
+    try:
+        page_ch = max(50.0, float(paper_h) - float(mt) - float(mb) - 1.0)
+    except (TypeError, ValueError):
+        page_ch = 246.0
     # 版心宽（切片条带的渲染宽度基准）
     try:
         paper_w = (float(pw) if (paper == "custom" and pw)
@@ -3129,7 +3231,8 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
 
     # 基础正文样式（表格边框/图片版面/断行纪律）——此前缺失是表格边框
     # 在分页导出中消失的根因；置于 ts_css 之前，排版设置的 !important 仍可覆盖
-    base_css = PAGED_BASE_CSS.replace("__IMGMAXH__", ("%.2f" % img_maxh)) + FIGCAP_BASE_CSS
+    base_css = (PAGED_BASE_CSS.replace("__IMGMAXH__", ("%.2f" % img_maxh))
+                .replace("__PAGECH__", ("%.2f" % page_ch))) + FIGCAP_BASE_CSS
 
     # 资源内嵌（全部本地，离线可用）
     katex_css = ""

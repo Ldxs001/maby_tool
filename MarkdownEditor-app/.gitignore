@@ -42,3 +42,6 @@ _tmp_*
 /_video28/_tts.log
 /installer/_msix_identity.json
 /_setup_msix_stage/
+
+# 举报收件邮箱种子（本源不含明文；仅随构建产物分发，见 md_server.py）
+/_report_mail.txt

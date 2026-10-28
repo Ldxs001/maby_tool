@@ -314,6 +314,29 @@ function _asFigure(h){
     +'" data-fig-w="'+(w?w[1]:'auto')
     +'" data-fig-mode="'+(md?md[1]:'')+'" style="'+sty+'">'+h+'</figure>';
 }
+/* v2.13.2 统一块级规则：「块级语法必须独占一行」（前面可以有缩进/列表内缩进，
+   但整行除该语法外不得夹带别的文字）→ 按块渲染，而不是并进段落/列表项的
+   行内文本流。反过来，想让它退化成行内文字，多打一个空行即可。
+   这里给两个判据，列表延续行与主循环共用（两条路径必须同一口径，否则
+   「图片在正文里块级、在列表里行内」这种割裂会重现）：
+   _isBlockImgLine  整行只有一个图片语法（含可选 "题注" 与 {参数组}）
+   _isHrLine        分隔线：去空格后 ≥3 个同一字符，且该字符限 - * _
+                    （CommonMark 口径。历史实现不限制字符集，任何同字符
+                     ≥3 的行都变横线——占位符 xxxx、省略号。。。都中招；
+                     v2.13.2 收紧，附图/列表共用同一判据） */
+function _isBlockImgLine(line){
+  var s=String(line).replace(/^[ ]+/,'').replace(/[ ]+$/,'');
+  if(s.charAt(0)!=='!')return false;
+  return /^!\[[^\]]*\]\([^)]+?(?:\s+"[^"]*")?\)(?:\s*\{[^{}\n]*\})?$/.test(s);
+}
+function _isHrLine(line){
+  var s=String(line).replace(/[ ]/g,'');
+  if(s.length<3)return false;
+  var c0=s.charAt(0);
+  if(c0!=='-'&&c0!=='*'&&c0!=='_')return false;
+  for(var z=0;z<s.length;z++){if(s.charAt(z)!==c0)return false;}
+  return true;
+}
 /* v2.10.0 表格题注包裹：题注与表格装进同一个 div，先后由 t/b 定。
    这里按 side 直接拼 DOM 顺序（不用 flex —— 表格变成 flex item 会被
    压宽），docx 侧再按 data-tab-side 独立决定段落先后，两边一致。 */
@@ -493,16 +516,42 @@ function parseInline(text,noMde){
  function parseList(lines,start,indent,seq){
   /* seq：本编号区域内已出现的有序项数（跨列表接力，由外层块循环维护）。
      显示编号完全由渲染器决定——区域内第 N 个有序项显示 N，输入的
-     数字仅是语法标记不参与显示；无序项不占编号；空行/其他块打断
-     区域后由外层清零重计。嵌套子列表是独立编号区域（seq 从 0 起）。 */
+     数字仅是语法标记不参与显示；无序项不占编号。
+     v2.13 断续规则：编号区域只被空行打断——无空行一律延续，不管什么
+     内容：普通文本行并入当前项（<br> 连接，与段落渲染同法）；标题/
+     围栏/表格/引用/<<<//@@ 块等硬块物理打断列表但不清编号（外层只在
+     空行分支清零，编号跨块延续）。嵌套子列表是独立编号区域（seq 从
+     0 起）。 */
   var items=[];
   var i=start;
   var cur=null;
   var listOrdered=null;
   while(i<lines.length){
     var line=lines[i];
+    if(/^[ ]*$/.test(line)){break;}
     var m=line.match(/^([ ]*)([-+]|[0-9]+\.)([ ]+)(.*)$/);
-    if(!m){break;}
+    if(!m){
+      /* v2.13 延续行：非标记非空行并入当前项；硬块起步行除外（物理
+         打断，编号区域由外层延续）；无当前项不吞。
+         v2.13.2 整行块级：图片独占一行 / 分隔线 → 不再并进 <br> 文本流，
+         作为块直接挂在当前项内（图片走 _asFigure 重建 figure，{N c/l/r}
+         与题注参数在列表内同样生效——此前缩进/列表内一律退化成行内图，
+         宽度位丢失，这是「图片紧贴列表时 {} 失效」的根因）。 */
+      if(cur===null){break;}
+      /* 硬块白名单先判：<<< 去空格后是三个同字符，会被 _isHrLine 当分隔线，
+         顺序颠倒就会把包围块吞成 li 内的两条横线（实测过） */
+      if(/^```/.test(line)||/^(#{1,6})[ ]+/.test(line)||/^[ ]*>/.test(line)||
+         /^[ ]{0,3}<<</.test(line)||/^[ ]{0,3}@@\s*(begin|end|blank|caption)\b/.test(line)||
+         /^@@ MDE(_{1,2})?[\w\u4e00-\u9fff.-]*(:[23])?(\([^()]*\))?\{/.test(line)||
+         (line.indexOf('|')>=0&&i+1<lines.length&&/^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1])&&lines[i+1].indexOf('-')>=0)){
+        break;
+      }
+      if(_isBlockImgLine(line)){cur.parts.push({b:'fig',v:line});i++;continue;}
+      if(_isHrLine(line)){cur.parts.push({b:'hr',v:line});i++;continue;}
+      cur.parts.push({b:'t',v:line});
+      i++;
+      continue;
+    }
     var li=m[1].length;
     if(li<indent){break;}
     if(li>indent){
@@ -521,7 +570,7 @@ function parseInline(text,noMde){
     } else if(ordered!==listOrdered){
       break;
     }
-    cur={raw:m[4],ordered:ordered,mark:m[2],children:''};
+    cur={raw:m[4],ordered:ordered,mark:m[2],children:'',parts:[]};
     items.push(cur);
     i++;
   }
@@ -537,14 +586,32 @@ function parseInline(text,noMde){
   }
   for(var k=0;k<items.length;k++){
     var it=items[k];
+    /* v2.13.2 项内续接：parts 按源序混排「文本续行 / 整行图片 / 分隔线」。
+       文本行之间用 <br> 连接（单回车=换行）；块级元素前不加 <br>（块自带
+       间距，多一个 <br> 就是凭空多一行）；块之后的文本同样不加。 */
+    var tail='',prevBlk=false;
+    for(var pz=0;pz<it.parts.length;pz++){
+      var pt=it.parts[pz];
+      if(pt.b==='fig'){
+        var _fh=_asFigure(parseInline(pt.v));
+        tail+=(_fh||('<p>'+parseInline(pt.v)+'</p>'));
+        prevBlk=true;
+      }else if(pt.b==='hr'){
+        tail+='<hr>';prevBlk=true;
+      }else{
+        tail+=(prevBlk?'':'<br>')+parseInline(pt.v);
+        prevBlk=false;
+      }
+    }
+    var contHtml=tail;
     var tm=it.raw.match(/^\[([ xX])\][ ]+(.*)$/);
     if(tm){
       var checked=tm[1].toLowerCase()==='x';
-      html+='<li class="task"><input type="checkbox" disabled'+(checked?' checked':'')+'> '+parseInline(tm[2])+it.children+'</li>';
+      html+='<li class="task"><input type="checkbox" disabled'+(checked?' checked':'')+'> '+parseInline(tm[2])+contHtml+it.children+'</li>';
     } else {
       /* 仅无序项带 marker 样式类（+ 实心 / - 空心）；有序项无 class */
       var icls=it.ordered?'':(it.mark==='-'?' class="u-hollow"':' class="u-solid"');
-      html+='<li'+icls+'>'+parseInline(it.raw)+it.children+'</li>';
+      html+='<li'+icls+'>'+parseInline(it.raw)+contHtml+it.children+'</li>';
     }
   }
   html+=listOrdered?'</ol>':'</ul>';
@@ -621,7 +688,7 @@ function parseMarkdown(src, opts){
   var lines=src.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
   var html='';
   var i=0;
-  var olSeq=0;   /* 编号区域接力计数：空行/其他块打断即重置（见 parseList 注释） */
+  var olSeq=0;   /* 编号区域接力计数：v2.13 起只被空行打断（见 parseList 注释） */
   /* <<< 缩进包围块 · 当前位置状态机（v2.1；档位 v2.2.1 起为 px，正文字号基准）：
      只流容器级缩进（px）——空行/标题/围栏/hr/表格清零；顶层段落=正文首行缩进档、
      列表=列表档、引用=引用档；<<< 冻结当前值为块内左边界（块内封闭不更新），
@@ -642,6 +709,25 @@ function parseMarkdown(src, opts){
         pendCap={tok:_capM[1]||'',txt:(_capM[2]||'').trim(),at:i+1};
         i++;continue;
       }
+    }
+    /* v2.13.2 @@ blank{n}：硬控段间空白。n = 正文行数（1 = 一个正文行高，
+       可小数，0.1~50 钳制），输出一个只吃高度的空 div。
+       两条规矩：
+       ① 必须独占一行——紧贴文字时正则不匹配，整行按普通文本露出
+          （fail-closed：不猜意图、不吞字）；
+       ② 与前后块的段间距**不叠加**——相邻 margin 由 CSS 清零
+          （.mde-blank 规则），实际空白恰为 n 行，也压过排版面板的全局
+          段间距。高度写内联 style（克隆到分页导出/HTML 导出时随元素带走），
+          calc 里乘 --mde-lh 保证行高口径与正文一致。 */
+    var _bm=/^[ ]{0,3}@@\s*blank[ \t]*\{([\d.]+)\}[ \t]*$/.exec(line);
+    if(_bm){
+      var _bn=parseFloat(_bm[1]);
+      if(!isNaN(_bn)&&_bn>0){
+        _bn=Math.min(_bn,50);
+        html+='<div class="mde-blank" data-blank="'+_bn+'" style="height:calc('+_bn+' * var(--mde-lh,1.7) * 1em)"></div>';
+        i++;curInd=0;continue;
+      }
+      /* n=0 / 非正数：不生效，落到普通段落按原文露出 */
     }
     if(/^```/.test(line)){
       var rawLang=line.slice(3).trim();
@@ -685,7 +771,7 @@ function parseMarkdown(src, opts){
       }else{
         html+='<pre><code'+(rawLang?' class="lang-'+rawLang+'"':'')+'>'+escapeHtml(code).replace(/</g,'&lt;')+'</code></pre>';
       }
-      olSeq=0;curInd=0;
+      curInd=0;
       continue;
     }
     if(/^[ ]*$/.test(line)){i++;olSeq=0;curInd=0;continue;}
@@ -693,7 +779,7 @@ function parseMarkdown(src, opts){
     if(hm){
       var lvl=hm[1].length;
       html+='<h'+lvl+'>'+parseInline(hm[2].trim())+'</h'+lvl+'>';
-      i++;olSeq=0;curInd=0;continue;
+      i++;curInd=0;continue;
     }
     /* <<< 缩进包围块（开闭同符号，状态翻转；不支持嵌套）。
        必须在 hr 判定之前：<<< 去空格后为三连字符，会被 hr 规则吃掉。
@@ -708,7 +794,7 @@ function parseMarkdown(src, opts){
       }
       if(!closed){
         html+='<p>'+parseInline(line)+'</p>';
-        i++;olSeq=0;curInd=0;continue;
+        i++;curInd=0;continue;
       }
       var hasList=false,hasQuote=false;
       for(var q=0;q<inner.length;q++){
@@ -723,37 +809,30 @@ function parseMarkdown(src, opts){
       var left=curInd;
       html+='<div class="ind-blk" style="margin-left:'+left+'px">'+parseMarkdown(inner.join('\n'))+'</div>';
       curInd=left+Math.max(hasList?IPX.li:0,hasQuote?IPX.quote:0);
-      i=j;olSeq=0;
+      i=j;
       continue;
     }
-    /* @@ fill 图片分栏（v2.3）：@@ begin fill {a|b[|c[|d]]} … @@ end fill。
-       比例为版面宽度百分比（50|50 各半，与图 {50} 同口径），2~4 栏、
-       各值 1-100、和须=100。栏内容按空行分隔（每栏 = 一段：图表围栏块
-       或图片行序列）；段数 ≠ 栏数 fail-closed（标记与内容按普通文本渲染）。
-       栏内 {N} 失效（CSS fill-col 覆盖：width:auto/max-width:100%），
-       宽度全权由栏比例决定；分栏是图片布局语法，进 <<< 继承链（容器级
-       margin-left）。 */
-    var fm=line.match(/^[ ]{0,3}@@\s*begin\s+fill\s*\{([\d|]+)\}\s*$/);
+    /* @@ fill 分栏（v2.3 图片语法，v2.13 泛化为文字/图片任意组合）：
+       @@ begin fill{a|b[|c[|d]]} 或 @@ begin fill（无参 = 栏数等分，2~4 栏）
+       … @@ end fill。带参：比例为版面宽度百分比（50|50 各半，与图 {50}
+       同口径），各值 1-100、和须=100、段数=栏数。空行分栏（连续非空行
+       属同栏）——空行在进入解析器前就被分栏消费，栏内天然无空行，
+       「空行打断」规则在栏内不触发；每栏整段走完整 markdown 渲染
+       （文字/图片/表格/围栏任意组合）。栏内 {N} 失效（CSS fill-col
+       覆盖：width:auto/max-width:100%），图片宽度全权由栏比例决定；
+       分栏进 <<< 继承链（容器级 margin-left）。编号区域不清零（空行
+       才打断，此处空行已被分栏消费）。
+       带参段数≠栏数 / 非法值 / 未闭合 → fail-closed（标记与内容按普通
+       文本渲染）。 */
+    var fm=line.match(/^[ ]{0,3}@@\s*begin\s+fill\s*(?:\{([\d|]+)\})?\s*$/);
     if(fm){
-      var parts=fm[1].split('|');
-      var okFill=parts.length>=2&&parts.length<=4;
-      var ratios=[];
-      var sumR=0;
-      if(okFill){
-        for(var r=0;r<parts.length;r++){
-          var rv=parseInt(parts[r],10);
-          if(isNaN(rv)||rv<1||rv>100){okFill=false;break;}
-          ratios.push(rv);sumR+=rv;
-        }
-        if(sumR!==100)okFill=false;
-      }
       var finner=[],fclosed=false,fj=i+1;
       while(fj<lines.length){
         if(/^[ ]{0,3}@@\s*end\s+fill\s*$/.test(lines[fj])){fclosed=true;fj++;break;}
         finner.push(lines[fj]);fj++;
       }
-      if(okFill&&fclosed){
-        /* 空行分栏：连续非空行属同栏（栏内可放图片行/围栏） */
+      if(fclosed){
+        /* 空行分栏：连续非空行属同栏（栏内可放文字行/图片行/围栏） */
         var cols=[],cur=[];
         for(var c=0;c<finner.length;c++){
           if(/^[ ]*$/.test(finner[c])){
@@ -761,24 +840,50 @@ function parseMarkdown(src, opts){
           }else{cur.push(finner[c]);}
         }
         if(cur.length)cols.push(cur.join('\n'));
-        if(cols.length===ratios.length){
-          var fh='<div class="fill-row" style="margin-left:'+curInd+'px">';
+        var ratios=[],okFill=false;
+        if(fm[1]!==undefined){
+          var parts=fm[1].split('|');
+          okFill=parts.length>=2&&parts.length<=4&&parts.length===cols.length;
+          var sumR=0;
+          if(okFill){
+            for(var r=0;r<parts.length;r++){
+              var rv=parseInt(parts[r],10);
+              if(isNaN(rv)||rv<1||rv>100){okFill=false;break;}
+              ratios.push(rv);sumR+=rv;
+            }
+            if(sumR!==100)okFill=false;
+          }
+        }else{
+          /* v2.13 无参：2~4 栏等分（100 除不尽的余数给末栏） */
+          okFill=cols.length>=2&&cols.length<=4;
+          if(okFill){
+            var base=Math.floor(100/cols.length),rem=100-base*cols.length;
+            for(var r2=0;r2<cols.length;r2++){ratios.push(r2===cols.length-1?base+rem:base);}
+          }
+        }
+        if(okFill){
+          /* v2.13.3 包围块不吃兄弟块缩进：curInd 此时可能是「上一个块」遗留的
+             列表/引用/正文档（列表分支会写 curInd=IPX.li），紧贴列表的
+             @@ begin fill 会因此凭空左缩进一档——实测「只有紧跟列表的那一个
+             缩进，下一个包围就恢复」（因为 fill 结束写了 curInd=0）。
+             fill 是容器级块：外层 <<< 的缩进由 .ind-blk 的 margin 承担，
+             内层 fill 相对容器左边界即 0，故不写 margin-left。 */
+          var fh='<div class="fill-row">';
           for(var ci=0;ci<cols.length;ci++){
             fh+='<div class="fill-col" style="width:'+ratios[ci]+'%">'+parseMarkdown(cols[ci])+'</div>';
           }
           fh+='</div>';
           html+=fh;
-          i=fj;olSeq=0;curInd=0;
+          i=fj;curInd=0;
           continue;
         }
       }
       /* fail-closed：整块（含标记行）按普通文本渲染 */
       if(fclosed){
         html+='<p>'+parseInline(line)+'</p>';
-        i++;
         var ftxt=finner.join('\n');
         if(ftxt.trim()){html+=parseMarkdown(ftxt);}
-        i=fj;olSeq=0;curInd=0;
+        i=fj;curInd=0;
         continue;
       }
     }
@@ -800,18 +905,48 @@ function parseMarkdown(src, opts){
         cinner.push(lines[cj]);cj++;
       }
       if(cval&&cclosed){
-        html+='<div class="mde-color" style="color:'+cval+(curInd?';margin-left:'+curInd+'px':'')+'">'+
+        /* v2.13.3 同 fill：不继承兄弟块缩进（紧贴列表时会被带出一档），
+           容器缩进由外层 .ind-blk 承担 */
+        html+='<div class="mde-color" style="color:'+cval+'">'+
           parseMarkdown(cinner.join('\n'))+'</div>';
-        i=cj;olSeq=0;
+        i=cj;
         continue;
       }
       if(cclosed){
         html+='<p>'+parseInline(line)+'</p>';
         var ctxt=cinner.join('\n');
         if(ctxt.trim()){html+=parseMarkdown(ctxt);}
-        i=cj;olSeq=0;
+        i=cj;
         continue;
       }
+    }
+    /* v2.13 @@ begin full{t|m|b} / @@ begin full（缺省 m）… @@ end full：
+       独占一页块。t=居上 m=居中 b=居下（页内垂直位置，分页导出生效）；
+       左右不参数化——块内元素按排版面板既有对齐档走。内容按完整
+       markdown 渲染（可嵌 fill/图表/表格/列表，空行在其中保留普通
+       打断语义）。预览与 HTML 导出无页概念，按普通块渲染；分页导出
+       由 .full-page CSS 撑满页心并按 data-full-pos 垂直定位。
+       curInd 不清零、不写 margin-left（页级块与缩进链解耦，继承语义
+       与 color 块同口径）；编号区域不清零（空行才打断）。
+       参数非 t/m/b（正则不匹配）或未闭合 → 标记行按原文、内容照常
+       渲染（fail-closed，结束行按文本露出）。 */
+    var um=line.match(/^[ ]{0,3}@@\s*begin\s+full\s*(?:\{([tmb])\})?\s*$/);
+    if(um){
+      var uinner=[],uclosed=false,uj=i+1;
+      while(uj<lines.length){
+        if(/^[ ]{0,3}@@\s*end\s+full\s*$/.test(lines[uj])){uclosed=true;uj++;break;}
+        uinner.push(lines[uj]);uj++;
+      }
+      if(uclosed){
+        html+='<div class="full-page" data-full-pos="'+(um[1]||'m')+'">'+
+          parseMarkdown(uinner.join('\n'))+'</div>';
+        i=uj;
+        continue;
+      }
+      /* 未闭合 fail-closed：标记行按原文，内容照常渲染 */
+      html+='<p>'+parseInline(line)+'</p>';
+      i++;
+      continue;
     }
      /* MDE 跨行数据点（@@ MDE_{ 或 :N(rxc){ 后行内未闭合 → 收集到 }）：
         ① 普通跨行 = 长文本（形式 1，解析含 (( )) 行文/向量等形式）
@@ -866,28 +1001,23 @@ function parseMarkdown(src, opts){
                if(dpost.trim())dout+=parseInline(dpost);
                html+='<p>'+dout+'</p>';
              }
-             i=dj;olSeq=0;curInd=0;
+             i=dj;curInd=0;
              continue;
            }
            /* fail-closed：整块按普通段落（含标记行原文） */
            html+='<p>'+parseInline(dfull.replace(/\n/g,' '))+'</p>';
-           i=dj;olSeq=0;curInd=0;
+           i=dj;curInd=0;
            continue;
          }
        }
      }
-    var stripped=line.replace(/[ ]/g,'');
-    if(stripped.length>=3){
-      var ch0=stripped.charAt(0);
-      var allSame=true;
-      for(var z=0;z<stripped.length;z++){if(stripped.charAt(z)!==ch0){allSame=false;break;}}
-      if(allSame){html+='<hr>';i++;olSeq=0;curInd=0;continue;}
-    }
+    /* v2.13.2 分隔线与列表内共用同一判据（_isHrLine），两条路径不得分叉 */
+    if(_isHrLine(line)){html+='<hr>';i++;curInd=0;continue;}
     if(/^[ ]*>/.test(line)){
       var quote=[];
       while(i<lines.length && /^[ ]*>/.test(lines[i])){quote.push(lines[i].replace(/^[ ]*>[ ]?/,''));i++;}
       html+='<blockquote>'+parseMarkdown(quote.join('\n'))+'</blockquote>';
-      olSeq=0;curInd=IPX.quote;
+      curInd=IPX.quote;
       continue;
     }
     if(line.indexOf('|')>=0 && i+1<lines.length && /^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1]) && lines[i+1].indexOf('-')>=0){
@@ -895,7 +1025,7 @@ function parseMarkdown(src, opts){
       var _tb=t[0];
       if(pendCap&&pendCap.at===i){_tb=_wrapTabCap(_tb,pendCap);}
       pendCap=null;
-      html+=_tb;i=t[1];olSeq=0;curInd=0;continue;
+      html+=_tb;i=t[1];curInd=0;continue;
     }
     if(/^[ ]*([-+]|[0-9]+\.)[ ]+/.test(line)){
       var ind=/^([ ]*)([-+]|[0-9]+\.)/.exec(line)[1].length;
@@ -903,7 +1033,13 @@ function parseMarkdown(src, opts){
       html+=lst[0];i=lst[1];olSeq=lst[2];curInd=IPX.li;continue;
     }
     var para=[];
-    while(i<lines.length && !/^[ ]*$/.test(lines[i]) && !/^```/.test(lines[i]) && !/^(#{1,6})[ ]+/.test(lines[i]) && !/^[ ]*>/.test(lines[i]) && !/^[ ]*([-+]|[0-9]+\.)[ ]+/.test(lines[i]) && !/^[ ]{0,3}<<<\s*$/.test(lines[i]) && !(lines[i].indexOf('|')>=0 && i+1<lines.length && /^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1]) && lines[i+1].indexOf('-')>=0)
+    while(i<lines.length && !/^[ ]*$/.test(lines[i]) && !/^```/.test(lines[i]) && !/^(#{1,6})[ ]+/.test(lines[i]) && !/^[ ]*>/.test(lines[i]) && !/^[ ]*([-+]|[0-9]+\.)[ ]+/.test(lines[i]) && !/^[ ]{0,3}<<<\s*$/.test(lines[i])
+      /* v2.13.2 @@ 家族块（begin/end/caption/blank）紧贴上一行文字时同样终断
+         段落——否则"必须独占一行"的块被段落收集器整条吞进 <p>，标记原样
+         露出（@@ blank{1} 紧贴正文即中此招）。行内 @@ color / @@ MDE 不在此列
+         （它们是真行内语法，本来就可以混在文字里）。 */
+      && !/^[ ]{0,3}@@\s*(begin|end|caption|blank)\b/.test(lines[i])
+      && !(lines[i].indexOf('|')>=0 && i+1<lines.length && /^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1]) && lines[i+1].indexOf('-')>=0)
       /* v2.6：未闭合的 MDE 表格起始行（@@ MDE_x:2(2x2){ 后无 }）终断
          段落收集——否则连续数据点行把表格语法吞进段落漏成明文 */
       && !(/^@@ MDE(_{1,2})?[\w\u4e00-\u9fff.-]*(:[23])?(\([^()]*\))?\{/.test(lines[i]) && lines[i].indexOf('}')<0)){
@@ -917,7 +1053,7 @@ function parseMarkdown(src, opts){
     var _pd=parseInline(para.join('\n'));
     var _fg=_asFigure(_pd);
     html+=_fg?_fg:('<p>'+_pd.replace(/\n/g,'<br>')+'</p>');
-    olSeq=0;curInd=IPX.p;
+    curInd=IPX.p;
   }
   return html;
 }
