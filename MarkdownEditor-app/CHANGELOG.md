@@ -11,6 +11,37 @@
 
 ---
 
+## v2.20.0（2026-10-29）
+
+**本次改动：打印版目录页码截断修复（完成判定改 Paged.js 官方信号）+ 版本位按规则进 y**
+
+**修复**
+- **打印版目录后半条目页码截断**：现象=长文档（16~20 万字）打印版目录后半条目无页码，
+  服务端构建与预览栏正常，仅浏览器实际分页产物缺号。根因两层叠加：①回填完成判定靠轮询
+  「页数 0.9s 不变即分页完成」，分页途中任一重块（公式/长图切片/大表）卡过 0.9s 即提前
+  判定；②判定后 `done=true` 永久停机，此刻后方标题尚未落到任何页，`pageOf` 找不到页直接
+  continue，页码永不再补。修法=`PAGED_FILLER_TMPL` 回填改为可重入 `window.__pgFill`，由
+  `PagedConfig.after`（polyfill 排版全部完成的官方回调，实测 `Vm.after&&await Vm.after(e)`）
+  触发、每次整表重算、目录点线与页码幂等更新（重跑不重复加点线）；`build_paged_html` 在
+  polyfill 之前预置 `window.PagedConfig={auto:true,after:...}`（polyfill 执行时读取，晚定义
+  无效）；轮询降为兜底（0.9s→6s 稳定窗，仅在 after 失效时触发，之后仍可被 after 整表覆盖）。
+
+**测试**
+- **`_test_v2191_filler.py` 12 条**：钉 PagedConfig 预置在场且先于 polyfill 读取点、after
+  回调调 `__pgFill`、旧 `done` 标记与 3 轮判定移除、兜底 20 轮（6s）在场、目录回填先查
+  已有 `.md-toc-pg`/`.toc-dots`、脚本顺序预置<polyfill<回填器、目录条目与锚点不回归。
+- **`_test_v2170_filler.py` 31 条**：按新契约更新——回填入口改直调 `__pgFill()`（等价
+  after 到达），新增 6s 兜底轮询触发场景。
+- **回归 `_test_v2190_toc.py` 8/8、`_test_v2170_e2e.py` 17/17、`_test_v2180_e2e.py` 14/14、
+  `_test_v2160_img.py` 14/14**：全 PASS。
+- **产物三段 script `node --check`**：PagedConfig 预置/polyfill/回填器逐段语法 PASS。
+
+**说明**
+- 版本位按「z 累计 ≥10 主动进 y」进位：2.x 线 z 修订累计 10 处（2.11.1~3、2.13.1~5、
+  2.15.1、2.18.1）+ 本条。
+
+---
+
 ## v2.19.0（2026-10-29）
 
 **本次改动：① 并写 end 改集合语义（`@@ end X` 只关 X，`@@ end X Y` 同关多个）；② `noll` 区标题不进目录；③ 修并写块内嵌 fill 被深度计数误杀**

@@ -64,7 +64,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 110  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 111  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 # MSIX 商城版判定（微软商店政策 11.16 的"报告 AI 生成内容"入口用）：
 # 商城包与侧载包恒落在 WindowsApps 之下，Release 安装包/便携形态不会。
@@ -3065,8 +3065,8 @@ PAGED_FILLER_TMPL = """
   var tpl = __TPL__;
   var sel = __SEL__;
   var size = __SIZE__;
-  var lastN = -1, stable = 0, done = false;
-  var mo = new MutationObserver(function(){ if(!done) lastN = -1; });
+  var lastN = -1, stable = 0;
+  var mo = new MutationObserver(function(){ lastN = -1; });
   mo.observe(document.body, {childList:true, subtree:true});
   /* 纯目录页判定：页内有目录且无任何正文标题锚——目录不计入页码（6.4） */
   function tocOnly(pg){
@@ -3088,14 +3088,16 @@ PAGED_FILLER_TMPL = """
     for(var k=0;k<M.length;k++){ while(n >= M[k][0]){ s += M[k][1]; n -= M[k][0]; } }
     return up ? s.toUpperCase() : s;
   }
-  var iv = setInterval(function(){
+  /* v2.19.1 页码回填改为可重入的 window.__pgFill，由 PagedConfig.after
+     （Paged.js 排版全部完成的官方回调，先于 polyfill 预置）触发，可重复
+     执行、每次整表重算。旧实现把回填塞在轮询里「页数 0.9s 不变即判定
+     完成并永久停机」：长文档分页途中任一重块（公式/长图切片/大表）卡过
+     0.9s 就提前回填，此刻后方标题尚未落到任何页，pageOf 找不到页直接
+     continue，此后再不补——目录后半条目页码截断。 */
+  window.__pgFill = function(){
     var pgs = document.querySelectorAll('.pagedjs_page');
     var n = pgs.length;
     if(!n) return;
-    if(n !== lastN){ lastN = n; stable = 0; return; }
-    stable++;
-    if(stable < 3) return;
-    clearInterval(iv); mo.disconnect(); done = true;
     var skip = [], shown = [], reg = [], P = 0, c = 0, i, k;
     for(i=0;i<n;i++){ skip[i] = tocOnly(pgs[i]); if(!skip[i]) P++; }
     /* v2.17.0 页区归属：起止都强制断页，一页至多属一个区，取第一个即可。
@@ -3177,14 +3179,33 @@ PAGED_FILLER_TMPL = """
       if(di < 0 || skip[di]) continue;
       var lb = label(di);
       if(!lb) continue;      /* 兜底：noll 区标题已不进目录（v2.19.0），理论不达 */
-      var dots = document.createElement('span');
-      dots.className = 'toc-dots';
-      var sp = document.createElement('span');
-      sp.className = 'md-toc-pg';
+      /* v2.19.1 幂等回填：after 可多次触发，已填的只改文本，不重复加点线 */
+      var sp = links[i].querySelector('.md-toc-pg');
+      var dots = links[i].querySelector('.toc-dots');
+      if(!dots){
+        dots = document.createElement('span');
+        dots.className = 'toc-dots';
+        links[i].appendChild(dots);
+      }
+      if(!sp){
+        sp = document.createElement('span');
+        sp.className = 'md-toc-pg';
+        links[i].appendChild(sp);
+      }
       sp.textContent = lb;
-      links[i].appendChild(dots);
-      links[i].appendChild(sp);
     }
+  };
+  /* 兜底轮询：仅在 after 信号失效（polyfill 缺失或报错）时才会触发——
+     判定窗口 0.9s 放宽到 6s（页数连续 20 轮不变），且只是先填一版，
+     随后真正的 after 到达仍会整表覆盖 */
+  var iv = setInterval(function(){
+    var pgs = document.querySelectorAll('.pagedjs_page');
+    var n = pgs.length;
+    if(!n) return;
+    if(n !== lastN){ lastN = n; stable = 0; return; }
+    if(++stable < 20) return;
+    clearInterval(iv); mo.disconnect();
+    window.__pgFill();
   }, 300);
 })();
 """
@@ -3565,6 +3586,14 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
         filler = filler.replace(k, v)
     filler = filler.replace("</script", "<\\/script")
 
+    # v2.19.1 完成信号预置：PagedConfig.after 是 polyfill 排版全部完成的官方
+    # 回调（Vm=window.PagedConfig||{...} 在 polyfill 执行时读取，必须先于它
+    # 定义）。after 内微延时等最终 DOM 落定后调 __pgFill 回填页码与目录。
+    paged_cfg = ("window.PagedConfig={auto:true,after:function(){"
+                 "return new Promise(function(res){setTimeout(function(){"
+                 "try{window.__pgFill&&window.__pgFill();}catch(e){}res();},80);});}};")
+    paged_cfg = paged_cfg.replace("</script", "<\\/script")
+
     # 目录版式（STRUCTURE_GUIDE 6.4：点线引导 + 页码右对齐列；
     # 11.4 几何纪律：页码列统一右缘、点线与页码留间距不重叠）
     toc_css = (
@@ -3587,6 +3616,7 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
         "<style>%s</style><style>%s</style><style>%s%s%s</style>"
         '</head><body class="markdown-body"><div id="paged-content" class="markdown-body">%s</div>'
         "<script>%s</script>"
+        "<script>%s</script>"
         "<script>%s</script></body></html>"
     ) % (
         html_module.escape(title),
@@ -3596,6 +3626,7 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
         toc_css,
         ts_css,
         body,
+        paged_cfg,
         paged_js,
         filler,
     )

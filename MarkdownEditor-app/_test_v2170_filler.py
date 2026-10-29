@@ -4,6 +4,9 @@
 不启服务、不跑 Paged.js——手搭一份 .pagedjs_page 骨架，直接执行服务端
 真正注入的那段 PAGED_FILLER_TMPL（从 md_server.py 源码抽出），断言每页
 margin box 落下的字符串。测的是产品代码本身，不是它的复制品。
+
+v2.19.1 起回填入口是 window.__pgFill()（由 PagedConfig.after 触发），
+场景一直接调它验证回填逻辑；场景四验证轮询兜底（6s 稳定窗口）仍能触发。
 """
 import io, os, sys, json
 
@@ -51,7 +54,7 @@ def build(pages):
             + ''.join(out) + '</body></html>')
 
 
-def run(pw, pages, tpl='{p}|{P}|{N}', wait=1600):
+def run(pw, pages, tpl='{p}|{P}|{N}', wait=200, poke=True):
     script = (FILLER.replace('__TPL__', json.dumps(tpl, ensure_ascii=False))
                     .replace('__SEL__', json.dumps(SEL))
                     .replace('__SIZE__', json.dumps('9')))
@@ -59,6 +62,9 @@ def run(pw, pages, tpl='{p}|{P}|{N}', wait=1600):
     pg = br.new_page()
     pg.set_content(build(pages))
     pg.add_script_tag(content=script)
+    if poke:
+        # v2.19.1：直接触发回填入口（等价于 PagedConfig.after 到达）
+        pg.evaluate('window.__pgFill && window.__pgFill()')
     pg.wait_for_timeout(wait)
     got = pg.evaluate("""() => {
       const out = [];
@@ -189,6 +195,11 @@ with sync_playwright() as pw:
     t('模板只写 {p}：输出无花括号残留',
       lambda: not any('{' in (p['r'] + p['l'] + p['c']) for p in r3['out']))
     t('模板只写 {p}：罗马区首张 = i', lambda: r3['out'][0]['r'] == 'i')
+
+    # 场景四：轮询兜底——不 poke，页数不变连续 20 轮（约 6s）后自动回填
+    P4 = [d('i', 'pY'), d()]
+    r4 = run(pw, P4, tpl='{p}|{P}|{N}', wait=7600, poke=False)
+    t('兜底轮询（6s 稳定窗）仍能触发回填', lambda: r4['out'][0]['r'] == 'i|2|i')
 
 print('\n' + ('ALL PASS' if fail_n == 0 else 'FAILED %d' % fail_n) +
       '  (%d/%d)' % (pass_n, pass_n + fail_n))
