@@ -333,10 +333,10 @@ section('七、导出面');
 t('9 个导出函数齐备', () => ['parseMarkdown', 'parseInline', 'parseList', 'parseTable',
   'parseFenceLang', 'splitRow', 'escapeHtml', 'escAttr', 'sanitizeUrl'
 ].every(k => typeof P[k] === 'function'));
-t('parseMarkdown(src, {indents}) 第二参生效（列表档叠加到下一个容器）', () => {
+t('parseMarkdown(src, 0, {indents}) 第三参生效（列表档叠加到下一个容器）', () => {
   const s = ['<<<', '+ 项', '<<<', '<<<', '内层', '<<<'].join('\n');
   const a = parseMarkdown(s);
-  const b = parseMarkdown(s, { indents: { p: 0, quote: 0, li: 40 } });
+  const b = parseMarkdown(s, 0, { indents: { p: 0, quote: 0, li: 40 } });
   return a.split('margin-left:40px').length === 1 && b.includes('margin-left:40px');
 });
 

@@ -15,8 +15,9 @@
  *
  * 相对原文件的两处增强（仅本抽取版，原文件未动）：
  *   1. 外包 UMD：浏览器全局(MDParser) / CommonJS(require) / ESM(import) 通用；
- *   2. parseMarkdown(src, opts) 增加可选第二参 opts.indents = {p, quote, li}
- *      （容器级缩进档，px）——不传时与原文 100% 一致（默认 {p:0,quote:0,li:0}）。
+ *   2. parseMarkdown(src, _lv, opts) 增加可选第三参 opts.indents = {p, quote, li}
+ *      （容器级缩进档，px）——不传时与原文 100% 一致（默认 {p:0,quote:0,li:0}）；
+ *      第二参 _lv 为 v2.18.0 主链嵌套层级（0=文档流顶层，html 内部递归专用）。
  * 其余解析逻辑逐字复制，未改动。改 html 解析器段后必须重新抽取本文件。
  */
 (function (root, factory) {
@@ -28,6 +29,10 @@
   /* ===== 以下自 markdown-editor.html PARSER_START … PARSER_END 原样抽取 ===== */
 
 /*PARSER_START*/
+/* v2.17.0 页区实例序号：给 @@ begin page{…} 出的 .page-region 发唯一 id，
+   填充脚本靠它区分「同一个区的续页」与「另一个区」（两个相邻 {1} 区各自
+   从 1 起）。只增不复位——同一次渲染内唯一即可，多处递归解析也不会撞号。 */
+var _pgRegSeq=0;
 function escapeHtml(s){
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -684,7 +689,63 @@ function parseFenceLang(raw){
     width:m[2]?Math.min(100,parseInt(m[2],10)):0,
     align:m[3]?(m[3]==='c'?'center':m[3]==='l'?'left':'right'):''};
 }
-function parseMarkdown(src, opts){
+/* ---- v2.18.0 @@ begin 容器的层级与嵌套裁决（四族共用） ----
+   主链 rank：page 1 < full 2 < fill 3（外→内）。color 不占主链（透明，
+   挂在哪层都不改变层级），所以它「随便组合、放哪都行」。
+   规矩一（层级）：主链家族只在 rank > 已进入的最内层级（_lv）时才能开启。
+   同族进入后 rank == _lv，必然被拒——「自己套自己」就此自动禁止。实测套
+   自己会让外层被内层的 end 提前关掉、内层 begin 与末尾 end 直接印在纸面
+   （full 套 full：p2 印 @@ begin full{b}、p3 印 @@ end full，只出 1 个
+   full-page）；color 不需要自嵌套，行内 @@ color r{文字} 本来就是就近覆盖。
+   规矩二（并写顺序）：三者压在同一个 div 上，顺序不影响渲染结果，锁死
+   page→full→color 只为唯一写法（不锁则 full page 与 page full 逐字节相同，
+   同一份文档两种写法，diff 出噪音、报错也没法指名）；与规矩一的层级同构。
+   越界 / 同族 / 顺序错 → 标记行露出、内容照常渲染（fail-closed）。 */
+var _LV={page:1,full:2,fill:3};      /* 嵌套层级（外→内），color 不参与 */
+var _MGORD={page:0,full:1,color:2};  /* 并写书写顺序，必须单调递增 */
+/* 从 @@ begin 之后那段文字里按出现顺序取家族名。只用于判断「是不是自己套
+   自己」，不做参数校验（各家族的参数仍由各自分支严格匹配）。 */
+function _beginFams(rest){
+  var o=[],re=/(page|full|color|fill)\b/g,m;
+  while((m=re.exec(rest))!==null){o.push(m[1]);}
+  return o;
+}
+/* 收集 begin/end 之间的内容。teams = 本块已经声明的家族数组。
+   所有 begin 行都压栈（fams=家族数组，z=是否与 teams 交集——交集即「自己
+   套自己」或同族混入，整对零宽露出）；end 行只弹「栈顶家族含其名」的栈，
+   零宽与否跟随栈顶配对的 begin——这样 teams 之外的内层块（如并写
+   full+color 里嵌的 fill）也计入深度，fill 里再写 end full 不会提前关掉
+   外层块。栈空时遇到 teams 内的 end → 收尾。返回 {inner, closed, next}。 */
+function _scanBeginBlock(lines,startIdx,teams){
+  var inner=[],stack=[],closed=false,k=startIdx;
+  while(k<lines.length){
+    var ln=lines[k];
+    var bm=/^[ ]{0,3}@@\s*begin\s+([\s\S]*)$/.exec(ln);
+    if(bm){
+      var fams=_beginFams(bm[1]),dup=false;
+      for(var q=0;q<fams.length;q++){
+        if(teams.indexOf(fams[q])>=0){dup=true;break;}
+      }
+      if(fams.length){
+        stack.push({f:fams,z:dup});
+        inner.push(dup?('\u200b'+ln):ln);k++;continue;
+      }
+    }
+    var em=/^[ ]{0,3}@@\s*end\s+([A-Za-z]+)[ \t]*$/.exec(ln);
+    if(em){
+      if(stack.length){
+        var top=stack[stack.length-1],zw=top.z;
+        if(top.f.indexOf(em[1])>=0){stack.pop();}
+        inner.push(zw?('\u200b'+ln):ln);k++;continue;
+      }
+      if(teams.indexOf(em[1])>=0){closed=true;k++;break;}
+    }
+    inner.push(ln);k++;
+  }
+  return {inner:inner,closed:closed,next:k};
+}
+function parseMarkdown(src, _lv, opts){
+  _lv=_lv|0;
   var lines=src.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
   var html='';
   var i=0;
@@ -807,7 +868,7 @@ function parseMarkdown(src, opts){
          em 时基准随容器字号漂移（继承链 15px 环境下 2em 渲染 30px，
          与正文首行 37.3px 不齐）。 */
       var left=curInd;
-      html+='<div class="ind-blk" style="margin-left:'+left+'px">'+parseMarkdown(inner.join('\n'))+'</div>';
+      html+='<div class="ind-blk" style="margin-left:'+left+'px">'+parseMarkdown(inner.join('\n'),_lv)+'</div>';
       curInd=left+Math.max(hasList?IPX.li:0,hasQuote?IPX.quote:0);
       i=j;
       continue;
@@ -826,11 +887,18 @@ function parseMarkdown(src, opts){
        文本渲染）。 */
     var fm=line.match(/^[ ]{0,3}@@\s*begin\s+fill\s*(?:\{([\d|]+)\})?\s*$/);
     if(fm){
-      var finner=[],fclosed=false,fj=i+1;
-      while(fj<lines.length){
-        if(/^[ ]{0,3}@@\s*end\s+fill\s*$/.test(lines[fj])){fclosed=true;fj++;break;}
-        finner.push(lines[fj]);fj++;
+      if(!(_LV.fill>_lv)){
+        /* v2.18.0 越界/同族：fill 是主链最内层（rank 3），_lv>=3 时不可再开
+           （fill 套 fill、full/page 区里的 fill——full 2、page 1 都推不进
+           _lv=3 的位置）。标记行按原文露出，i++ 推进，内容与结束行交主循环
+           照常渲染——end 行走孤 end 兜底按原文露出，begin/end 对称可见
+           （fail-closed 不吞字；不做块扫描，否则配对的 end 会被当闭合吃掉）。 */
+        html+='<p>'+parseInline(line)+'</p>';
+        i++;
+        continue;
       }
+      var _fr=_scanBeginBlock(lines,i+1,['fill']);
+      var finner=_fr.inner,fclosed=_fr.closed,fj=_fr.next;
       if(fclosed){
         /* 空行分栏：连续非空行属同栏（栏内可放文字行/图片行/围栏） */
         var cols=[],cur=[];
@@ -870,7 +938,7 @@ function parseMarkdown(src, opts){
              内层 fill 相对容器左边界即 0，故不写 margin-left。 */
           var fh='<div class="fill-row">';
           for(var ci=0;ci<cols.length;ci++){
-            fh+='<div class="fill-col" style="width:'+ratios[ci]+'%">'+parseMarkdown(cols[ci])+'</div>';
+            fh+='<div class="fill-col" style="width:'+ratios[ci]+'%">'+parseMarkdown(cols[ci],_LV.fill)+'</div>';
           }
           fh+='</div>';
           html+=fh;
@@ -882,7 +950,7 @@ function parseMarkdown(src, opts){
       if(fclosed){
         html+='<p>'+parseInline(line)+'</p>';
         var ftxt=finner.join('\n');
-        if(ftxt.trim()){html+=parseMarkdown(ftxt);}
+        if(ftxt.trim()){html+=parseMarkdown(ftxt,_lv);}
         i=fj;curInd=0;
         continue;
       }
@@ -899,23 +967,23 @@ function parseMarkdown(src, opts){
     var cm=line.match(/^[ ]{0,3}@@\s*begin\s+color\s+(?:\{([^}]*)\}|([\w#]+))\s*$/);
     if(cm){
       var cval=_colorVal(cm[1]!==undefined?cm[1]:cm[2]);
-      var cinner=[],cclosed=false,cj=i+1;
-      while(cj<lines.length){
-        if(/^[ ]{0,3}@@\s*end\s+color\s*$/.test(lines[cj])){cclosed=true;cj++;break;}
-        cinner.push(lines[cj]);cj++;
-      }
+      var _cr=_scanBeginBlock(lines,i+1,['color']);
+      var cinner=_cr.inner,cclosed=_cr.closed,cj=_cr.next;
       if(cval&&cclosed){
         /* v2.13.3 同 fill：不继承兄弟块缩进（紧贴列表时会被带出一档），
-           容器缩进由外层 .ind-blk 承担 */
+           容器缩进由外层 .ind-blk 承担。color 不占主链（v2.18.0）：层级
+           状态 _lv 原样下传，color 块里的主链层级不变；块内再写
+           @@ begin color 由 _scanBeginBlock 整对零宽露出（禁同族，
+           行内 @@ color 就是就近覆盖，块级自嵌套无意义）。 */
         html+='<div class="mde-color" style="color:'+cval+'">'+
-          parseMarkdown(cinner.join('\n'))+'</div>';
+          parseMarkdown(cinner.join('\n'),_lv)+'</div>';
         i=cj;
         continue;
       }
       if(cclosed){
         html+='<p>'+parseInline(line)+'</p>';
         var ctxt=cinner.join('\n');
-        if(ctxt.trim()){html+=parseMarkdown(ctxt);}
+        if(ctxt.trim()){html+=parseMarkdown(ctxt,_lv);}
         i=cj;
         continue;
       }
@@ -932,14 +1000,21 @@ function parseMarkdown(src, opts){
        渲染（fail-closed，结束行按文本露出）。 */
     var um=line.match(/^[ ]{0,3}@@\s*begin\s+full\s*(?:\{([tmb])\})?\s*$/);
     if(um){
-      var uinner=[],uclosed=false,uj=i+1;
-      while(uj<lines.length){
-        if(/^[ ]{0,3}@@\s*end\s+full\s*$/.test(lines[uj])){uclosed=true;uj++;break;}
-        uinner.push(lines[uj]);uj++;
+      if(!(_LV.full>_lv)){
+        /* v2.18.0 越界/同族：full 是主链中层（rank 2），_lv>=2 时不可再开
+           （full 套 full、fill 里的 full）。标记行按原文露出，i++ 推进，
+           内容与结束行交主循环照常渲染——end 行走孤 end 兜底按原文露出，
+           begin/end 对称可见（fail-closed 不吞字；不做块扫描，否则配对的
+           end 会被当闭合吃掉、只露 begin 不露 end）。 */
+        html+='<p>'+parseInline(line)+'</p>';
+        i++;
+        continue;
       }
+      var _ur=_scanBeginBlock(lines,i+1,['full']);
+      var uinner=_ur.inner,uclosed=_ur.closed,uj=_ur.next;
       if(uclosed){
         html+='<div class="full-page" data-full-pos="'+(um[1]||'m')+'">'+
-          parseMarkdown(uinner.join('\n'))+'</div>';
+          parseMarkdown(uinner.join('\n'),_LV.full)+'</div>';
         i=uj;
         continue;
       }
@@ -947,6 +1022,139 @@ function parseMarkdown(src, opts){
       html+='<p>'+parseInline(line)+'</p>';
       i++;
       continue;
+    }
+    /* v2.17.0 @@ begin page{noll|1|i|I} … @@ end page：页区。
+       一个区域内的页共用一个页码体系，只作用于分页导出（打印/PDF）：
+         noll  区内不印页码（margin box 留空占位，版面高度不变）
+         1     阿拉伯数字，本区从 1 重编
+         i / I 小写 / 大写罗马，本区从 i / I 重编
+       起止两端都强制断页——页码是页级属性，一页只能有一个数字，所以
+       一页只属一个区（边界落在页中必然有一方的号是错的）。
+       页码不在这里算：输出 data-pn 交给分页填充脚本按页回写，因为
+       "第几页"只有 Paged.js 排完版才知道。data-pr-id 区分**不同区域实例**
+       （两个相邻的 {1} 区各自从 1 起），由模块级 _pgRegSeq 单调递增生成，
+       永不复位——同一次渲染里唯一即可，多渲染几次值变大无害。
+       嵌套不支持：内层 begin/end 两行都原样保留为正文（对称，不吞内容）。
+       参数非法或未闭合 → 标记行按原文、内容照常渲染（fail-closed）。 */
+    var pgm=line.match(/^[ ]{0,3}@@\s*begin\s+page\s*\{([^{}\n]*)\}[ \t]*$/);
+    if(pgm){
+      var _pgn=(pgm[1]||'').trim();
+      if(_pgn==='noll'||_pgn==='1'||_pgn==='i'||_pgn==='I'){
+        if(!(_LV.page>_lv)){
+          /* v2.18.0 越界/同族：page 是主链最外层（rank 1），_lv>=1 时不可
+             再开（页区套页区、full/fill 里的 page）。标记行按原文露出，
+             i++ 推进，内容与结束行交主循环照常渲染——end 行走孤 end 兜底
+             按原文露出，begin/end 对称可见（fail-closed 不吞字）。 */
+          html+='<p>'+parseInline(line)+'</p>';
+          i++;
+          continue;
+        }
+        var _pgr=_scanBeginBlock(lines,i+1,['page']);
+        var pginner=_pgr.inner,pgclosed=_pgr.closed,pgj=_pgr.next;
+        if(pgclosed){
+          _pgRegSeq++;
+          html+='<div class="page-region" data-pn="'+_pgn+'" data-pr-id="pr'+_pgRegSeq+'">'+
+            parseMarkdown(pginner.join('\n'),_LV.page)+'</div>';
+          i=pgj;
+          continue;
+        }
+        html+='<p>'+parseInline(line)+'</p>';
+        i++;
+        continue;
+      }
+      /* 参数非法：不接管，落到下面普通段落按原文露出 */
+    }
+    /* v2.18.0 并写：@@ begin page{noll|1|i|I} full{t|m|b} color{X} … @@ end <声明过的任一>。
+       三个家族都只是「给同一个容器加属性」，CSS 完全正交，所以能压在**一个**
+       div 上——封面「单独一页 + 不写页码」从此一行搞定，不必套两层：
+         page  → class page-region + data-pn / data-pr-id（断页 + 页码体系）
+         full  → class full-page + data-full-pos（撑满页心 + 垂直定位）
+         color → class mde-color + 内联 color（继承色）
+       fill **不参与**并写：它要 display:flex 横向分栏，full 要 display:flex
+       纵向居中，两种布局意图压进同一个元素必打架；它自带 begin/end，直接
+       嵌套即可（@@ begin full 里套 @@ begin fill），一样清楚。
+       书写顺序锁死 page→full→color（_MGORD 单调递增校验）：三者压在同一
+       div 上渲染结果与顺序无关，锁死只为唯一写法——同一份文档两种写法会
+       制造 diff 噪音，报错也没法指名。各带自己的参数（color 允许裸词）。
+       同名重复 / 顺序错 / 参数非法 / 未闭合 → 整行按原文露出（fail-closed，
+       与四个单家族分支同口径）。
+       结束行认**本块声明过的**家族名之一（@@ end page / full / color 等价）：
+       一个块只有一个结束位置，写哪个都指向同一处；没声明过的名字不闭合，
+       避免张冠李戴。
+       嵌套交给 _scanBeginBlock + 递归 rank：内层与容器同族（teams 交集）
+       的 begin/end 整对零宽露出；容器之外的块（fill 等）原样收集、递归
+       渲染，其内部再写容器家族由 rank 裁决（fill 里写 page/full 被拒）。
+       容器主链层级 = 其中 rank 最高的家族（只 page+color→1，带 full→2）：
+       容器内 page/full 不得再开（rank 不大于 _lv），fill 照常可开。
+       家族数 < 2 不进本分支：单家族由上面四个分支先命中，输出逐字节不变。 */
+    var _mgt=line.match(/^[ ]{0,3}@@\s*begin\s+([\s\S]*?)[ \t]*$/);
+    if(_mgt){
+      var _mgs=_mgt[1],_mgpos=0,_mgl=[],_mgbad=false,_mgm;
+      var _mgone=/[ \t]*(page|full|color)\b[ \t]*(\{[^{}\n]*\})?/g;
+      while((_mgm=_mgone.exec(_mgs))!==null){
+        if(_mgm.index!==_mgpos){_mgbad=true;break;}
+        var _mga=null;
+        if(_mgm[2]){_mga=_mgm[2].slice(1,-1);}
+        else if(_mgm[1]==='color'){
+          /* color 允许裸词色值（@@ begin color r）。裸词只能给 color——
+             否则 @@ begin full color r 里的 color 会被当成 full 的参数 */
+          var _raw=/^[ \t]*([\w#]+)/.exec(_mgs.slice(_mgone.lastIndex));
+          if(_raw&&!/^(page|full|color)$/.test(_raw[1])){
+            _mga=_raw[1];_mgone.lastIndex+=_raw[0].length;
+          }
+        }
+        _mgl.push({f:_mgm[1],a:_mga});
+        _mgpos=_mgone.lastIndex;
+      }
+      if(!_mgbad&&/[^ \t]/.test(_mgs.slice(_mgpos))){_mgbad=true;}
+      if(!_mgbad&&_mgl.length>=2){
+        var _mgA={},_mgOk=true,_mgOrd=-1;
+        for(var _mi=0;_mi<_mgl.length;_mi++){
+          var _mf=_mgl[_mi].f,_ma=_mgl[_mi].a;
+          if(_mgA[_mf]!==undefined){_mgOk=false;break;}   /* 同族重复 */
+          if(_MGORD[_mf]<=_mgOrd){_mgOk=false;break;}     /* 顺序锁死 page→full→color */
+          _mgOrd=_MGORD[_mf];
+          if(_mf==='page'){
+            if(!(_ma==='noll'||_ma==='1'||_ma==='i'||_ma==='I')){_mgOk=false;break;}
+            _mgA.page=_ma;
+          }else if(_mf==='full'){
+            if(!(_ma===null||_ma==='t'||_ma==='m'||_ma==='b')){_mgOk=false;break;}
+            _mgA.full=(_ma||'m');
+          }else{
+            var _mcv=_colorVal(_ma);
+            if(!_mcv){_mgOk=false;break;}
+            _mgA.color=_mcv;
+          }
+        }
+        if(_mgOk){
+          var _mgTeams=[];
+          for(var _mt=0;_mt<_mgl.length;_mt++){_mgTeams.push(_mgl[_mt].f);}
+          var _mgr=_scanBeginBlock(lines,i+1,_mgTeams);
+          var _mgIn=_mgr.inner,_mgCl=_mgr.closed,_mgK=_mgr.next;
+          if(_mgCl){
+            var _mgCls=[],_mgAt='';
+            if(_mgA.page!==undefined){
+              _pgRegSeq++;
+              _mgCls.push('page-region');
+              _mgAt+=' data-pn="'+_mgA.page+'" data-pr-id="pr'+_pgRegSeq+'"';
+            }
+            if(_mgA.full!==undefined){
+              _mgCls.push('full-page');
+              _mgAt+=' data-full-pos="'+_mgA.full+'"';
+            }
+            if(_mgA.color!==undefined){_mgCls.push('mde-color');}
+            /* 容器主链层级 = 其中 rank 最高的家族：只 page+color → 1，
+               带 full → 2。容器内同链 begin 由各分支 rank 裁决。 */
+            var _mgLv=(_mgA.full!==undefined)?_LV.full:_LV.page;
+            html+='<div class="'+_mgCls.join(' ')+'"'+_mgAt+
+              (_mgA.color!==undefined?' style="color:'+_mgA.color+'"':'')+'>'+
+              parseMarkdown(_mgIn.join('\n'),_mgLv)+'</div>';
+            i=_mgK;
+            continue;
+          }
+        }
+      }
+      /* 不成立（单家族 / 参数非法 / 顺序错 / 未闭合）→ 落到下面普通段落按原文露出 */
     }
      /* MDE 跨行数据点（@@ MDE_{ 或 :N(rxc){ 后行内未闭合 → 收集到 }）：
         ① 普通跨行 = 长文本（形式 1，解析含 (( )) 行文/向量等形式）
@@ -980,7 +1188,7 @@ function parseMarkdown(src, opts){
                }else{
                  /* 显性（v2.6.12）：表格原文照原样渲染成真表格。行列裁剪
                     (RxC) 只作用于 data-dp-val，屏幕显示整张原表 */
-                 dsp='<div class="mde-dp mde-dp-block"'+dattrs+'>'+parseMarkdown(_dpTableSrc(dmm[5]))+'</div>';
+                 dsp='<div class="mde-dp mde-dp-block"'+dattrs+'>'+parseMarkdown(_dpTableSrc(dmm[5]),_lv)+'</div>';
                  dspBlock=true;
                }
              }
@@ -1016,7 +1224,7 @@ function parseMarkdown(src, opts){
     if(/^[ ]*>/.test(line)){
       var quote=[];
       while(i<lines.length && /^[ ]*>/.test(lines[i])){quote.push(lines[i].replace(/^[ ]*>[ ]?/,''));i++;}
-      html+='<blockquote>'+parseMarkdown(quote.join('\n'))+'</blockquote>';
+      html+='<blockquote>'+parseMarkdown(quote.join('\n'),_lv)+'</blockquote>';
       curInd=IPX.quote;
       continue;
     }

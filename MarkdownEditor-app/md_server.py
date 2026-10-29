@@ -64,7 +64,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 107  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 109  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 # MSIX 商城版判定（微软商店政策 11.16 的"报告 AI 生成内容"入口用）：
 # 商城包与侧载包恒落在 WindowsApps 之下，Release 安装包/便携形态不会。
@@ -3077,6 +3077,17 @@ PAGED_FILLER_TMPL = """
     while(n && !(n.classList && n.classList.contains('pagedjs_page'))) n = n.parentNode;
     return n;
   }
+  /* v2.17.0 罗马数字（减法对标准写法）。1→i 4→iv 9→ix 40→xl 399→cccxcix；
+     超出 1~3999 回落阿拉伯数字（罗马记法本身到此为止，不硬凑） */
+  function toRoman(v, up){
+    var n = Math.floor(v);
+    if(!(n > 0) || n > 3999) return String(v);
+    var M = [[1000,'m'],[900,'cm'],[500,'d'],[400,'cd'],[100,'c'],[90,'xc'],
+             [50,'l'],[40,'xl'],[10,'x'],[9,'ix'],[5,'v'],[4,'iv'],[1,'i']];
+    var s = '';
+    for(var k=0;k<M.length;k++){ while(n >= M[k][0]){ s += M[k][1]; n -= M[k][0]; } }
+    return up ? s.toUpperCase() : s;
+  }
   var iv = setInterval(function(){
     var pgs = document.querySelectorAll('.pagedjs_page');
     var n = pgs.length;
@@ -3085,22 +3096,75 @@ PAGED_FILLER_TMPL = """
     stable++;
     if(stable < 3) return;
     clearInterval(iv); mo.disconnect(); done = true;
-    /* 页码映射：纯目录页不编号；正文页码 = 物理序 - 已跳过的目录页数 */
-    var skip = [], shown = [], P = 0, c = 0, i;
+    var skip = [], shown = [], reg = [], P = 0, c = 0, i, k;
     for(i=0;i<n;i++){ skip[i] = tocOnly(pgs[i]); if(!skip[i]) P++; }
-    for(i=0;i<n;i++){ shown[i] = skip[i] ? 0 : ++c; }
+    /* v2.17.0 页区归属：起止都强制断页，一页至多属一个区，取第一个即可。
+       data-pr-id 区分**区域实例**——两个相邻的 {1} 区各自从 1 起；
+       Paged.js 拆页是 cloneNode(false)，属性随片段走，续页仍是同一个 id。 */
+    for(i=0;i<n;i++){
+      var rel = pgs[i].querySelector('.page-region[data-pn]');
+      reg[i] = rel
+        ? {id: rel.getAttribute('data-pr-id') || '', pn: rel.getAttribute('data-pn') || ''}
+        : null;
+    }
+    /* 区域外的全文连续号：跳过纯目录页与所有区域页（区域页自成体系） */
+    for(i=0;i<n;i++){
+      if(skip[i] || reg[i]){ shown[i] = 0; continue; }
+      shown[i] = ++c;
+    }
+    /* 每区总页数 + 区内序号：每区从 1 重编，noll 的页既不编号也不占号 */
+    var tot = {}, idx = {};
+    for(i=0;i<n;i++){
+      if(!reg[i] || skip[i] || reg[i].pn === 'noll') continue;
+      tot[reg[i].id] = (tot[reg[i].id] || 0) + 1;
+    }
+    for(i=0;i<n;i++){
+      if(!reg[i] || skip[i] || reg[i].pn === 'noll') continue;
+      idx[reg[i].id] = (idx[reg[i].id] || 0) + 1;
+      reg[i].no = idx[reg[i].id];
+      reg[i].all = tot[reg[i].id];
+    }
+    /* 该页页脚显示串：区域外=阿拉伯全文号；noll=空；区内=按档位形态 */
+    function label(t){
+      var r = reg[t];
+      if(skip[t]) return '';
+      if(!r) return String(shown[t]);
+      if(r.pn === 'noll') return '';
+      if(r.pn === 'i') return toRoman(r.no, false);
+      if(r.pn === 'I') return toRoman(r.no, true);
+      return String(r.no);
+    }
+    /* {N}：区内=本区总页数（形态随区）；区外=全文可编号页数，与 {P} 同值——
+       这样没写页区的文档输出与 v2.16.0 逐字节一致 */
+    function totalOf(t){
+      var r = reg[t];
+      if(r && r.pn !== 'noll' && r.all) return {v: r.all, r: r};
+      return {v: P, r: null};
+    }
+    function fmt(o){
+      if(o.r && o.r.pn === 'i') return toRoman(o.v, false);
+      if(o.r && o.r.pn === 'I') return toRoman(o.v, true);
+      return String(o.v);
+    }
     for(i=0;i<n;i++){
       if(skip[i]) continue;
-      /* 外侧奇右偶左（6.4）；固定位置模式 odd/even 同盒 */
-      var boxSel = (shown[i] % 2 === 1) ? sel.odd : sel.even;
+      var _r = reg[i];
+      if(_r && _r.pn === 'noll') continue;   /* 区内不印：margin box 留空占位 */
+      /* 外侧奇右偶左（6.4）：按**显示号**的奇偶，不是物理页序（区内重编后
+         两者不同；固定位置模式 odd/even 同盒） */
+      var pnum = _r ? _r.no : shown[i];
+      var boxSel = (pnum % 2 === 1) ? sel.odd : sel.even;
       var el = pgs[i].querySelector(boxSel);
       if(el){
-        el.textContent = tpl.replace('{p}', shown[i]).replace('{P}', P);
+        el.textContent = tpl.replace('{p}', label(i))
+                            .replace('{P}', String(P))
+                            .replace('{N}', fmt(totalOf(i)));
         el.style.fontSize = size + 'pt';
         el.style.color = '#666';
       }
     }
-    /* 目录条目页码：按标题锚真实落页的显示页码回填（口径与页脚一致），
+    /* 目录条目页码：按标题锚真实落页的显示页码回填（口径与页脚严格同源，
+       所以罗马区写 iii、noll 区不给页码，不会出现「页脚 iii 目录 3」）；
        点线引导 + 页码右对齐列（6.4 目录规范） */
     var links = document.querySelectorAll('.md-toc a[href^="#md-h-"]');
     for(i=0;i<links.length;i++){
@@ -3108,14 +3172,16 @@ PAGED_FILLER_TMPL = """
       var dst = document.getElementById(decodeURIComponent(href.slice(1)));
       if(!dst) continue;
       var dpg = pageOf(dst);
-      var idx = -1;
-      for(var k=0;k<n;k++){ if(pgs[k] === dpg){ idx = k; break; } }
-      if(idx < 0 || skip[idx]) continue;
+      var di = -1;
+      for(k=0;k<n;k++){ if(pgs[k] === dpg){ di = k; break; } }
+      if(di < 0 || skip[di]) continue;
+      var lb = label(di);
+      if(!lb) continue;      /* noll 区：条目只留标题与点线，不给页码 */
       var dots = document.createElement('span');
       dots.className = 'toc-dots';
       var sp = document.createElement('span');
       sp.className = 'md-toc-pg';
-      sp.textContent = shown[idx];
+      sp.textContent = lb;
       links[i].appendChild(dots);
       links[i].appendChild(sp);
     }
@@ -3226,6 +3292,8 @@ def build_standalone_html(md_path, body_html, ts_css, page_cfg=None):
         '.full-page{break-before:page;break-after:page;min-height:250mm;display:flex;flex-direction:column;justify-content:center;}'
         '.full-page[data-full-pos="t"]{justify-content:flex-start;}'
         '.full-page[data-full-pos="b"]{justify-content:flex-end;}'
+        '.page-region{break-before:page;break-after:page;}'
+        '.page-region:last-child{break-after:auto;}'
         '.fill-col{min-width:0;}'
         '.fill-col img{width:100% !important;height:auto;}'
         '.fill-col table img{width:auto !important;max-width:100% !important;height:auto;}'
@@ -3390,6 +3458,11 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
         "p{orphans:2;widows:2;}li{orphans:1;widows:1;}"
         "hr{break-inside:avoid;break-after:avoid;}"
         "table{break-inside:auto;}blockquote{break-inside:avoid;}"
+        # v2.17.0 页区：起止两端都强制断页——页码是页级属性，一页只能有
+        # 一个数字，边界落在页中必然有一方的号是错的。区域若是文末最后
+        # 一块，撤掉 break-after，否则末尾会多催一张空白页。
+        ".page-region{break-before:page;break-after:page;}"
+        ".page-region:last-child{break-after:auto;}"
     )
 
     # TOC + 锚点

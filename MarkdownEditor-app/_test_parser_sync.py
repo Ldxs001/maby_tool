@@ -9,7 +9,7 @@
 
 口径：
   1. 两个文件均按标记行定位 core 段（不硬编码行号，行号可漂、标记不可丢）；
-  2. 对 html core 应用抽取时的两处已知增强（parseMarkdown 加 opts 形参、
+  2. 对 html core 应用抽取时的两处已知增强（parseMarkdown 加 _lv/opts 形参、
      IPX 行加 opts.indents 兜底），归一化后与 js core 做**字节级**全等比对；
   3. 任何在 html 解析器段或 md-parser.js core 段的改动，若未同步另一方，
      本测试 FAIL。改动流程：改 html 解析器段 → 重新抽取 md-parser.js → 本测试 PASS。
@@ -32,8 +32,8 @@ END_MARK = "/*PARSER_END*/"
 
 # 抽取时对 core 段做的两处增强（与生成脚本完全一致）
 ENHANCE = [
-    ("function parseMarkdown(src){",
-     "function parseMarkdown(src, opts){"),
+    ("function parseMarkdown(src,_lv){",
+     "function parseMarkdown(src, _lv, opts){"),
     ("var IPX=(typeof window!=='undefined'&&window.__IND_PX__)||{p:0,quote:0,li:0};",
      "var IPX=(opts&&opts.indents)||(typeof window!=='undefined'&&window.__IND_PX__)||{p:0,quote:0,li:0};"),
 ]

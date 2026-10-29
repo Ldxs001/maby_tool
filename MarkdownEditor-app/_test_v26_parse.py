@@ -81,7 +81,7 @@ T('PM4 fail-closed 原文保留', h.indexOf('mde-dp')<0&&h.indexOf('((b))')>0);
 /* 表格块 */
 const TB='@@ MDE_甲:2(2x2){'+NL+'|职务|名称|年龄|'+NL+'|:-|:-|:-|'+NL+'|总经理|tony|59|'+NL+'|秘书|lily|18|'+NL+'}';
 h=P(TB);
-T('PM5 表格块 span+摘要', h.indexOf('data-dp-val=')>0&&h.indexOf('[数据表 2×2]')>=0);
+T('PM5 表格块渲染成真表（v2.6.12 口径：不再造 [数据表 R×C] 标签）', h.indexOf('data-dp-val=')>0&&h.indexOf('<table>')>=0);
 T('PM6 表格值进 data-dp-val', h.indexOf('tony')>0&&h.indexOf('%22tony%22')>0||h.indexOf('tony')>0&&h.indexOf('&quot;')>0);
 /* 执行点 global */
 h=P('@@ MDE import 序号 is zzz{global p}');

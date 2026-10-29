@@ -1,11 +1,25 @@
 # -*- coding: utf-8 -*-
-"""v2.16.0 /img 缩略图接口：w 参数、ETag 区分、304 协商"""
-import os, sys, time, subprocess, urllib.request, urllib.parse
+"""v2.16.0 /img 缩略图接口：w 参数、ETag 区分、304 协商
+
+素材自产（1920×2744 噪点合成图），不含任何真实图片，可在任意机器复跑。
+"""
+import os, sys, time, subprocess, tempfile, urllib.request, urllib.parse
 
 APP = r'C:\Users\sm001\WorkBuddy\MarkdownEditor-app'
-SRC = r'C:\Users\sm001\WorkBuddy\2026-10-26-10-54-01\Temp\src_pdf_png.png'
+_TD = tempfile.mkdtemp(prefix='mde_v2160_http_')
+SRC = os.path.join(_TD, 'synth_big.png')
 PORT = 18799
 ESC = urllib.parse.quote(SRC)
+
+from PIL import Image, ImageDraw, ImageFilter
+_im = Image.effect_noise((1920, 2744), 60).convert('RGB')
+_d = ImageDraw.Draw(_im)
+for _i in range(0, 2744, 160):
+    _d.line([(0, _i), (1920, _i)], fill=(255, 255, 255), width=6)
+_im = _im.filter(ImageFilter.GaussianBlur(0.6))
+_im.save(SRC, 'PNG', optimize=True)
+del _im, _d
+
 ORIG = os.path.getsize(SRC)
 
 RUNNER = os.path.join(APP, 'runtime', '_test_run_server.py')

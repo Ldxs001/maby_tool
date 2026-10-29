@@ -44,8 +44,9 @@ HEADER = '''/*! md-parser.js — MDEditor 自研 Markdown 方言解释器（独�
  *
  * 相对原文件的两处增强（仅本抽取版，原文件未动）：
  *   1. 外包 UMD：浏览器全局(MDParser) / CommonJS(require) / ESM(import) 通用；
- *   2. parseMarkdown(src, opts) 增加可选第二参 opts.indents = {p, quote, li}
- *      （容器级缩进档，px）——不传时与原文 100% 一致（默认 {p:0,quote:0,li:0}）。
+ *   2. parseMarkdown(src, _lv, opts) 增加可选第三参 opts.indents = {p, quote, li}
+ *      （容器级缩进档，px）——不传时与原文 100% 一致（默认 {p:0,quote:0,li:0}）；
+ *      第二参 _lv 为 v2.18.0 主链嵌套层级（0=文档流顶层，html 内部递归专用）。
  * 其余解析逻辑逐字复制，未改动。改 html 解析器段后必须重新抽取本文件。
  */
 (function (root, factory) {
@@ -86,7 +87,7 @@ def main():
 
     # 两处抽取版增强（锚点计数断言）
     anchors = [
-        ("function parseMarkdown(src){", "function parseMarkdown(src, opts){"),
+        ("function parseMarkdown(src,_lv){", "function parseMarkdown(src, _lv, opts){"),
         ("var IPX=(typeof window!=='undefined'&&window.__IND_PX__)||{p:0,quote:0,li:0};",
          "var IPX=(opts&&opts.indents)||(typeof window!=='undefined'&&window.__IND_PX__)||{p:0,quote:0,li:0};"),
     ]

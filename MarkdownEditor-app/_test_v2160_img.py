@@ -1,13 +1,21 @@
 # -*- coding: utf-8 -*-
 """v2.16.0 实图输出：打印 / HTML 导出 / 预览缩略图 —— 便携版 Python 可跑的部分"""
-import io, os, re, sys, urllib.parse
+import io, os, re, sys, tempfile, urllib.parse
 
 APP = r'C:\Users\sm001\WorkBuddy\MarkdownEditor-app'
 sys.path.insert(0, APP)
 import md_server as S
 
-SRC = r'C:\Users\sm001\WorkBuddy\2026-10-26-10-54-01\Temp\src_pdf_png.png'
-assert os.path.isfile(SRC), SRC
+_TD = tempfile.mkdtemp(prefix='mde_v2160_img_')
+SRC = os.path.join(_TD, 'synth_big.png')
+from PIL import Image, ImageDraw, ImageFilter
+_im = Image.effect_noise((1920, 2744), 60).convert('RGB')
+_d = ImageDraw.Draw(_im)
+for _i in range(0, 2744, 160):
+    _d.line([(0, _i), (1920, _i)], fill=(255, 255, 255), width=6)
+_im = _im.filter(ImageFilter.GaussianBlur(0.6))
+_im.save(SRC, 'PNG', optimize=True)
+del _im, _d
 esc = urllib.parse.quote(SRC)
 
 PASS = FAIL = 0
@@ -31,9 +39,13 @@ for mode, want in (('orig', None), ('300', 493), ('150', 247)):
     got = int(m.group(1)) if m else None
     ck('img=%s -> w=%s' % (mode, got), got == want, 'want %s' % want)
 
-# 满页宽的图（无 width 样式）→ 300dpi 该要 2008px，原图 1920 不够，w 仍会写 2008，
-# 但 _shrink_image 会因"只缩不放"返回 None，最终由 /img 路由直供原图
-FULL = os.path.join(os.path.dirname(SRC), 'src_pdf_jpg2.jpg')
+# 满页宽的图（无 width 样式）→ 300dpi 该要 2055px，小图 572 宽不够，w 仍会写 2055，
+# 但 _shrink_image 会因"只缩不放"返回 None，最终由 /img 路由直供原图。
+# 必须用"满页也不超高"的小图，否则会先被长图切片改写成 strip，测不到 w。
+FULL = os.path.join(_TD, 'synth_small.jpg')
+_sm = Image.effect_noise((572, 747), 60).convert('RGB')
+_sm.save(FULL, 'JPEG', quality=92)
+del _sm
 pg = dict(PG); pg['img'] = '300'
 out = S.build_paged_html('', '<p><img src="/img?path=%s"></p>'
                          % urllib.parse.quote(FULL), '', pg)

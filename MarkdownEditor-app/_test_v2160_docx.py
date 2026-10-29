@@ -1,14 +1,22 @@
 # -*- coding: utf-8 -*-
 """v2.16.0 docx：降采样后体积变小，但显示宽度必须与原图口径完全一致"""
-import io, os, re, sys, zipfile, urllib.parse
+import io, os, re, sys, tempfile, zipfile, urllib.parse
 
 APP = r'C:\Users\sm001\WorkBuddy\MarkdownEditor-app'
 sys.path.insert(0, APP)
 sys.path.insert(0, os.path.join(APP, 'docxdeps'))   # 与运行期同一套依赖（内置）
 import docx_export as D
 
-SRC = r'C:\Users\sm001\WorkBuddy\2026-10-26-10-54-01\Temp\src_pdf_png.png'
-assert os.path.isfile(SRC), SRC
+_TD = tempfile.mkdtemp(prefix='mde_v2160_docx_')
+SRC = os.path.join(_TD, 'synth_big.png')
+from PIL import Image, ImageDraw, ImageFilter
+_im = Image.effect_noise((1920, 2744), 60).convert('RGB')
+_d = ImageDraw.Draw(_im)
+for _i in range(0, 2744, 160):
+    _d.line([(0, _i), (1920, _i)], fill=(255, 255, 255), width=6)
+_im = _im.filter(ImageFilter.GaussianBlur(0.6))
+_im.save(SRC, 'PNG', optimize=True)
+del _im, _d
 esc = urllib.parse.quote(SRC)
 
 PASS = FAIL = 0
@@ -76,7 +84,10 @@ ck('150dpi 显示宽与原图一致', mma and mmc and abs(mma[0]-mmc[0]) < 0.1
 
 # 只缩不放：拿一张本来就不宽的小图（572x747），满页 300dpi 要 1950px，
 # 原图不够 -> 必须原样嵌入，绝不能放大
-SMALL_SRC = os.path.join(os.path.dirname(SRC), 'src_pdf_jpg2.jpg')
+SMALL_SRC = os.path.join(_TD, 'synth_small.jpg')
+_sm = Image.effect_noise((572, 747), 60).convert('RGB')
+_sm.save(SMALL_SRC, 'JPEG', quality=92)
+del _sm
 esc_s = urllib.parse.quote(SMALL_SRC)
 _body = ('<div class="markdown-body"><p><img src="/img?path=%s" '
          'data-x-pct="100" alt="t"></p></div>' % esc_s)
