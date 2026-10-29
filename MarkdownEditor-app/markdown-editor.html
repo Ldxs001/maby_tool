@@ -2425,20 +2425,28 @@ function applyLang(l){
        v2.13.1 @@ 块感知：@@ begin full|fill|color 块内含标题行时
        不得下刀——否则 begin/end 被劈进相邻块成孤儿标记，逐块解析
        各自 fail-closed 原样泄漏（实测「@@ 紧贴 ## 上面必碎」）。
-       进入块后暂停切分，遇任意 @@ end 恢复（不校验种类：错配 end
-       时解析器本就整块 fail-closed，此处只求不无限吞块）；fence 内
-       标记行不算（与解析器口径一致）。未闭合块吞到文末仅使增量
-       粒度变粗，渲染结果不受影响；大纲/自动序号/锚点均按 DOM 与
-       起始行计算，不依赖切块边界，合并块后依旧正确。 */
-    var lines=src.split('\n'), blocks=[], cur=[], fence=false, wrap=null;
+       v2.18.1 集合扩到四家族（v2.17 的 page 一直漏着——page 块内
+       有标题同样碎）并写行首家族也在集合内自然命中；恢复改深度
+       计数——旧逻辑「遇任意 @@ end 就清 wrap」会被嵌套 color 的
+       @@ end color 提前解除保护，后半段标题又被劈碎。计数口径：
+       集合内 begin 深度 +1（并写行只含一个 begin，每行至多 +1）、
+       集合内 end 深度 −1、归零恢复。不校验种类：错配 end 时解析器
+       本就整块 fail-closed，此处只求不无限吞块；fence 内标记行
+       不算（与解析器口径一致）。未闭合块吞到文末仅使增量粒度变粗，
+       渲染结果不受影响；大纲/自动序号/锚点均按 DOM 与起始行计算，
+       不依赖切块边界，合并块后依旧正确。 */
+    var lines=src.split('\n'), blocks=[], cur=[], fence=false, wrap=null, wdepth=0;
     for(var i=0;i<lines.length;i++){
       var ln=lines[i];
       if(/^\s*(```|~~~)/.test(ln)) fence=!fence;
       if(!fence){
-        var mb=ln.match(/^[ ]{0,3}@@\s*begin\s+(full|fill|color)\b/);
-        if(mb && !wrap) wrap=mb[1];
+        var mb=ln.match(/^[ ]{0,3}@@\s*begin\s+(page|full|fill|color)\b/);
+        if(mb){ if(!wrap){ wrap=mb[1]; wdepth=1; } else { wdepth++; } }
         if(!wrap && /^#{1,2} /.test(ln) && cur.length){ blocks.push(cur.join('\n')); cur=[]; }
-        if(wrap && /^[ ]{0,3}@@\s*end\s+(full|fill|color)\b/.test(ln)) wrap=null;
+        if(wrap && /^[ ]{0,3}@@\s*end\s+(page|full|fill|color)\b/.test(ln)){
+          wdepth--;
+          if(wdepth<=0){ wrap=null; wdepth=0; }
+        }
       }
       cur.push(ln);
     }

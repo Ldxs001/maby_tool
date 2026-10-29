@@ -1,6 +1,6 @@
 # MDEditor — 本地 Markdown 编辑器
 
-**当前版本 v2.18.0**（2026-10-29）｜[更新日志](CHANGELOG.md)｜[使用指南](docs/MDEditor%20使用指南.md)
+**当前版本 v2.18.1**（2026-10-29）｜[更新日志](CHANGELOG.md)｜[使用指南](docs/MDEditor%20使用指南.md)
 
 由 AI 辅助生成的单机版 Markdown 编辑器：左侧写作、右侧实时渲染，支持 KaTeX 数学公式、**图表渲染**（Mermaid / Graphviz / WaveDrom / Vega-Lite，全部本地）、本地/网络图片、排版定制（字体/字号/对齐/缩进/表格样式）、**分页导出**（纸张、页边距、页码、自动目录，Ctrl+P 直接出 PDF）、**选区批注**与 **AI 润色改写**（对接本地 LM Studio / Ollama）、以及 **low runner**——在正文里写数据点，用 run 库在子进程里算，结果（文本 / 表格 / 图片）落回正文。**图片输出**可切原图输出 / 实图输出（300dpi·150dpi）：导出时按每张图的实际显示宽度降采样，打印、导出 HTML 与 Word 三条通道同时受益，源文件与磁盘上的图一个字节都不动。**页区页码**用 `@@ begin page{noll|1|i|I}` 划段，同一份 PDF 里前言不编号、序用罗马、正文从 1 起，占位符 `{p}`／`{P}`／`{N}` 各管一义。`@@ begin` 还支持**并写**——`page`／`full`／`color` 压在同一行，封面只要 `@@ begin page{noll} full` 一句就是「单独一页且不写页码」。除 AI 推理需本地模型服务外，全部功能**离线可用**。
 
@@ -210,7 +210,7 @@ ZIP 格式规范由 PKWARE 公开且免费使用（无专利约束，Deflate 算
 | [`docs/MDEditor 使用指南.md`](docs/MDEditor%20使用指南.md) | 18 章语法与操作手册：基础语法（含块级语法与换行规则）、列表方言、表格、公式、四种图表、图片、low runner、排版、独占一页与硬控空白、缩进块、保存导出、滚动联动、批注、AI 润色、语法速查 |
 | [`docs/low runner 数据形式规范.md`](docs/low%20runner%20数据形式规范.md) | 六种数据形式、类型契约、fail-closed 清单、全局执行、返回值渲染的设计定稿 |
 | [`docs/MDEditor-2.8 发布说明与 low runner 规范.md`](docs/MDEditor-2.8%20发布说明与%20low%20runner%20规范.md) | v2.8 更新说明 + 输入输出规范（四通道、`vals` 四形状、输出四形状、图片落点与文件名一致性边界） |
-| [`CHANGELOG.md`](CHANGELOG.md) | v1.0.0 至 v2.18.0 逐版现象 / 根因 / 修法 / 验证 |
+| [`CHANGELOG.md`](CHANGELOG.md) | v1.0.0 至 v2.18.1 逐版现象 / 根因 / 修法 / 验证 |
 | [`docs/分发清单.md`](docs/分发清单.md) | 入库 / 入包 / 不入包的分界与理由 |
 
 演示视频（1600×900 / 25fps，实机录屏）：

@@ -2,7 +2,7 @@
 
 **本工具由 AI 辅助生成**：零依赖单文件 Markdown 编辑器，左侧写作、右侧实时渲染，全程本地运行。
 
-> 本指南对应 **v2.16.0**。语法有增补时，先看文末「语法速查」；每条写法后面的章节名指向详细说明。
+> 本指南对应 **v2.18.1**。语法有增补时，先看文末「语法速查」；每条写法后面的章节名指向详细说明。
 
 ## English at a glance
 
@@ -19,7 +19,7 @@ The interface is bilingual. The small **EN / 中** button in the status bar swit
 | Image output | **TS → Image output**: *Original* (default, untouched), *300 dpi* or *150 dpi*. Export copies are downscaled to each image's real printed width (`width_mm ÷ 25.4 × dpi`), never upscaled, and only when it actually saves bytes. Print/PDF, `.html` and `.docx` all follow; the files on disk are never modified and the preview always uses thumbnails. |
 | Language | Status bar **EN / 中**, remembered on this machine. |
 | Offline | KaTeX, Paged.js and the four diagram engines (Mermaid, Graphviz, WaveDrom, Vega-Lite) are bundled; only remote images and links need the network. |
-| Extensions | `@@ begin fill {50\|50}` … `@@ end fill` (columns), `@@ blank{n}` (exact vertical space), `@@ begin full` (own page on print), `@@ MDE_…` (Python data points). The cheat sheet at the end carries an English note on every row. |
+| Extensions | `@@ begin fill {50\|50}` … `@@ end fill` (columns), `@@ blank{n}` (exact vertical space), `@@ begin full` (own page on print), `@@ begin page{noll\|1\|i\|I}` (page-number regions: no numbers / arabic / roman, `{p}` page, `{P}` total, `{N}` pages in this region; `page`+`full`+`color` can be combined in one block, write `fill` nested), `@@ MDE_…` (Python data points). The cheat sheet at the end carries an English note on every row. |
 
 ## 一、基础语法
 
@@ -690,8 +690,12 @@ run 库里的 `plotimg` 用工具自带的 Pillow 直接把编辑区的数据画
   - 三道闸（fail-closed）：**只缩不放**、**缩比 ≤ 0.84 才动手**（缩一点点重编码反而更大）、**编码后不比原图小就回滚**；任何一步出错都退回原图，不会给你一张糊图
   - 编码选型：带透明通道、或抽样色数 < 4096 的图（截图、线稿、图表）走 PNG 无损；其余走 JPEG q92
   - **预览不受此项影响**：预览栏始终按栏宽要缩略图（`宽 × DPR`）＋懒加载，切档位不会让预览变糊或变慢
+- **页码**（v2.17.0 扩了占位符）：是否显示、位置（外侧奇右偶左 / 底部居中 / 底部右侧 / 底部左侧 / 顶部居中 / 顶部右侧）、模板与字号
+  - 模板里三个占位符：`{p}` 当前页序号、`{P}` 全文可编号页数、`{N}` 当前页区的总页数（未划页区时 `{N}` 与 `{P}` 同值）
+  - 例：`{p}` 只印数字；`第 {p} 页 / 共 {P} 页` 印全文；`{p} / {N}` 在页区内印本区页数（罗马区的「共 v 页」）
+  - 分区编号（前言不印、序用罗马、正文从 1）见「十、（三）页区页码」
 
-## 十、独占一页 `@@ begin full` 与硬控空白 `@@ blank`
+## 十、独占一页 `@@ begin full`、硬控空白 `@@ blank`、页区页码与并写
 
 ### （一）独占一页 `@@ begin full{t|m|b}`
 
@@ -729,6 +733,99 @@ run 库里的 `plotimg` 用工具自带的 Pillow 直接把编辑区的数据画
 - 列表项内、分栏栏内同样可用
 - 连续多个空行本来就等于一个空行——要"空两块"写 `@@ blank{2}`，不要空两行
 - 导出 docx 时不出空档（Word 里用空段落代替）
+
+### （三）页区页码 `@@ begin page{noll|1|i|I}`
+
+一本书里前言不编号、序用罗马、正文从 1 起——这不是三种文档，是**同一份 PDF 里的三段编号**。用它划段：
+
+```
+@@ begin page{noll}
+封面与前言（这几页不印页码）
+@@ end page
+
+@@ begin page{i}
+序　为什么写这本书
+@@ end page
+
+@@ begin page{1}
+## 第一章
+（正文）
+@@ end page
+```
+
+- 参数只认四种：`noll` 区内不印页码；`1` 阿拉伯数字；`i` 小写罗马；`I` 大写罗马。**区内都从 1 / i / I 重编**，区内跨页续算
+- **起止两端都强制断页**：一页只能有一个页码，所以边界不会落在页中间。区域前后各起新页
+- 区域外照旧：阿拉伯数字、全文连续、纯目录页不计号
+- 导出 docx 不分页（本来就没有页眉页脚）；预览按普通块渲染；只有「打印 / PDF」会真的分页编号
+
+**三个占位符，各管一义**（在「排版」面板的「页码模板」里写）：
+
+| 占位符 | 区域外 | 页区内 |
+|---|---|---|
+| `{p}` | 当前页的连续序号 | 当前页在本区内的序号，形态随区 |
+| `{P}` | 全文可编号页数 | **同一个数，全文总页数** |
+| `{N}` | 同 `{P}` | 本区总页数，形态随区 |
+
+- 要「第 3 页 / 共 12 页」的区内版：`{p} / {N}`。要「共 20 页」的全文版：`{p} / {P}`
+- 罗马区写 `{p} / {N}` 会印出 `ii / 共 v 页`——`{N}` 跟着区走，`{P}` 永远报全文
+- 目录条目的页码跟页脚**同源**：罗马区的条目写 `iii`，`noll` 区的条目不给页码
+
+**四条 fail-closed**（写错了不会吞你的内容）：
+
+- 参数非法（`{x}`、`{}`、不写参数）→ 标记行按原文露出，内容照常渲染
+- 未闭合（缺 `@@ end page`）→ 标记行原样显示，不吞后面的内容
+- **嵌套不支持**：`page` 区里再开 `page` 区，内层两行标记退回普通文本
+- 区域是文末最后一块时不再补断页，不会多出一张空白尾页
+
+**两个容易误会的现象**：
+
+- 正文页脚 `1` 对应的可能是物理第 3 张纸（前言用了 `i`、`ii`）。这是分册书的常态，PDF 阅读器显示的页码是物理页序，两者本来就不同
+- `noll` 区的页**算进** `{P}`（它们物理存在，只是不印号），但不占任何 `{p}` 序号
+
+### （四）并写 `@@ begin page{…} full{t} color{X}`
+
+封面／扉页最常要的两件事是「**单独一页**」和「**不写页码**」。这两个诉求现在一行说完：
+
+```
+@@ begin page{noll} full{t}
+# 书名
+副标题
+@@ end page
+```
+
+`page`、`full`、`color` 三个家族都只是**给同一个容器加属性**，所以能压在同一个块上（书写顺序锁死为 `page → full → color`）：
+
+| 家族 | 加的东西 | 生效范围 |
+|---|---|---|
+| `page{noll\|1\|i\|I}` | 断页 + 页码体系 | 打印／PDF |
+| `full{t\|m\|b}` | 撑满页心 + 垂直定位 | 打印／PDF |
+| `color{X}` | 继承色 | 预览／导出／打印 |
+
+- **书写顺序锁死 `page → full → color`**：三者压在同一个块上，先写谁后写谁渲染结果一样——但只认这一种写法。写反了（如 `@@ begin full page`）整行按原文露出，不猜意图；`color` 的色值写 `{r}` 或裸写 `r` 都行
+- **结束标记写其中任一个即可**：`@@ end page`、`@@ end full`、`@@ end color` 等价——一个块只有一个结束位置
+- **`fill` 不参与并写**：它要横向分栏，`full` 要纵向居中，两种布局意图压不进同一个元素。要「整页 + 左右分栏」就嵌套写（见下）
+- 没声明过的家族名不闭合：块里没有 `color` 却写 `@@ end color`，这行按正文处理，块最终算未闭合
+
+**嵌套规则**（四条，v2.18.0 定稿）：
+
+1. **同族一律不许自己套自己**——`full` 套 `full`、`page` 套 `page`、`fill` 套 `fill`、`color` 块套 `color` 块都算违规。套了自己，外层会被内层的 `@@ end` 提前关掉，标记直接印到纸上（实测）。`color` 不需要套自己：行内 `@@ color r{文字}` 本来就是就近覆盖。
+2. **主链严格递增：`page`（最外）> `full`（中）> `fill`（最内）**——不管嵌套几层、中间缺谁，出现的都要保持这个相对顺序。`page` 哪怕只和 `fill` 嵌套，`page` 也必须是外层。跳级合法（`page` 直套 `fill`、`full` 直套 `fill` 都行），逆序不行（`fill` 里套 `full`、`full` 里套 `page`）。
+3. **`color` 不占主链**——它只改颜色、不布局，与任何家族自由组合、放哪层都行：`color` 块里套 `full`、`fill` 栏里套 `color` 都正常。
+4. **违规的可见形态**：begin 行与配对的 end 行**都**按原文露出（对称、不吞字），中间内容照常渲染。
+
+**并写外层 + 嵌套内层**（扉页左图右文，整页居中且不编号）：
+
+```
+@@ begin page{noll} full
+@@ begin fill{50|50}
+![](left.png)
+
+正文在右栏
+@@ end fill
+@@ end page
+```
+
+**fail-closed**：同族重复（`page{noll} page{1}`）、书写顺序错（`full page`）、参数非法（`page{x}`、`full{q}`、`color zz`）、未闭合、嵌套违规——标记行按原文露出（嵌套违规时 begin/end 成对露出），内容照常渲染，一个字段都不猜。
 
 ## 十一、缩进包围块 `<<< ... <<<`
 
@@ -826,6 +923,7 @@ AI 解释（批注弹窗内一键按钮）可请 AI 解读当前标注片段。�
 | `@@ begin fill {50\|50}` … `@@ end fill` | 图片/图表/文字分栏并排（2~4 栏、比例为版面宽度百分比、相加须 =100；**参数可省略 = 等分**；栏内 `{N}` 与图题宽度位失效、栏内图一律撑满栏；紧贴列表不继承列表缩进；docx 以无边框表格渲染） | 「图片 · 分栏」 | 2-4 columns side by side |
 | `@@ begin full{t\|m\|b}` … `@@ end full` | 独占一页：分页导出时前后强制断页、块撑满版心，`t/m/b` = 居上/居中/居下（缺省 m）；预览与 `.html` 无页概念，按普通块渲染 | 「独占一页与硬控空白」 | Own page on print |
 | `@@ blank{n}` | 硬控段间空白：n = 正文行数（可小数，上限 50），与段间距**不叠加**、压过排版面板的全局段间距；必须独占一行 | 「独占一页与硬控空白」 | Exact vertical space |
+| `@@ begin page{noll\|1\|i\|I}` … `@@ end page` | 页区：区内按档位重新编号（`noll` 不印 / `1` 阿拉伯 / `i`、`I` 罗马），起止都强制断页、一页只属一个区；占位符 `{p}`=当前页、`{P}`=全文总页数、`{N}`=本区总页数 | 「页区页码」 | Page-number regions |
 | `![说明](路径 "图题"){50l:c t s0.3}` | 图题：题注写 `()` 内末尾 `"…"`，图片须独占一段；`:` 前图参、后题参（l/c/r 对齐、t/b 上/下、w/n 裁剪/换行、s<n> 间距 = n×题注字号；图默认 b、间距默认 s0.3） | 「图片 · 图题」 | Figure caption with options |
 | `@@ caption{c t s0.3} 表题` | 表题：紧贴表格上一行；参数与图题同一套（表默认 t、间距默认 s0.3；`{}` 可省略）；后面不是表格则整行按普通文本露出 | 「表格」 | Table caption line above |
 | `@@ MDE_{键 == 值}` / `@@ MDE__{…}` | low runner 数据点（显性显示值 / 隐性不渲染；`==` 剥离进 kv，原文进 raw；带别名 `@@ MDE_甲{…}` 只喂 `is 甲` 执行点） | 「low runner」 | Python data point |
@@ -835,6 +933,7 @@ AI 解释（批注弹窗内一键按钮）可请 AI 解读当前标注片段。�
 | `^{内容}` / `_{内容}` | 上标 / 下标（角标）：正文直写、不用 `$`；须紧跟花括号，不跨行、不嵌套 | 「基础语法 · 上下标」 | Super / subscript |
 | `@@ color x{内容}` | 行内文字着色；x = 简写字母（`r g b y o p c m k w a`）或 3/6/8 位 HEX（不带 `#`，8 位末两位是透明度） | 「基础语法 · 文字颜色」 | Inline text colour |
 | `@@ begin color x` … `@@ end color` | 块级着色，块内可再用行内写法局部覆盖（花括号写法 `@@ begin color {x}` 等价） | 「基础语法 · 文字颜色」 | Block colour |
+| `@@ begin page{noll} full{t} color{r}` … `@@ end <任一个>` | 并写：`page`／`full`／`color` 三个容器压在同一个块上，书写顺序锁死 page→full→color、结束标记写其中任一个；`fill` 不参与（用嵌套）。嵌套：同族禁套、主链 page＞full＞fill 严格递增、color 任意层 | 「并写」 | Combine containers |
 | `$...$` / `$$...$$` | 行内 / 块级 LaTeX 公式 | 「数学公式」 | Inline / block LaTeX |
 | `<<< ... <<<` | 缩进包围块：块内容以上一段的缩进位置为起点整体右移；紧邻连续块逐级递进，空行/其他块打断 | 「缩进包围块」 | Indent block |
 

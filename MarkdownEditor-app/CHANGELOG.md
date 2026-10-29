@@ -11,6 +11,23 @@
 
 ---
 
+## v2.18.1（2026-10-29）
+
+**本次改动：修复预览栏并写块 begin/end 泄漏——`splitBlocks` 的 @@ 块感知集合缺 `page` 且不识并写行，块内标题触发切块后逐块解析各自 fail-closed**
+
+**修复**
+
+- **现象**：单家族 `@@ begin` 块预览正常；一旦并写（如 `@@ begin page{noll} full{t}`），预览栏把 begin／end 标记行原样露出。
+- **根因**：预览是按块增量渲染——`splitBlocks()` 负责保证 @@ 块不被 H1/H2 切碎（v2.13.1），但其感知集合仍是旧三家族 `(full|fill|color)`：**不认 v2.17 的 `page`，更不认并写行**。并写块内的 `# 标题` 触发下刀，begin 行与 end 行被劈进相邻块，逐块独立解析各自 fail-closed 原样露出——与 v2.13.1 记录的「@@ 紧贴 ## 上面必碎」同款机制。
+- **修法**：感知集合扩为四家族 `(page|full|fill|color)`——并写行首家族在集合内自然命中，v2.17 的 page 单家族块一并补上（此前 `@@ begin page{...}` 块内有标题同样会碎）；恢复条件从「遇任意 `@@ end` 清 wrap」改为**深度计数**（集合内 begin +1、end −1、归零恢复）——旧逻辑会被嵌套 `color` 的 `@@ end color` 提前解除保护，后半段标题又被劈碎。
+- **验证**：新增 `_test_v2181_splitblocks.cjs` 9 项——并写+H1 单块渲染、page 单家族回归、深度计数（嵌套 color 中段 `@@ end color` 不解除保护）、普通文档切块不回退、fence 口径、逆序非法整块保持交解析器对称露出、未闭合吞到文末、组合文档端到端无泄漏。既有 `_test_splitblocks_wrap.cjs`（v2.13.1 原用例）全过——深度计数不改变原行为。
+
+**测试**
+
+- 全量回归：`md-parser.test.cjs` 95/95、`_test_v2132_rules` 46/46、`_test_v213_matrix` 全过、`_test_splitblocks_wrap` 全过、`_test_v2170_parse` 14/14、`_test_v2180_merge` 26/26、`_test_v2180_nest` 22/22、`_test_v2180_e2e` 14/14、`_test_v2170_e2e` 17/17、`_test_parser_sync` PASS（`splitBlocks` 在解析器段之外，`md-parser.js` 无需重抽）。
+
+---
+
 ## v2.18.0（2026-10-29）
 
 **本次改动：`@@ begin` 并写（page→full→color 顺序锁死）+ 嵌套规则定稿——四族同族禁套、主链 page > full > fill 严格递增、color 任意层**
