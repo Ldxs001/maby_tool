@@ -64,7 +64,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 111  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 112  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 # MSIX 商城版判定（微软商店政策 11.16 的"报告 AI 生成内容"入口用）：
 # 商城包与侧载包恒落在 WindowsApps 之下，Release 安装包/便携形态不会。
@@ -3487,6 +3487,10 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
     )
 
     # TOC + 锚点
+    # v2.21.0 级别排除：排版设置「不计入目录」勾选 #/##/### 后，对应级别的
+    # 标题照常渲染、只是不收集进目录、不加锚（与 noll 区同口径）。场景=封面
+    # 大标题用 # 但不希望它出现在目录里，又不想为它套一个 noll 页区。
+    toc_ex = {lv for lv in (1, 2, 3) if toc_cfg.get("ex%d" % lv)}
     # v2.19.0 noll 区标题不进目录：页区标了 noll 就是不编号，其内标题在目录里
     # 无页码可填（实测「封面 h1 进目录，条目光秃秃」判例）。扫描顶层 noll
     # page-region 的字符区间，区间内的 h1/h2/h3 不加锚、不收集。
@@ -3508,6 +3512,8 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
 
     def _head(m):
         lvl = int(m.group(1))
+        if lvl in toc_ex:
+            return m.group(0)
         if any(s <= m.start() < e for s, e in _noll_spans):
             return m.group(0)
         inner = m.group(2)
