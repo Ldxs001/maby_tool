@@ -11,6 +11,33 @@
 
 ---
 
+## v2.19.0（2026-10-29）
+
+**本次改动：① 并写 end 改集合语义（`@@ end X` 只关 X，`@@ end X Y` 同关多个）；② `noll` 区标题不进目录；③ 修并写块内嵌 fill 被深度计数误杀**
+
+**变更（end 集合语义）**
+
+- **旧语义废弃**：v2.18.0 规定「结束标记认本块声明过的任一家族名」——`@@ begin page full` 写 `@@ end page` 或 `@@ end full` 都关整块。实际使用中语义不清：写 `@@ end full` 时用户无法表达「只关 full、page 还开着」。
+- **新语义**：并写本就是嵌套的简写，end 按嵌套配对——`@@ end X` 只关 X；`@@ end X Y` 同关 X 和 Y（成员须当前开着，end 了没开的家族整块 fail-closed）；end 成员书写顺序无关；关剩下的家族**继续收内容**，后续内容按剩余层级重开内层容器（page div 只开一次、`data-pr-id` 只分配一次）。
+- **流式分段渲染**：end 事件把内容切段，按各段开集合输出嵌套 DOM——`@@ begin page full color … @@ end color … @@ end page … @@ end full` → `<div page><div full><div color>段1</div>段2</div></div>`。end 拆行（`@@ end page` 换行 `@@ end color`）与合并 end（`@@ end page color`）产生中间空段，渲染时跳过空段、下一段直接对上一实段收放层，DOM 与合并写法逐字节一致（空段按段重开容器会产出空 `full-page` div，引发多余断页）；末段不跳，空末段仍渲染空容器（保住「整块空白页」用途）。
+- **嵌套模型重构**：并写从「三家族压同一个 div」（v2.18.0）改为「begin 展开成嵌套容器」。断页属性只在开/关点各生效一次，无双断页；`_MGORD` 顺序锁死不变。
+- **per-family 深度计数**：块内嵌套块的 begin/end 按行内家族词各 ±1——并写声明的 color 深度 1，内层再 `begin color` 升 2、内层 `end color` 降回 1 不关外层，再一个 `end color` 归零才关外层。内层块照常递归渲染，同族由 rank 裁决 fail-closed。
+
+**修复**
+
+- **并写块内嵌 fill 被误杀**：`_mgDepth` 只初始化并写家族（page/full/color），内层 `@@ begin fill` 把 fill 深度变成 `undefined++`（NaN），配对的 `@@ end fill` 判负 → 整块 fail-closed。修法：四家族深度全部预置 0。
+- **`noll` 区标题不进目录**：页区标了 `noll` 就是不编号，其内标题在目录里无页码可填（判例：封面 h1 进目录、条目无页码无点线光秃秃）。修法：生成目录时扫描顶层 `page-region[data-pn=noll]` 的字符区间（按 div 深度配对取闭合位置，覆盖 fill/full 任意深层），区间内的 h1/h2/h3 不加锚、不收集；正文与编号区的标题编号不受影响。
+
+**测试**
+
+- `_test_v2190_end.cjs` 13 项：end 单关 3（color/full/page 各层）、end 并写 3、拆行/乱序等价 2、fail-closed 3（end 未开、同族关两次、关剩未关完）、内层配对 2。
+- `_test_v2190_toc.py` 8 项：noll 区 h1/h2 不进目录且不加锚、正文/附录正常进、条目数正确、fill 深处标题也排除、编号不受影响。
+- `_test_v2180_merge.cjs` 按新语义重写（30 项）、`_test_v2180_nest.cjs` 并写容器两节重写（22 项）、`_test_v2181_splitblocks.cjs` end 行改集合写法（9 项）。
+- **全量回归**：md-parser core、v2132 46、v213 matrix、splitblocks_wrap（v2.13.1 原行为）、v2170 parse 14 / filler 30 / e2e 17、v2180 e2e 14、v26 33、escape 11、list 20、indent 10、table 8 全过。
+- 目录回填实测（Playwright + Paged.js，合成文档 15 页）：目录 14 条全部有点线有页码（1→11 + I/II），noll 封面标题不出现，页脚 noll 空／正文 1-11／附录 I-II。
+
+---
+
 ## v2.18.1（2026-10-29）
 
 **本次改动：修复预览栏并写块 begin/end 泄漏——`splitBlocks` 的 @@ 块感知集合缺 `page` 且不识并写行，块内标题触发切块后逐块解析各自 fail-closed**

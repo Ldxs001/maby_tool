@@ -2,7 +2,7 @@
 
 **本工具由 AI 辅助生成**：零依赖单文件 Markdown 编辑器，左侧写作、右侧实时渲染，全程本地运行。
 
-> 本指南对应 **v2.18.1**。语法有增补时，先看文末「语法速查」；每条写法后面的章节名指向详细说明。
+> 本指南对应 **v2.19.0**。语法有增补时，先看文末「语法速查」；每条写法后面的章节名指向详细说明。
 
 ## English at a glance
 
@@ -790,10 +790,10 @@ run 库里的 `plotimg` 用工具自带的 Pillow 直接把编辑区的数据画
 @@ begin page{noll} full{t}
 # 书名
 副标题
-@@ end page
+@@ end page full
 ```
 
-`page`、`full`、`color` 三个家族都只是**给同一个容器加属性**，所以能压在同一个块上（书写顺序锁死为 `page → full → color`）：
+**并写就是嵌套的简写**。`@@ begin page{noll} full{t}` 实际展开成 `page` 套 `full` 两层容器（一层一个 div），书写顺序锁死为 `page → full → color`（也是嵌套顺序）：
 
 | 家族 | 加的东西 | 生效范围 |
 |---|---|---|
@@ -801,10 +801,10 @@ run 库里的 `plotimg` 用工具自带的 Pillow 直接把编辑区的数据画
 | `full{t\|m\|b}` | 撑满页心 + 垂直定位 | 打印／PDF |
 | `color{X}` | 继承色 | 预览／导出／打印 |
 
-- **书写顺序锁死 `page → full → color`**：三者压在同一个块上，先写谁后写谁渲染结果一样——但只认这一种写法。写反了（如 `@@ begin full page`）整行按原文露出，不猜意图；`color` 的色值写 `{r}` 或裸写 `r` 都行
-- **结束标记写其中任一个即可**：`@@ end page`、`@@ end full`、`@@ end color` 等价——一个块只有一个结束位置
+- **书写顺序锁死 `page → full → color`**：展开后的嵌套顺序就是书写顺序。写反了（如 `@@ begin full page`）整行按原文露出，不猜意图；`color` 的色值写 `{r}` 或裸写 `r` 都行
+- **end 也是集合并写（v2.19.0）**：`@@ end X` 只关 X，`@@ end X Y` 同关 X 和 Y，关剩下的家族**继续收内容**（后续内容按剩余层级重开内层容器）。end 成员的书写顺序无所谓；end 了没开的家族整块 fail-closed。上面示例里 `@@ end page full` 一次关两层，拆成 `@@ end full` 换行 `@@ end page` 也等价
 - **`fill` 不参与并写**：它要横向分栏，`full` 要纵向居中，两种布局意图压不进同一个元素。要「整页 + 左右分栏」就嵌套写（见下）
-- 没声明过的家族名不闭合：块里没有 `color` 却写 `@@ end color`，这行按正文处理，块最终算未闭合
+- **noll 区标题不进目录（v2.19.0）**：目录只收编了号的区的标题——`noll` 区（如封面）的 h1/h2/h3 不出现在目录里，后面的标题编号也不受它影响
 
 **嵌套规则**（四条，v2.18.0 定稿）：
 
@@ -822,10 +822,10 @@ run 库里的 `plotimg` 用工具自带的 Pillow 直接把编辑区的数据画
 
 正文在右栏
 @@ end fill
-@@ end page
+@@ end page full
 ```
 
-**fail-closed**：同族重复（`page{noll} page{1}`）、书写顺序错（`full page`）、参数非法（`page{x}`、`full{q}`、`color zz`）、未闭合、嵌套违规——标记行按原文露出（嵌套违规时 begin/end 成对露出），内容照常渲染，一个字段都不猜。
+**fail-closed**：同族重复（`page{noll} page{1}`）、书写顺序错（`full page`）、参数非法（`page{x}`、`full{q}`、`color zz`）、未闭合（关剩家族没关完）、end 了没开的家族、嵌套违规——标记行按原文露出（嵌套违规时 begin/end 成对露出），内容照常渲染，一个字段都不猜。
 
 ## 十一、缩进包围块 `<<< ... <<<`
 
@@ -933,7 +933,7 @@ AI 解释（批注弹窗内一键按钮）可请 AI 解读当前标注片段。�
 | `^{内容}` / `_{内容}` | 上标 / 下标（角标）：正文直写、不用 `$`；须紧跟花括号，不跨行、不嵌套 | 「基础语法 · 上下标」 | Super / subscript |
 | `@@ color x{内容}` | 行内文字着色；x = 简写字母（`r g b y o p c m k w a`）或 3/6/8 位 HEX（不带 `#`，8 位末两位是透明度） | 「基础语法 · 文字颜色」 | Inline text colour |
 | `@@ begin color x` … `@@ end color` | 块级着色，块内可再用行内写法局部覆盖（花括号写法 `@@ begin color {x}` 等价） | 「基础语法 · 文字颜色」 | Block colour |
-| `@@ begin page{noll} full{t} color{r}` … `@@ end <任一个>` | 并写：`page`／`full`／`color` 三个容器压在同一个块上，书写顺序锁死 page→full→color、结束标记写其中任一个；`fill` 不参与（用嵌套）。嵌套：同族禁套、主链 page＞full＞fill 严格递增、color 任意层 | 「并写」 | Combine containers |
+| `@@ begin page{noll} full{t} color{r}` … `@@ end <关剩的>` | 并写：嵌套的简写，展开成 page＞full＞color 嵌套容器（书写顺序锁死）；end 也是并写——`@@ end X` 只关 X、`@@ end X Y` 同关多个、关剩的继续收内容；`fill` 不参与（用嵌套）。嵌套：同族禁套、主链 page＞full＞fill 严格递增、color 任意层 | 「并写」 | Combine containers |
 | `$...$` / `$$...$$` | 行内 / 块级 LaTeX 公式 | 「数学公式」 | Inline / block LaTeX |
 | `<<< ... <<<` | 缩进包围块：块内容以上一段的缩进位置为起点整体右移；紧邻连续块逐级递进，空行/其他块打断 | 「缩进包围块」 | Indent block |
 

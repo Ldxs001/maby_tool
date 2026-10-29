@@ -29,7 +29,7 @@ const joined = (src) => splitBlocks(src).map(b => parseMarkdown(b)).join('');
 
 /* 1. 并写块含 H1：整块不切，解析出 page-region，标记不露出 */
 t('并写 page{noll} full + H1：单块渲染 page-region，begin/end 不露出', () => {
-  const src = '@@ begin page{noll} full{t}\n# 封面\n副标题\n@@ end page\n\n## 第二章\n正文';
+  const src = '@@ begin page{noll} full{t}\n# 封面\n副标题\n@@ end page full\n\n## 第二章\n正文';
   const blocks = splitBlocks(src);
   if (blocks.length !== 2) return false;
   const h = joined(src);
@@ -115,7 +115,7 @@ t('组合文档端到端：无任何标记泄漏', () => {
     '@@ begin page{noll} full{t}',
     '# 书名',
     '副题',
-    '@@ end page',
+    '@@ end page full',
     '',
     '@@ begin page{i}',
     '# 序',

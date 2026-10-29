@@ -697,10 +697,11 @@ function parseFenceLang(raw){
    自己会让外层被内层的 end 提前关掉、内层 begin 与末尾 end 直接印在纸面
    （full 套 full：p2 印 @@ begin full{b}、p3 印 @@ end full，只出 1 个
    full-page）；color 不需要自嵌套，行内 @@ color r{文字} 本来就是就近覆盖。
-   规矩二（并写顺序）：三者压在同一个 div 上，顺序不影响渲染结果，锁死
-   page→full→color 只为唯一写法（不锁则 full page 与 page full 逐字节相同，
-   同一份文档两种写法，diff 出噪音、报错也没法指名）；与规矩一的层级同构。
-   越界 / 同族 / 顺序错 → 标记行露出、内容照常渲染（fail-closed）。 */
+   规矩二（并写顺序）：begin 并写 = 展开成嵌套（v2.19.0），书写顺序即嵌套
+   顺序，锁死 page→full→color 只为唯一写法（不锁则 full page 与 page full
+   逐字节相同，同一份文档两种写法，diff 出噪音、报错也没法指名）；与规矩一
+   的层级同构。end 同为集合并写：@@ end X 只关 X，@@ end X Y 同关多个，
+   关剩的继续收内容（详见并写分支头注释）。 */
 var _LV={page:1,full:2,fill:3};      /* 嵌套层级（外→内），color 不参与 */
 var _MGORD={page:0,full:1,color:2};  /* 并写书写顺序，必须单调递增 */
 /* 从 @@ begin 之后那段文字里按出现顺序取家族名。只用于判断「是不是自己套
@@ -1064,28 +1065,31 @@ function parseMarkdown(src, _lv, opts){
       }
       /* 参数非法：不接管，落到下面普通段落按原文露出 */
     }
-    /* v2.18.0 并写：@@ begin page{noll|1|i|I} full{t|m|b} color{X} … @@ end <声明过的任一>。
-       三个家族都只是「给同一个容器加属性」，CSS 完全正交，所以能压在**一个**
-       div 上——封面「单独一页 + 不写页码」从此一行搞定，不必套两层：
+    /* v2.19.0 并写（end 集合语义）：@@ begin page{noll|1|i|I} full{t|m|b} color{X} …
+       begin 并写 = 展开成嵌套：page 压 full 压 color，一层一个 div，容器
+       只开一次只关一次——Paged.js 的断页属性只在开/关点各生效一次，无
+       双重断页。封面「单独一页 + 不写页码」仍是一行声明。
          page  → class page-region + data-pn / data-pr-id（断页 + 页码体系）
          full  → class full-page + data-full-pos（撑满页心 + 垂直定位）
          color → class mde-color + 内联 color（继承色）
-       fill **不参与**并写：它要 display:flex 横向分栏，full 要 display:flex
-       纵向居中，两种布局意图压进同一个元素必打架；它自带 begin/end，直接
-       嵌套即可（@@ begin full 里套 @@ begin fill），一样清楚。
-       书写顺序锁死 page→full→color（_MGORD 单调递增校验）：三者压在同一
-       div 上渲染结果与顺序无关，锁死只为唯一写法——同一份文档两种写法会
-       制造 diff 噪音，报错也没法指名。各带自己的参数（color 允许裸词）。
-       同名重复 / 顺序错 / 参数非法 / 未闭合 → 整行按原文露出（fail-closed，
-       与四个单家族分支同口径）。
-       结束行认**本块声明过的**家族名之一（@@ end page / full / color 等价）：
-       一个块只有一个结束位置，写哪个都指向同一处；没声明过的名字不闭合，
-       避免张冠李戴。
-       嵌套交给 _scanBeginBlock + 递归 rank：内层与容器同族（teams 交集）
-       的 begin/end 整对零宽露出；容器之外的块（fill 等）原样收集、递归
-       渲染，其内部再写容器家族由 rank 裁决（fill 里写 page/full 被拒）。
-       容器主链层级 = 其中 rank 最高的家族（只 page+color→1，带 full→2）：
-       容器内 page/full 不得再开（rank 不大于 _lv），fill 照常可开。
+       fill 不参与并写：flex 横向分栏与 full 纵向居中冲突，要「整页+分栏」
+       用嵌套。begin 书写顺序仍锁死 page→full→color（_MGORD，唯一写法）。
+       **end 集合语义（v2.19.0，替代 v2.18 的「任一 end 关整块」）**：
+         @@ end color      → 只关 color，page/full 继续收内容
+         @@ end page color → 同时关 page 和 color，full 继续收内容
+         @@ end full       → 只关 full
+       end 成员书写顺序不校验（同时移除，与顺序无关）；成员须**当前开着**，
+       end 了没开的家族整块 fail-closed。集合清空 → 块闭合。
+       渲染：end 事件把内容切段，按各段开集合流式嵌套——
+         @@ begin page full color … @@ end color … @@ end page … @@ end full
+       →  <div page><div full><div color>段1</div>段2</div>段3</div>
+       DOM 层级由 begin 声明序决定，与 end 书写顺序无关。
+       嵌套块（fill/内层 color…）照旧进内容递归渲染：per-family 深度计数
+       保证内层 begin/end 只在自己那层配对——并写声明的 color 深度 1，内层
+       再 begin color 升 2，内层 end color 降回 1 不关外层，再来一个 end
+       color 归零才关外层。end 行纯内层闭合（不涉 openSet 成员）→ 行进
+       内容；涉及外层成员 → 是分段点，行不进内容（混写内外层的 end 行会让
+       内层块未闭合、由递归 fail-closed——混写本就不该鼓励）。
        家族数 < 2 不进本分支：单家族由上面四个分支先命中，输出逐字节不变。 */
     var _mgt=line.match(/^[ ]{0,3}@@\s*begin\s+([\s\S]*?)[ \t]*$/);
     if(_mgt){
@@ -1127,34 +1131,82 @@ function parseMarkdown(src, _lv, opts){
           }
         }
         if(_mgOk){
-          var _mgTeams=[];
-          for(var _mt=0;_mt<_mgl.length;_mt++){_mgTeams.push(_mgl[_mt].f);}
-          var _mgr=_scanBeginBlock(lines,i+1,_mgTeams);
-          var _mgIn=_mgr.inner,_mgCl=_mgr.closed,_mgK=_mgr.next;
-          if(_mgCl){
-            var _mgCls=[],_mgAt='';
-            if(_mgA.page!==undefined){
-              _pgRegSeq++;
-              _mgCls.push('page-region');
-              _mgAt+=' data-pn="'+_mgA.page+'" data-pr-id="pr'+_pgRegSeq+'"';
+          /* 分段扫描：per-family 深度计数 + openSet */
+          var _mgSegs=[],_mgBuf=[],_mgOpen={},_mgDepth={page:0,full:0,fill:0,color:0},_mgOpenN=_mgl.length,_mgOk2=true,_mgK2=i+1;
+          for(var _md=0;_md<_mgl.length;_md++){_mgOpen[_mgl[_md].f]=true;_mgDepth[_mgl[_md].f]=1;}
+          while(_mgK2<lines.length){
+            var _mln=lines[_mgK2];
+            var _mgBm=_mln.match(/^[ ]{0,3}@@\s*begin\s+([\s\S]*)$/);
+            if(_mgBm){
+              /* begin 行：行内家族词各 +1（并写 begin 行含多个家族词；
+                 参数花括号与裸词色值不会混进——page{noll} 的 { 断词界） */
+              var _mgWd=_mgBm[1].match(/(?:^|[^\w])(page|full|fill|color)\b/g);
+              if(_mgWd){for(var _mw=0;_mw<_mgWd.length;_mw++){_mgDepth[_mgWd[_mw].replace(/^[^\w]+/,'')]++;}}
+              _mgBuf.push(_mln);_mgK2++;continue;
             }
-            if(_mgA.full!==undefined){
-              _mgCls.push('full-page');
-              _mgAt+=' data-full-pos="'+_mgA.full+'"';
+            var _mgEm=_mln.match(/^[ ]{0,3}@@\s*end\s+((?:page|full|fill|color)(?:[ \t]+(?:page|full|fill|color))*)[ \t]*$/);
+            if(_mgEm){
+              var _mgFs=_mgEm[1].split(/[ \t]+/),_mgClose=[];
+              for(var _mf2=0;_mf2<_mgFs.length;_mf2++){
+                var _fn=_mgFs[_mf2];
+                _mgDepth[_fn]=(_mgDepth[_fn]||0)-1;
+                if(_mgDepth[_fn]<0){_mgOk2=false;break;}   /* end 了没开的 */
+                if(_mgDepth[_fn]===0&&_mgOpen[_fn]){_mgClose.push(_fn);}   /* 外层成员归零 → 分段 */
+              }
+              if(!_mgOk2){break;}
+              if(_mgClose.length){
+                /* 分段点：本段收尾，成员移出集合；end 行是结构行不进内容 */
+                var _oarr=[];
+                for(var _oq=0;_oq<_mgl.length;_oq++){if(_mgOpen[_mgl[_oq].f])_oarr.push(_mgl[_oq].f);}
+                _mgSegs.push({c:_mgBuf,o:_oarr});
+                _mgBuf=[];
+                for(var _mc2=0;_mc2<_mgClose.length;_mc2++){delete _mgOpen[_mgClose[_mc2]];}
+                _mgOpenN-=_mgClose.length;
+                _mgK2++;
+                if(_mgOpenN===0){break;}   /* 集合清空 → 块闭合 */
+              }else{
+                _mgBuf.push(_mln);_mgK2++;   /* 纯内层闭合：行进内容交递归 */
+              }
+              continue;
             }
-            if(_mgA.color!==undefined){_mgCls.push('mde-color');}
-            /* 容器主链层级 = 其中 rank 最高的家族：只 page+color → 1，
-               带 full → 2。容器内同链 begin 由各分支 rank 裁决。 */
+            _mgBuf.push(_mln);_mgK2++;
+          }
+          if(_mgOk2&&_mgOpenN===0&&_mgSegs.length){
+            /* 流式嵌套输出：集合单调递减（end 只移除），每段关多开的层、
+               不开新层；page div 只在首段打开（pr-id 只分配一次） */
+            var _mgHtml='',_mgPrev=[];
             var _mgLv=(_mgA.full!==undefined)?_LV.full:_LV.page;
-            html+='<div class="'+_mgCls.join(' ')+'"'+_mgAt+
-              (_mgA.color!==undefined?' style="color:'+_mgA.color+'"':'')+'>'+
-              parseMarkdown(_mgIn.join('\n'),_mgLv)+'</div>';
-            i=_mgK;
+            for(var _ms=0;_ms<_mgSegs.length;_ms++){
+              /* 中间空段跳过：end 拆行（end page 换行 end color）会切出
+                 无内容的中间段，按段重开容器会产出空 div（full-page 空
+                 容器引发多余断页）。跳过后下一段直接对上一实段收放层，
+                 DOM 与合并 end 写法逐字节一致；末段不跳（空末段=空容器
+                 仍渲染，保住「整块空白页」用途）。 */
+              if(_ms<_mgSegs.length-1&&!_mgSegs[_ms].c.length){continue;}
+              var _so=_mgSegs[_ms].o,_keep=0;
+              while(_keep<_mgPrev.length&&_keep<_so.length&&_mgPrev[_keep]===_so[_keep]){_keep++;}
+              for(var _cl2=_mgPrev.length-1;_cl2>=_keep;_cl2--){_mgHtml+='</div>';}
+              for(var _op=_keep;_op<_so.length;_op++){
+                if(_so[_op]==='page'){
+                  _pgRegSeq++;
+                  _mgHtml+='<div class="page-region" data-pn="'+_mgA.page+'" data-pr-id="pr'+_pgRegSeq+'">';
+                }else if(_so[_op]==='full'){
+                  _mgHtml+='<div class="full-page" data-full-pos="'+_mgA.full+'">';
+                }else{
+                  _mgHtml+='<div class="mde-color" style="color:'+_mgA.color+'">';
+                }
+              }
+              if(_mgSegs[_ms].c.length){_mgHtml+=parseMarkdown(_mgSegs[_ms].c.join('\n'),_mgLv);}
+              _mgPrev=_so;
+            }
+            for(var _cl3=_mgPrev.length-1;_cl3>=0;_cl3--){_mgHtml+='</div>';}
+            html+=_mgHtml;
+            i=_mgK2;
             continue;
           }
         }
       }
-      /* 不成立（单家族 / 参数非法 / 顺序错 / 未闭合）→ 落到下面普通段落按原文露出 */
+      /* 不成立（单家族 / 参数非法 / 顺序错 / end 未开家族 / 未闭合）→ 落到下面普通段落按原文露出 */
     }
      /* MDE 跨行数据点（@@ MDE_{ 或 :N(rxc){ 后行内未闭合 → 收集到 }）：
         ① 普通跨行 = 长文本（形式 1，解析含 (( )) 行文/向量等形式）

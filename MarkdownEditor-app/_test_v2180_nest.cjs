@@ -88,36 +88,37 @@ t('full 内 color 与 fill 交错：color 独立、fill 正常', () => {
   return cnt(h, 'mde-color') === 1 && cnt(h, 'full-page') === 1 && cnt(h, 'fill-row') === 1;
 });
 
-console.log('\n— 并写容器的内部层级 —');
+console.log('\n— 并写容器的内部层级（v2.19 流式嵌套模型）—');
 t('并写 page+full 内套 fill：正常（容器 _lv=2，fill 3>2）', () => {
-  const h = parseMarkdown('@@ begin page{noll} full\n@@ begin fill\n甲\n\n乙\n@@ end fill\n@@ end page');
+  const h = parseMarkdown('@@ begin page{noll} full\n@@ begin fill\n甲\n\n乙\n@@ end fill\n@@ end page full');
   return cnt(h, 'page-region') === 1 && cnt(h, 'full-page') === 1 && cnt(h, 'fill-row') === 1;
 });
-t('并写 page+full 内套 full：同级 → 零宽露出', () => {
-  const h = parseMarkdown('@@ begin page{noll} full\n@@ begin full\nA\n@@ end full\n@@ end page');
+t('并写 page+full 内套 full：同族 → 原文露出（外层 full-page 只 1 个）', () => {
+  const h = parseMarkdown('@@ begin page{noll} full\n@@ begin full\nA\n@@ end full\n@@ end page full');
   return cnt(h, 'page-region') === 1 && cnt(h, 'full-page') === 1 &&
-    h.indexOf(ZW + '@@ begin full') >= 0;
+    h.indexOf('<p>@@ begin full</p>') >= 0 && h.indexOf('<p>A</p>') >= 0 &&
+    h.indexOf('<p>@@ end full</p>') >= 0;
 });
-t('并写 page+full 内套 page：逆序 → 零宽露出', () => {
-  const h = parseMarkdown('@@ begin page{noll} full\n@@ begin page{1}\nA\n@@ end page\n@@ end page');
-  return cnt(h, 'page-region') === 1 && h.indexOf(ZW + '@@ begin page{1}') >= 0;
+t('并写 page+full 内套 page：主链逆序 → 原文露出（全文只一个 page-region）', () => {
+  const h = parseMarkdown('@@ begin page{noll} full\n@@ begin page{1}\nA\n@@ end page\n@@ end page full');
+  return cnt(h, 'page-region') === 1 &&
+    h.indexOf('<p>@@ begin page{1}</p>') >= 0 && h.indexOf('<p>A</p>') >= 0;
 });
-t('并写 page+color 内套 fill：正常（容器 _lv=1）', () => {
-  const h = parseMarkdown('@@ begin page{1} color r\n@@ begin fill\n甲\n\n乙\n@@ end fill\n@@ end page');
+t('并写 page+color 内套 fill：正常（fill 不在并写集合，照常嵌套）', () => {
+  const h = parseMarkdown('@@ begin page{1} color r\n@@ begin fill\n甲\n\n乙\n@@ end fill\n@@ end page color');
   return cnt(h, 'page-region') === 1 && cnt(h, 'mde-color') === 1 && cnt(h, 'fill-row') === 1;
 });
-t('并写 page+color 内套 full：正常（容器 _lv=1，full 2>1）', () => {
-  const h = parseMarkdown('@@ begin page{1} color r\n@@ begin full\nA\n@@ end full\n@@ end page');
-  return cnt(h, 'page-region') === 1 && cnt(h, 'full-page') === 1;
+t('并写 page+color 内套 full：正常（容器 _lv=1，full 2>1，full 嵌在 page>color 内）', () => {
+  const h = parseMarkdown('@@ begin page{1} color r\n@@ begin full\nA\n@@ end full\n@@ end page color');
+  return cnt(h, 'page-region') === 1 && cnt(h, 'mde-color') === 1 && cnt(h, 'full-page') === 1;
 });
 
-console.log('\n— 深度跟踪：teams 之外的内层块不干扰外层闭合 —');
-t('并写内 fill 未闭合时出现的 end full 不提前关外层', () => {
+console.log('\n— 深度跟踪：per-family 计数下内外层 end 各归各 —');
+t('并写内层 fill 未闭合：fill fail-closed 露出，end full 关掉 full 成员后分段', () => {
   const h = parseMarkdown('@@ begin page{noll} full\n@@ begin fill\n甲\n@@ end full\n@@ end page');
-  /* end full 落在 fill 栈内 → 弹栈失败、原样保留；外层 end page 才收尾。
-     fill 未闭合 → fail-closed：fill-row 0 个，标记行按原文 */
-  return cnt(h, 'fill-row') === 0 &&
-    h.indexOf('@@ begin fill') >= 0 && h.indexOf('@@ end page') >= 0;
+  /* @@ end full 命中并写成员 full → 分段点；fill 未闭合由递归 fail-closed */
+  return cnt(h, 'page-region') === 1 && cnt(h, 'full-page') === 1 &&
+    cnt(h, 'fill-row') === 0 && h.indexOf('@@ begin fill') >= 0;
 });
 t('fill 内嵌 full 块：end full 弹栈不关外层，end fill 才闭合', () => {
   const h = parseMarkdown('@@ begin fill\n甲\n\n@@ begin full\nA\n@@ end full\n\n乙\n@@ end fill');

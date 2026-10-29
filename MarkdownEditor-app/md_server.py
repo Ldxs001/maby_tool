@@ -64,7 +64,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 109  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 110  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 # MSIX 商城版判定（微软商店政策 11.16 的"报告 AI 生成内容"入口用）：
 # 商城包与侧载包恒落在 WindowsApps 之下，Release 安装包/便携形态不会。
@@ -3176,7 +3176,7 @@ PAGED_FILLER_TMPL = """
       for(k=0;k<n;k++){ if(pgs[k] === dpg){ di = k; break; } }
       if(di < 0 || skip[di]) continue;
       var lb = label(di);
-      if(!lb) continue;      /* noll 区：条目只留标题与点线，不给页码 */
+      if(!lb) continue;      /* 兜底：noll 区标题已不进目录（v2.19.0），理论不达 */
       var dots = document.createElement('span');
       dots.className = 'toc-dots';
       var sp = document.createElement('span');
@@ -3466,10 +3466,29 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
     )
 
     # TOC + 锚点
+    # v2.19.0 noll 区标题不进目录：页区标了 noll 就是不编号，其内标题在目录里
+    # 无页码可填（实测「封面 h1 进目录，条目光秃秃」判例）。扫描顶层 noll
+    # page-region 的字符区间，区间内的 h1/h2/h3 不加锚、不收集。
+    # page-region 由解析器保证不嵌套，但内部可有任意 div（full/fill/color…），
+    # 所以闭合位置按 div 深度配对，不数到第一个 </div> 就收。
+    _noll_spans = []
+    for _m in re.finditer(r'<div class="[^"]*\bpage-region\b[^"]*"[^>]*>', body_html):
+        if 'data-pn="noll"' not in _m.group(0):
+            continue
+        _depth, _pos = 1, _m.end()
+        for _t in re.finditer(r'<div\b|</div>', body_html[_m.end():]):
+            _depth += -1 if _t.group(0) == '</div>' else 1
+            if _depth == 0:
+                _pos = _m.end() + _t.end()
+                break
+        _noll_spans.append((_m.start(), _pos))
+
     heads = []
 
     def _head(m):
         lvl = int(m.group(1))
+        if any(s <= m.start() < e for s, e in _noll_spans):
+            return m.group(0)
         inner = m.group(2)
         heads.append((lvl, inner))
         return '<h%s id="md-h-%d">%s</h%s>' % (lvl, len(heads), inner, lvl)
