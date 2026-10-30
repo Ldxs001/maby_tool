@@ -256,9 +256,255 @@ check("T16 未引用资产不入包",
       "assets/keep.png" in names16 and "assets/stray.png" not in names16,
       ",".join(names16))
 
+# --- T17 同尺寸换内容：资产 diff 必须认内容，不能认大小 ---
+# 事故背景：旧实现按 file_size 判「变没变」，8 字节换 8 字节判为未变化，包内留旧图。
+# 当场看不出来（预览读工作目录，是新图），重启解包后旧图回来——静默回滚。
+sig_smd = os.path.join(TD, "sig.smd")
+sstage = os.path.join(_smd._tmp_root(), "test_stage_sig")
+shutil.rmtree(sstage, ignore_errors=True)
+os.makedirs(os.path.join(sstage, "assets"), exist_ok=True)
+with io.open(os.path.join(sstage, "doc.md"), "w", encoding="utf-8") as f:
+    f.write("# 指纹\n\n![a](assets/a.png)\n")
+with open(os.path.join(sstage, "assets", "a.png"), "wb") as f:
+    f.write(b"AAAA-OLD")
+_smd.pack_from_dir(sig_smd, os.path.join(sstage, "doc.md"), os.path.join(sstage, "assets"))
+with open(os.path.join(sstage, "assets", "a.png"), "wb") as f:
+    f.write(b"BBBB-NEW")                       # 同长 8 字节，内容不同
+_smd.save_from_dir(sig_smd, sstage)
+with zipfile.ZipFile(sig_smd) as z:
+    got17 = z.read("assets/a.png")
+check("T17 同尺寸换内容进包", got17 == b"BBBB-NEW", repr(got17))
+check("T17 工作目录与包内一致",
+      open(os.path.join(sstage, "assets", "a.png"), "rb").read() == got17)
+
+# --- T18 文件名含空格：不判孤儿、不删图、能往返 ---
+# 事故背景：引用正则用 \s 当终止符，assets/my pic.png 只认到 assets/my，图被判
+# 「没人用」→ 从工作目录删除 + 触发 compact → 包内一并清除，真丢图。Windows 截图
+# 默认文件名（"屏幕截图 2026-10-30 205849.png"）即带空格，属现实场景。
+sp_smd = os.path.join(TD, "space.smd")
+spstage = os.path.join(_smd._tmp_root(), "test_stage_space")
+shutil.rmtree(spstage, ignore_errors=True)
+os.makedirs(os.path.join(spstage, "assets"), exist_ok=True)
+with io.open(os.path.join(spstage, "doc.md"), "w", encoding="utf-8") as f:
+    f.write("# 空格\n\n![图](assets/my pic.png)\n")
+with open(os.path.join(spstage, "assets", "my pic.png"), "wb") as f:
+    f.write(png_bytes(10))
+_smd.pack_from_dir(sp_smd, os.path.join(spstage, "doc.md"), os.path.join(spstage, "assets"))
+with zipfile.ZipFile(sp_smd) as z:
+    check("T18 含空格图入包", "assets/my pic.png" in z.namelist())
+n18, comp18 = _smd.save_from_dir(sp_smd, spstage)
+check("T18 保存后图仍在工作目录",
+      os.path.isfile(os.path.join(spstage, "assets", "my pic.png")))
+with zipfile.ZipFile(sp_smd) as z:
+    check("T18 保存后图仍在包内", "assets/my pic.png" in z.namelist())
+check("T18 不因误判触发整理", not comp18, "%d entry" % n18)
+d18 = _smd.base_dir_for(sp_smd)
+check("T18 重解包后图与正文对齐",
+      os.path.isfile(os.path.join(d18, "assets", "my pic.png")))
+check("T18 物化生成名不含空白", " " not in md_assets._safe_name("我的 图", 1, ".png"),
+      md_assets._safe_name("我的 图", 1, ".png"))
+
+# --- T19 子目录资产：打包/保存/整理三处都必须认 ---
+# 事故背景：三处都只 os.listdir 顶层，assets/sub/x.png 在「整理」与「另存为」
+# 时被静默丢掉——包内没这个 entry，正文仍引用它，重开后破图，全程不报错。
+nest_smd = os.path.join(TD, "nest.smd")
+nstage = os.path.join(_smd._tmp_root(), "test_stage_nest")
+shutil.rmtree(nstage, ignore_errors=True)
+os.makedirs(os.path.join(nstage, "assets", "sub"), exist_ok=True)
+with io.open(os.path.join(nstage, "doc.md"), "w", encoding="utf-8") as f:
+    f.write("# 嵌套\n\n![x](assets/sub/x.png)\n")
+with open(os.path.join(nstage, "assets", "sub", "x.png"), "wb") as f:
+    f.write(png_bytes(11))
+_smd.pack_from_dir(nest_smd, os.path.join(nstage, "doc.md"),
+                   os.path.join(nstage, "assets"))
+with zipfile.ZipFile(nest_smd) as z:
+    check("T19 子目录图入包（pack）", "assets/sub/x.png" in z.namelist(),
+          ",".join(z.namelist()))
+n19, c19 = _smd.save_from_dir(nest_smd, nstage)
+check("T19 子目录图不被当孤儿删除",
+      os.path.isfile(os.path.join(nstage, "assets", "sub", "x.png")) and not c19)
+_smd.compact(nest_smd, nstage)                    # 强制全量重建
+with zipfile.ZipFile(nest_smd) as z:
+    check("T19 整理后子目录图仍在包内", "assets/sub/x.png" in z.namelist(),
+          ",".join(z.namelist()))
+d19 = _smd.base_dir_for(nest_smd)
+check("T19 重解包后子目录图与正文对齐",
+      os.path.isfile(os.path.join(d19, "assets", "sub", "x.png")))
+
+# --- T20 并发保存：正文不许出现半截/串行错乱 ---
+# 事故背景：服务端是多线程的（Ctrl+S 与自动落盘可同时到达），旧实现里
+# doc.md 的写是非原子的、save_from_dir 之间也没有互斥：一个线程能读到
+# 截断到一半的正文并把它打进包，或让旧快照覆盖新快照。
+import threading as _th
+cc_smd = os.path.join(TD, "conc.smd")
+cc_stage = os.path.join(_smd._tmp_root(), "test_stage_conc")
+shutil.rmtree(cc_stage, ignore_errors=True)
+os.makedirs(os.path.join(cc_stage, "assets"), exist_ok=True)
+with io.open(os.path.join(cc_stage, "doc.md"), "w", encoding="utf-8") as f:
+    f.write("# 并发\n")
+_smd.pack_from_dir(cc_smd, os.path.join(cc_stage, "doc.md"),
+                   os.path.join(cc_stage, "assets"))
+_pad = "甲" * (200 * 1024)
+_err = []
+
+
+def _w(i):
+    try:
+        for k in range(5):
+            tag = "END-%d-%d-END" % (i, k)
+            txt = "# 并发 %d-%d\n\n%s\n%s\n" % (i, k, _pad, tag)
+            with _smd.locked(cc_smd):
+                base = _smd.base_dir_for(cc_smd)
+                _smd.write_doc(base, txt)
+                _smd.save_from_dir(cc_smd, base)
+    except Exception as e:                      # 线程里的异常必须带回主线程
+        _err.append(repr(e))
+
+
+_ts = [_th.Thread(target=_w, args=(i,)) for i in range(6)]
+for _t in _ts:
+    _t.start()
+for _t in _ts:
+    _t.join()
+with zipfile.ZipFile(cc_smd) as z:
+    cc_body = z.read(_smd.DOC_NAME).decode("utf-8")
+check("T20 并发保存无异常", not _err, "; ".join(_err[:2]))
+check("T20 落盘正文完整（首尾齐全、无截断）",
+      cc_body.startswith("# 并发 ") and cc_body.rstrip().endswith("-END"),
+      "len=%d tail=%r" % (len(cc_body), cc_body[-18:]))
+check("T20 落盘正文长度与整篇一致", len(cc_body) == len("# 并发 0-0\n\n%s\nEND-0-0-END\n" % _pad),
+      "%d vs %d" % (len(cc_body), len("# 并发 0-0\n\n%s\nEND-0-0-END\n" % _pad)))
+
+# --- T21 死空间按压缩后字节算：重复保存同一内容要能回收 ---
+# 事故背景：旧实现「包大小 − 未压缩大小之和」，单位不对，且只减最后一份。
+# 正文 6MB、压缩后 3MB：存第二份后包里 50% 是重复副本，旧口径算成 -1.5%
+# （因为它把 6MB 未压缩从 6.1MB 里减光了），永远不整理——包只增不减。
+cmp_smd = os.path.join(TD, "cmp.smd")
+cstage2 = os.path.join(_smd._tmp_root(), "test_stage_cmp")
+shutil.rmtree(cstage2, ignore_errors=True)
+os.makedirs(cstage2, exist_ok=True)
+_parts = []
+for _i in range(260000):                    # 每行 6 位序号 + 16 位随机十六进制
+    _parts.append("%06d %s\n" % (_i, os.urandom(8).hex()))
+_big_txt = "".join(_parts)
+with io.open(os.path.join(cstage2, "doc.md"), "w", encoding="utf-8") as f:
+    f.write(_big_txt)
+_smd.pack_from_dir(cmp_smd, os.path.join(cstage2, "doc.md"), None)
+# 正文一个字都不改，连存两次：第二次时包里有两份全文，死空间 50%
+_n21a, _c21a = _smd.save_from_dir(cmp_smd, cstage2)   # 包未过 5MB 门槛，缓存增量
+_n21, _c21 = _smd.save_from_dir(cmp_smd, cstage2)     # 已过门槛，必须回收
+_u = len(_big_txt.encode("utf-8"))
+check("T21 重复副本触发整理", _c21 and not _c21a,
+      "正文 %.1fMB（包已回收到 %.1fMB）；旧口径此处算出负数，永不整理"
+      % (_u / 1048576.0, os.path.getsize(cmp_smd) / 1048576.0))
+
+# --- T22 URL 编码引用：%20 / %XX 写法不许被判孤儿 ---
+# 事故背景：子串只认原样写法，链接目标被编码后认不出，正在用的图被判
+# 「没人引用」→ 从工作目录删除 + 整理 → 包内一并清除，真丢图。
+enc_smd = os.path.join(TD, "enc.smd")
+estage = os.path.join(_smd._tmp_root(), "test_stage_enc")
+shutil.rmtree(estage, ignore_errors=True)
+os.makedirs(os.path.join(estage, "assets"), exist_ok=True)
+with io.open(os.path.join(estage, "doc.md"), "w", encoding="utf-8") as f:
+    f.write("# 编码\n\n![g](assets/%E5%9B%BE.png)\n")
+with open(os.path.join(estage, "assets", "图.png"), "wb") as f:
+    f.write(png_bytes(12))
+_smd.pack_from_dir(enc_smd, os.path.join(estage, "doc.md"),
+                   os.path.join(estage, "assets"))
+_n22, _c22 = _smd.save_from_dir(enc_smd, estage)
+check("T22 编码引用不判孤儿", os.path.isfile(os.path.join(estage, "assets", "图.png")))
+with zipfile.ZipFile(enc_smd) as z:
+    check("T22 编码引用的图未从包内清除", "assets/图.png" in z.namelist(),
+          ",".join(z.namelist()))
+
+# --- T23 普通 .md 原子写 + 行尾保真 ---
+# 事故背景：open(path,"w") 先截成 0 字节再写，中途崩溃/被并发读到就是半截；
+# 且不分青红皂白按平台 CRLF 写，LF 仓库每次保存整篇 diff 变红。
+lf_md = os.path.join(TD, "lf.md")
+with open(lf_md, "wb") as f:
+    f.write(b"a\nb\n")
+md_server._write_text_atomic(lf_md, "a\nb\nc\n")
+with open(lf_md, "rb") as f:
+    lf_bytes = f.read()
+check("T23 LF 文件保持 LF", lf_bytes == b"a\nb\nc\n", repr(lf_bytes))
+crlf_md = os.path.join(TD, "crlf.md")
+with open(crlf_md, "wb") as f:
+    f.write(b"a\r\nb\r\n")
+md_server._write_text_atomic(crlf_md, "a\nb\nc\n")
+with open(crlf_md, "rb") as f:
+    crlf_bytes = f.read()
+check("T23 CRLF 文件保持 CRLF", crlf_bytes == b"a\r\nb\r\nc\r\n", repr(crlf_bytes))
+new_md = os.path.join(TD, "new.md")
+md_server._write_text_atomic(new_md, "x\ny\n")
+with open(new_md, "rb") as f:
+    new_bytes = f.read()
+check("T23 新建文件用平台行尾",
+      new_bytes == ("x" + os.linesep + "y" + os.linesep).encode("utf-8"),
+      repr(new_bytes))
+check("T23 不留临时文件",
+      not [f for f in os.listdir(TD) if f.startswith(".") and ".tmp" in f],
+      ",".join(os.listdir(TD)))
+
+# --- T24 元数据档案随 .smd 往返 ---
+# 事故背景：白名单原先只精确匹配 annotations.json。元数据档案（assets/.mde/）
+# 正文永远不引用它，"正文里搜 assets/<名字>"这个判据永远命中不了，于是保存时
+# 被当孤儿 os.remove 掉、整包重建会跳过它——档案就这么没了，一句错都不报。
+# 所以这两条测的是"活着进出包"，不是"能读写"。
+import md_meta
+mstage = os.path.join(_smd._tmp_root(), "test_stage_meta")
+shutil.rmtree(mstage, ignore_errors=True)
+os.makedirs(os.path.join(mstage, "assets"), exist_ok=True)
+meta_smd = os.path.join(TD, "meta.smd")
+with io.open(os.path.join(mstage, "doc.md"), "w", encoding="utf-8") as f:
+    f.write("@@ meta\n\n正文\n")
+md_meta.ensure(os.path.join(mstage, "assets"), {"title": "我写故我播", "author": "wUwproject"})
+md_meta.update(os.path.join(mstage, "assets"), {"title": "改过的标题"})
+_smd.pack_from_dir(meta_smd, os.path.join(mstage, "doc.md"), os.path.join(mstage, "assets"))
+with zipfile.ZipFile(meta_smd) as z:
+    names = z.namelist()
+check("T24 元数据档案进包",
+      "assets/.mde/zero.json" in names and "assets/.mde/up.md" in names, ",".join(names))
+
+shutil.rmtree(mstage, ignore_errors=True)          # 丢掉工作目录，逼它重新解包
+base_m = _smd.base_dir_for(meta_smd)
+check("T24 解包目录里有档案", os.path.isfile(os.path.join(base_m, "assets", ".mde", "zero.json")))
+_smd.save_from_dir(meta_smd, base_m)               # 走孤儿清理那条路
+check("T24 保存后档案没被当孤儿删",
+      os.path.isfile(os.path.join(base_m, "assets", ".mde", "zero.json"))
+      and os.path.isfile(os.path.join(base_m, "assets", ".mde", "up.md")))
+with zipfile.ZipFile(meta_smd) as z:
+    names = z.namelist()
+check("T24 保存后包内档案仍在", "assets/.mde/zero.json" in names, ",".join(names))
+
+rec = md_meta.read(os.path.join(base_m, "assets"))
+check("T24 往返后字段正确合并",
+      bool(rec) and rec["fields"].get("title") == "改过的标题"
+      and rec["fields"].get("author") == "wUwproject", str(rec and rec["fields"]))
+check("T24 创建者快照未被修改（zero 存创建值）",
+      bool(rec) and rec["zero"]["fields"].get("title") == "我写故我播",
+      str(rec and rec["zero"]["fields"]))
+
+# --- T25 资产整树拷贝（含 .mde/ 与图片子目录）---
+# 事故背景：原先 os.listdir + isfile 只拷顶层，子目录资产与元数据档案在
+# .md ↔ .smd 互转时静默丢失——包本身是好的，所以没有任何报错线索。
+tsrc = os.path.join(TD, "tree_src"); tdst = os.path.join(TD, "tree_dst")
+os.makedirs(os.path.join(tsrc, "sub"), exist_ok=True)
+os.makedirs(os.path.join(tsrc, ".mde"), exist_ok=True)
+with open(os.path.join(tsrc, "a.png"), "wb") as f:
+    f.write(png_bytes(2))
+with open(os.path.join(tsrc, "sub", "b.png"), "wb") as f:
+    f.write(png_bytes(3))
+with io.open(os.path.join(tsrc, ".mde", "zero.json"), "w", encoding="utf-8") as f:
+    f.write("{}")
+_n_tree = md_server._copy_tree(tsrc, tdst)
+check("T25 递归拷贝含子目录", os.path.isfile(os.path.join(tdst, "sub", "b.png")))
+check("T25 递归拷贝含 .mde 档案", os.path.isfile(os.path.join(tdst, ".mde", "zero.json")))
+check("T25 拷贝计数正确", _n_tree == 3, str(_n_tree))
+
 # --- 清理 ---
 shutil.rmtree(TD, ignore_errors=True)
-for s in (stage, big_stage, ps, orphan_stage, fstage):
+for s in (stage, big_stage, ps, orphan_stage, fstage, sstage, spstage,
+          nstage, cc_stage, cstage2, estage, mstage, tsrc, tdst):
     shutil.rmtree(s, ignore_errors=True)
 
 fails = [r for r in results if not r[1]]

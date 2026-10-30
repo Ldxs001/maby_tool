@@ -11,6 +11,7 @@ MD 编辑器本地后端 + 系统托盘（纯标准库，零第三方依赖）
 """
 import http.server
 import hashlib
+import itertools
 import io
 import base64
 import time
@@ -64,7 +65,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 112  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 117  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 # MSIX 商城版判定（微软商店政策 11.16 的"报告 AI 生成内容"入口用）：
 # 商城包与侧载包恒落在 WindowsApps 之下，Release 安装包/便携形态不会。
@@ -202,6 +203,22 @@ except Exception as _e:  # embedded Python 下兜底，与 md_assets 同模式
         pass
 
 
+# 元数据档案（v2.23.0）：assets/.mde/{zero.json,up.md}。与 md_assets 同模式，
+# 导入失败不阻断服务——元数据不可用只让对应入口报错，文档照常打开保存。
+try:
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    import md_meta as _meta
+except Exception as _e:
+    _meta = None
+    try:
+        os.makedirs(RUNTIME_DIR, exist_ok=True)
+        with io.open(os.path.join(RUNTIME_DIR, "_meta.err"), "w", encoding="utf-8") as _f:
+            _f.write(repr(_e))
+    except Exception:
+        pass
+
+
 def _rewrite_assets_ref(text, old, new):
     """把文档内 "old/..." 资源引用改写为 "new/..."（.smd 打包/导出的路径契约换算）。
 
@@ -215,6 +232,39 @@ def _rewrite_assets_ref(text, old, new):
     pat = re.compile(r"(?<![\w\-.])" + re.escape(old) + r"/")
     out, n = pat.subn(new + "/", text)
     return out, n
+
+
+def _copy_tree(src, dst):
+    """资产目录整树拷贝（保留子目录），返回拷贝文件数。
+
+    为什么不用 os.listdir + isfile：那会**静默丢掉子目录**。图片子目录
+    assets/sub/x.png 与元数据目录 assets/.mde/ 都会被跳过一次——.md ↔ .smd
+    互转之后正文引用的图不见了、元数据档案不见了，而保存过程一句错都不报
+    （包本身是完好的，所以没有任何报错线索）。这是 v2.22 及更早的既有缺陷。
+    """
+    n = 0
+    if not src or not os.path.isdir(src):
+        return 0
+    for dp, _dns, fns in os.walk(src):
+        rel = os.path.relpath(dp, src)
+        out = dst if rel == "." else os.path.join(dst, rel)
+        os.makedirs(out, exist_ok=True)
+        for fn in sorted(fns):
+            fp = os.path.join(dp, fn)
+            if os.path.isfile(fp):
+                dstp = os.path.join(out, fn)
+                # 目标已存在且是只读时 copy2 会 PermissionError：元数据档案的
+                # zero.json 建档即只读（.mde/），整树拷贝到已有档案的目录
+                # （另存为覆盖、.md ↔ .smd 互转二次执行）就会在这里炸。
+                # 先解位再写；copy2 会把源文件属性一并带过去，档案仍是只读。
+                try:
+                    if os.path.exists(dstp):
+                        os.chmod(dstp, 0o666)
+                except Exception:
+                    pass
+                shutil.copy2(fp, dstp)
+                n += 1
+    return n
 
 
 # ---------------------------------------------------------------------------
@@ -250,11 +300,116 @@ def _save_json(path, data):
     os.replace(tmp, path)
 
 
+_TMP_SEQ = itertools.count()
+_TEXT_LOCKS = {}
+_TEXT_LOCKS_GUARD = threading.Lock()
+
+
+def _text_lock(path):
+    """同一文件的写入串行化（路径规范化后同一把锁）。"""
+    key = os.path.normcase(os.path.abspath(str(path)))
+    with _TEXT_LOCKS_GUARD:
+        lk = _TEXT_LOCKS.get(key)
+        if lk is None:
+            lk = threading.Lock()
+            _TEXT_LOCKS[key] = lk
+    return lk
+
+
+def _replace_retry(src, dst, tries=6):
+    """os.replace 重试：Windows 上目标文件被杀毒/索引/并发替换瞬时占用时报
+    WinError 5（拒绝访问）。退避重试，全部失败再抛原始异常，不吞错。"""
+    last = None
+    for i in range(tries):
+        try:
+            os.replace(src, dst)
+            return
+        except OSError as e:
+            last = e
+            time.sleep(0.02 * (i + 1))
+    raise last
+
+
+def _target_eol(path):
+    """该文件应当使用的行尾：已存在的跟随它，新建的跟随平台默认。
+
+    为什么不一刀切换成 LF：磁盘上已有的 .md 多是 CRLF（历史版本一律 CRLF），
+    强行改会让 git diff 整篇变红，而换行本身不是用户改的内容。跟随现状，
+    新建文件保持平台默认——行为与旧版一致，只是不再无脑覆盖。
+    """
+    try:
+        if os.path.isfile(path):
+            with open(path, "rb") as f:
+                head = f.read(65536)
+            crlf = head.count(b"\r\n")
+            lf = head.count(b"\n") - crlf
+            if crlf > lf:
+                return "\r\n"
+            if lf > 0:
+                return "\n"
+    except Exception:
+        pass
+    return os.linesep
+
+
+def _write_text_atomic(path, text):
+    """原子写普通文档：tmp → fsync → os.replace，行尾跟随该文件既有风格。
+
+    为什么必须原子：open(path, "w") 先把文件截成 0 字节再写，写到一半崩溃、
+    断电、或被并发请求读到，得到的就是半截正文。.smd 早就是两阶段提交，
+    .md 一直不是——两条保存路径的可靠性不该不一样。
+    """
+    d = os.path.dirname(os.path.abspath(path)) or "."
+    os.makedirs(d, exist_ok=True)
+    with _text_lock(path):                 # 写 tmp 与替换是一段，不能拆
+        eol = _target_eol(path)
+        if eol != "\n":
+            text = text.replace("\r\n", "\n").replace("\n", eol)
+        # 临时名必须唯一：同一毫秒内的并发保存若撞名，一个线程的 replace 会把
+        # 另一个线程正在写的临时文件搬走，结果是「保存成功但内容缺失」。
+        tmp = os.path.join(d, ".%s.tmp%d_%d_%d" % (
+            os.path.basename(path), os.getpid(), int(time.time() * 1000),
+            next(_TMP_SEQ)))
+        with io.open(tmp, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
+        _replace_retry(tmp, path)
+
+
 def _annotations_path(doc_path):
     if _smd is not None and _smd.is_smd(doc_path):
         return os.path.join(_smd.base_dir_for(doc_path), _smd.ASSETS_DIR, ANNOT_NAME)
     stem = os.path.splitext(os.path.basename(doc_path))[0]
     return os.path.join(os.path.dirname(doc_path), stem + ".assets", ANNOT_NAME)
+
+
+def _meta_assets_dir(doc_path):
+    """文档 → 元数据档案所在的资产目录。
+
+    .md  → <同目录>/<stem>.assets
+    .smd → 解包目录 assets/（包内契约恒为 assets/）
+    """
+    if _smd is not None and _smd.is_smd(doc_path):
+        return os.path.join(_smd.base_dir_for(doc_path), _smd.ASSETS_DIR)
+    stem = os.path.splitext(os.path.basename(doc_path))[0]
+    return os.path.join(os.path.dirname(doc_path), stem + ".assets")
+
+
+def _meta_of(doc_path):
+    """读档案；任何异常一律返回 None。
+
+    元数据不可用绝不能挡住文档的打开与保存——它是文档的附录，不是文档本身。
+    """
+    try:
+        if _meta is None or not doc_path:
+            return None
+        return _meta.read(_meta_assets_dir(doc_path))
+    except Exception:
+        return None
 
 
 def _smd_tmp_backups(smd_path):
@@ -777,6 +932,10 @@ def _safe_asset_name(name):
     if not n or n in (".", ".."):
         return ""
     n = re.sub(r"[,={}\r\n\t]", "_", n).strip().lstrip(".")
+    # 空白折成下划线：与图片物化同口径。链接目标里带空格在本编辑器的解析器
+    # 能认（src 取到右括号为止），但 CommonMark 严格解析器（GitHub / Obsidian
+    # 一类）会在首个空格处断开，迁出去就是一条死链。新落盘的名字从源头掐掉。
+    n = re.sub(r"\s+", "_", n).strip("_")
     if not n:
         return ""
     if len(n) > 120:
@@ -1666,6 +1825,44 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(500, json.dumps({"ok": False, "error": str(e)},
                                            ensure_ascii=False))
             return
+        if u.path == "/api/meta":
+            # 元数据档案：三动作一入口。
+            #   read   → {meta: {zero, up, fields} | null}
+            #   ensure → 建档（已存在则原样返回，绝不覆盖创建者快照）
+            #   update → 逐字段 diff 追加 up.md，永不改 zero.json
+            # .smd 情形写完立即进包：只写解包目录的话，会话结束工作目录被清，
+            # 档案就没了（正文能活下来是因为 /api/file 走 save_from_dir）。
+            try:
+                _raw = self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0)
+                obj = json.loads(_raw.decode("utf-8")) if _raw else {}
+                p = (obj.get("path") or "").strip()
+                action = (obj.get("action") or "read").strip()
+                fields = obj.get("fields") or {}
+                if not p:
+                    self._send(400, json.dumps({"ok": False, "error": "missing path"},
+                                               ensure_ascii=False))
+                    return
+                if _meta is None:
+                    self._send(200, json.dumps({"ok": False, "error": "元数据模块不可用"},
+                                               ensure_ascii=False))
+                    return
+                adir = _meta_assets_dir(p)
+                changed = 0
+                if action == "ensure":
+                    rec, _new = _meta.ensure(adir, fields)
+                elif action == "update":
+                    rec, changed = _meta.update(adir, fields)
+                else:
+                    rec = _meta.read(adir)
+                if action in ("ensure", "update") and _smd is not None and _smd.is_smd(p):
+                    with _smd.locked(p):
+                        _smd.save_from_dir(p, _smd.base_dir_for(p))
+                self._send(200, json.dumps({"ok": True, "meta": rec, "changed": changed},
+                                           ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
+            return
         if u.path == "/api/file":
             try:
                 length = int(self.headers.get("Content-Length", 0))
@@ -1682,28 +1879,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     # data URI / blob / 本机绝对路径中真实存在的图收进包内
                     # assets/，引用统一为 assets/ 契约；save_from_dir 按目录
                     # diff 自动追加新图。响应回传新正文供前端同步编辑区
-                    base = _smd.base_dir_for(p)
-                    if materialize_into:
-                        content, _mi = materialize_into(
-                            content, os.path.join(base, "assets"), "assets")
-                    # newline=""：禁用换行翻译，磁盘=包内=响应字节一致
-                    # （文本模式会把 LF 翻成 CRLF，save_from_dir 按原始字节进包）
-                    with open(os.path.join(base, _smd.DOC_NAME), "w", encoding="utf-8",
-                              newline="") as f:
-                        f.write(content)
-                    _n, _compacted = _smd.save_from_dir(p, base)
+                    # 整段持锁：写正文与进包必须是一个整体。分开做的话，
+                    # 另一个并发保存可以在两者之间插入，把旧正文打进包。
+                    with _smd.locked(p):
+                        base = _smd.base_dir_for(p)
+                        if materialize_into:
+                            content, _mi = materialize_into(
+                                content, os.path.join(base, "assets"), "assets")
+                        # 原子写 + newline=""：磁盘=包内=响应字节一致
+                        _smd.write_doc(base, content)
+                        _n, _compacted = _smd.save_from_dir(p, base)
                     _LAST_DOC_DIR[0] = base
                     self._send(200, json.dumps({"ok": True, "smd": True, "base": base,
                                                 "content": content,
+                                                "meta": _meta_of(p),
                                                 "images": []}, ensure_ascii=False))
                     return
                 added = []
                 if materialize_images:
                     content, added = materialize_images(p, content)
-                with open(p, "w", encoding="utf-8") as f:
-                    f.write(content)
+                _write_text_atomic(p, content)
                 _LAST_DOC_DIR[0] = os.path.dirname(p)
                 self._send(200, json.dumps({"ok": True, "content": content,
+                                            "meta": _meta_of(p),
                                             "images": added}, ensure_ascii=False))
             except Exception as e:
                 self._send(500, json.dumps({"ok": False, "error": _friendly_save_error(e, p)},
@@ -1754,23 +1952,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             content, os.path.join(stage, "assets"), "assets")
                     dst_assets = os.path.join(stage, "assets")
                     if src_assets and os.path.normpath(src_assets) != os.path.normpath(dst_assets):
-                        os.makedirs(dst_assets, exist_ok=True)
-                        import shutil as _sh
-                        for fn in os.listdir(src_assets):
-                            fp = os.path.join(src_assets, fn)
-                            if os.path.isfile(fp):
-                                _sh.copy2(fp, os.path.join(dst_assets, fn))
+                        _copy_tree(src_assets, dst_assets)   # 递归：子目录图与 .mde/ 档案一起跟随
                     if cand:
                         content, _nr = _rewrite_assets_ref(
                             content, os.path.basename(cand), "assets")
-                    # newline=""：禁用换行翻译，磁盘=包内=响应字节一致
-                    with open(os.path.join(stage, _smd.DOC_NAME), "w", encoding="utf-8",
-                              newline="") as f:
-                        f.write(content)
-                    _smd.pack_from_dir(path, os.path.join(stage, _smd.DOC_NAME), dst_assets)
+                    # 原子写 + newline=""：磁盘=包内=响应字节一致
+                    with _smd.locked(path):
+                        _smd.write_doc(stage, content)
+                        _smd.pack_from_dir(path, os.path.join(stage, _smd.DOC_NAME),
+                                           dst_assets)
                     _LAST_DOC_DIR[0] = stage
                     self._send(200, json.dumps({"ok": True, "path": path, "smd": True,
                                                 "base": stage, "content": content,
+                                                "meta": _meta_of(path),
                                                 "images": []},
                                                ensure_ascii=False))
                     return
@@ -1781,23 +1975,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     # "<stem>.assets/" 契约，图片一并落盘到目标目录
                     newstem = os.path.splitext(name)[0]
                     dst_assets = os.path.join(d, newstem + ".assets")
-                    os.makedirs(dst_assets, exist_ok=True)
-                    import shutil as _sh
-                    for fn in os.listdir(os.path.join(base, "assets")):
-                        fp = os.path.join(base, "assets", fn)
-                        if os.path.isfile(fp):
-                            _sh.copy2(fp, os.path.join(dst_assets, fn))
+                    _copy_tree(os.path.join(base, "assets"), dst_assets)  # 递归：子目录与档案一起落盘
                     content, _nr = _rewrite_assets_ref(content, "assets",
                                                        newstem + ".assets")
                 if materialize_images:
                     content, added = materialize_images(path, content)
                 else:
                     added = []
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(content)
+                _write_text_atomic(path, content)
                 _LAST_DOC_DIR[0] = d
                 self._send(200, json.dumps({"ok": True, "path": path,
-                                            "content": content, "images": added},
+                                            "content": content,
+                                            "meta": _meta_of(path),
+                                            "images": added},
                                            ensure_ascii=False))
             except Exception as e:
                 self._send(500, json.dumps({"ok": False, "error": _friendly_save_error(e, path)},

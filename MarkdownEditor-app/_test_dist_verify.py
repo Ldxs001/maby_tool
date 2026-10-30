@@ -32,7 +32,7 @@ FILES = ["md_launch.pyw", "_md_run.py", "md_server.py",
          "markdown-editor.html", "md-editor.ico", "llm_client.py",
          "web_search.py", "rag_client.py", "_smd.py", "md_assets.py",
          "_splash.py", "_pickdir_modern.py", "_pickfile.py", "md_app.pyw",
-         "LICENSE", "README.md"]
+         "md_meta.py", "LICENSE", "README.md"]
 for f in FILES:
     shutil.copy2(os.path.join(SRC, f), os.path.join(DIST, f))
 for d in ["python", "katex", "pagedjs", "docs", "LICENSES",
@@ -40,7 +40,7 @@ for d in ["python", "katex", "pagedjs", "docs", "LICENSES",
     subprocess.run(["cmd", "/c", "mklink", "/J",
                     os.path.join(DIST, d), os.path.join(SRC, d)],
                    capture_output=True, creationflags=NO_WINDOW)
-check("dist assembled (16 files + 9 junctions)",
+check("dist assembled (17 files + 9 junctions)",
       all(os.path.exists(os.path.join(DIST, f)) for f in FILES)
       and all(os.path.isdir(os.path.join(DIST, d))
               for d in ["python", "katex", "pagedjs", "docs", "LICENSES",

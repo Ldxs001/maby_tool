@@ -544,7 +544,7 @@ function parseInline(text,noMde){
       /* 硬块白名单先判：<<< 去空格后是三个同字符，会被 _isHrLine 当分隔线，
          顺序颠倒就会把包围块吞成 li 内的两条横线（实测过） */
       if(/^```/.test(line)||/^(#{1,6})[ ]+/.test(line)||/^[ ]*>/.test(line)||
-         /^[ ]{0,3}<<</.test(line)||/^[ ]{0,3}@@\s*(begin|end|blank|caption)\b/.test(line)||
+         /^[ ]{0,3}<<</.test(line)||/^[ ]{0,3}@@\s*(begin|end|blank|caption|meta)\b/.test(line)||
          /^@@ MDE(_{1,2})?[\w\u4e00-\u9fff.-]*(:[23])?(\([^()]*\))?\{/.test(line)||
          (line.indexOf('|')>=0&&i+1<lines.length&&/^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1])&&lines[i+1].indexOf('-')>=0)){
         break;
@@ -776,6 +776,114 @@ function parseMarkdown(src,_lv,opts,_base){
   var curInd=0;
   var pendCap=null;   /* v2.10.0 @@ caption 暂存：只作用于紧随其后的那一个表格 */
   var _dgHit=false;
+  /* ── v2.23.0 元数据：两条互斥通道 ────────────────────────────────
+     通道 A（兼容模式）：文首 --- … --- 的 YAML 平铺键值，值就在正文里。
+     通道 B（自有模式）：正文一行 @@ meta 作位置锚点，值**不进正文**，只存在
+       档案文件（<stem>.assets/.mde/zero.json + up.md），打开文档时随正文取
+       回并落在 window.__MDE_META__；总开关 window.__MDE_META_ON__。
+       渲染函数是同步的，所以只能读已经取回的值，不能在渲染途中去后端读文件。
+     两条同时成立＝冲突：都不渲染，只出一条提示条（不替人挑）。
+     元数据区一律带 data-mde-zone，三个导出出口按此属性整块剔除——
+     元数据只在预览区看得见。 */
+  var MDE_META_KEYS=[['title','标题'],['author','作者'],['date','日期'],['tags','标签'],['note','备注']];
+  function _fmEsc(s){return escapeHtml(String(s==null?'':s));}
+  function _mdeMetaOn(){
+    try{return !(typeof window!=='undefined'&&window.__MDE_META_ON__===false);}catch(e){return true;}
+  }
+  function _fmZone(rows,zone,last){
+    var h='<div class="mde-fm" data-mde-zone="'+zone+'"><div class="mde-fm-h">元数据</div>';
+    for(var k=0;k<rows.length;k++){
+      if(rows[k].k===null){                 /* 不合 key: value 的行按原文行露出，零吞字 */
+        h+='<div class="mde-fm-row mde-fm-raw"><span class="mde-fm-v">'+_fmEsc(rows[k].v)+'</span></div>';
+        continue;
+      }
+      h+='<div class="mde-fm-row"><span class="mde-fm-k">'+_fmEsc(rows[k].k)+'</span>'
+        +'<span class="mde-fm-v">'+_fmEsc(rows[k].v)+'</span></div>';
+    }
+    if(last){
+      h+='<div class="mde-fm-row mde-fm-last"><span class="mde-fm-k">最近修改</span>'
+        +'<span class="mde-fm-v">'+_fmEsc(last)+'</span></div>';
+    }
+    return h+'</div>';
+  }
+  /* 档案元数据 → 渲染行。无任何非空字段即返回 null（没数据就没区域，不占位） */
+  function _metaFromWindow(){
+    try{
+      var m=(typeof window!=='undefined')?window.__MDE_META__:null;
+      if(!m||typeof m!=='object')return null;
+      /* 渲染取的是**当前值**：服务端 read() 已经把 zero.fields 与 up 里的
+         变更叠加成 fields。只读 zero 会把「改过的」值漏掉，等于回到建档那一刻
+         ——这正是主人定的 zero+up 合成渲染（2026-10-31）。 */
+      var f=(m.fields&&typeof m.fields==='object')?m.fields:((m.zero&&m.zero.fields)||{}),rows=[];
+      for(var q=0;q<MDE_META_KEYS.length;q++){
+        var vv=f[MDE_META_KEYS[q][0]];
+        if(vv===undefined||vv===null||String(vv).replace(/^\s+|\s+$/g,'')==='')continue;
+        rows.push({k:MDE_META_KEYS[q][1],v:String(vv)});
+      }
+      if(!rows.length)return null;
+      var up=m.up||[],last=null;
+      if(up.length){
+        var t=up[up.length-1];
+        last=(t&&t.at?String(t.at):'')+(t&&t.key?(' · '+t.key):'');
+        if(!last)last=null;
+      }
+      return {rows:rows,last:last};
+    }catch(e){return null;}
+  }
+  /* 前置消费：四条判据全中才认
+       ① 首行恰为 ---（允许尾随空白，允许一个 BOM）
+       ② 有闭合 ---，且两者之间没有任何空行
+       ③ 闭合前至少一行 key:（防"---／第一章／---"这种装饰横线组被吞）
+       ④ 必须在文首（本函数只在顶层且 _base===0 时尝试）
+     任一不中 → 整段不认，走原有 hr + 段落路径，一字不吞，报 D301。 */
+  var _fmRows=null,_metaLineSeen=false,_fmConflict=false;
+  if(_lv===0&&_base===0&&lines.length){
+    var _fmL0=lines[0];
+    if(_fmL0.charCodeAt(0)===0xFEFF)_fmL0=_fmL0.slice(1);
+    if(/^---[ \t]*$/.test(_fmL0)){
+      var _fmCl=-1,_fmBlank=-1;
+      for(var _fmK=1;_fmK<lines.length;_fmK++){
+        if(/^---[ \t]*$/.test(lines[_fmK])){_fmCl=_fmK;break;}
+        if(/^\s*$/.test(lines[_fmK])){_fmBlank=_fmK;break;}
+      }
+      if(_fmCl>0){
+        var _fmRw=[],_fmKv=false;
+        for(var _fmM=1;_fmM<_fmCl;_fmM++){
+          var _fmLn=lines[_fmM];
+          var _fmMv=/^([A-Za-z_][A-Za-z0-9_\-. ]*?)[ \t]*:[ \t]*(.*)$/.exec(_fmLn);
+          if(_fmMv){
+            _fmKv=true;
+            var _fmV=_fmMv[2].replace(/[ \t]+$/,'');
+            if(_fmV.length>=2&&((_fmV.charAt(0)==='"'&&_fmV.charAt(_fmV.length-1)==='"')||
+                                (_fmV.charAt(0)==="'"&&_fmV.charAt(_fmV.length-1)==="'")))_fmV=_fmV.slice(1,-1);
+            _fmRw.push({k:_fmMv[1],v:_fmV});
+          }else if(_fmLn.replace(/\s/g,'')!==''){
+            _fmRw.push({k:null,v:_fmLn});     /* 不合键值的行按原文行输出，零吞字 */
+          }
+        }
+        if(_fmKv){_fmRows=_fmRw;i=_fmCl+1;}
+        else _dgE(0,'D501','front matter 内没有 key: value 行，未按元数据区渲染（已按普通文本走）','warn');
+      }else if(_fmBlank>0){
+        _dgE(0,'D501','front matter 内含空行，未按元数据区渲染（已按普通文本走）','warn');
+      }
+    }
+  }
+  if(_fmRows){
+    for(var _fmZ=0;_fmZ<lines.length;_fmZ++){
+      if(/^[ ]{0,3}@@\s*meta[ \t]*$/.test(lines[_fmZ])){_metaLineSeen=true;break;}
+    }
+    _fmConflict=_metaLineSeen;
+    if(_fmConflict){
+      html+='<div class="mde-fm mde-fm-conflict" data-mde-zone="x">'
+        +'<div class="mde-fm-h">元数据冲突</div>'
+        +'<div class="mde-fm-row"><span class="mde-fm-v">本文档同时存在首行 YAML front matter 与 '
+        +'<code>@@ meta</code>。二者只能选其一——删掉首行的 <code>---</code> 块，或删掉 <code>@@ meta</code> 行。'
+        +'两者都未渲染。</span></div></div>';
+    }else if(_mdeMetaOn()){
+      html+=_fmZone(_fmRows,'a',null);
+    }
+  }
+  var _metaSeen=false;
   while(i<lines.length){
     var line=lines[i];
     _dgHit=false;
@@ -809,6 +917,24 @@ function parseMarkdown(src,_lv,opts,_base){
         i++;curInd=0;continue;
       }
       /* n=0 / 非正数：不生效，落到普通段落按原文露出 */
+    }
+    /* v2.23.0 @@ meta：自有模式元数据区的位置锚点。行级、无参、必须独占一行
+       （不独占则落到段落兜底报 D406 并按原文露出，与 @@ blank 同口径）。
+       数据来自档案文件（window.__MDE_META__）；无数据 / 总开关关闭时静默
+       无输出——**不占位、不出提示条**（没数据就没区域）。冲突时的提示条
+       已由前置消费在文首出过，这里只跳过该行，不重复渲染。
+       重复出现只认第一处，其余报 D302 并跳过（指令「后写无效」的通用语义）。 */
+    if(/^[ ]{0,3}@@\s*meta[ \t]*$/.test(line)){
+      if(_metaSeen){
+        _dgE(i,'D502','重复的 @@ meta 已忽略（只有第一处生效）','warn');
+      }else{
+        _metaSeen=true;
+        if(!_fmConflict&&!_fmRows&&_mdeMetaOn()){
+          var _mz=_metaFromWindow();
+          if(_mz)html+=_fmZone(_mz.rows,'b',_mz.last);
+        }
+      }
+      i++;curInd=0;continue;
     }
     if(/^```/.test(line)){
       var _fenceAt=i;
@@ -1360,11 +1486,11 @@ function parseMarkdown(src,_lv,opts,_base){
     }
     var para=[];
     while(i<lines.length && !/^[ ]*$/.test(lines[i]) && !/^```/.test(lines[i]) && !/^(#{1,6})[ ]+/.test(lines[i]) && !/^[ ]*>/.test(lines[i]) && !/^[ ]*([-+]|[0-9]+\.)[ ]+/.test(lines[i]) && !/^[ ]{0,3}<<<\s*$/.test(lines[i])
-      /* v2.13.2 @@ 家族块（begin/end/caption/blank）紧贴上一行文字时同样终断
+      /* v2.13.2 @@ 家族块（begin/end/caption/blank/meta）紧贴上一行文字时同样终断
          段落——否则"必须独占一行"的块被段落收集器整条吞进 <p>，标记原样
          露出（@@ blank{1} 紧贴正文即中此招）。行内 @@ color / @@ MDE 不在此列
          （它们是真行内语法，本来就可以混在文字里）。 */
-      && !/^[ ]{0,3}@@\s*(begin|end|caption|blank)\b/.test(lines[i])
+      && !/^[ ]{0,3}@@\s*(begin|end|caption|blank|meta)\b/.test(lines[i])
       && !(lines[i].indexOf('|')>=0 && i+1<lines.length && /^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1]) && lines[i+1].indexOf('-')>=0)
       /* v2.6：未闭合的 MDE 表格起始行（@@ MDE_x:2(2x2){ 后无 }）终断
          段落收集——否则连续数据点行把表格语法吞进段落漏成明文 */
@@ -1380,11 +1506,12 @@ function parseMarkdown(src,_lv,opts,_base){
       /* v2.22.0 行尾兜底：@@ 方言前缀行没被任何分支接管＝未生效（fail-closed
          按普通文本渲染）。分支内已上报过的行（_dgHit）不重复报。 */
       if(!_dgHit&&/^[ ]{0,3}@@/.test(para[0])){
-        var _dgT=(para[0].match(/^[ ]{0,3}@@\s*(begin|end|caption|blank|MDE)/)||[])[1]||'';
+        var _dgT=(para[0].match(/^[ ]{0,3}@@\s*(begin|end|caption|blank|meta|MDE)/)||[])[1]||'';
         if(_dgT==='end')_dgE(i-1,'D401','孤 @@ end：前面没有打开的对应 begin 块（检查家族名与配对）');
         else if(_dgT==='begin')_dgE(i-1,'D402','@@ begin 未生效：家族名／参数／嵌套位置有误（fill 分栏／full 独占页／page 页区／color 着色）');
         else if(_dgT==='caption')_dgE(i-1,'D403','@@ caption 未生效：其后必须紧跟表格（下一行表体、再下一行分隔行）');
         else if(_dgT==='blank')_dgE(i-1,'D404','@@ blank 未生效：须独占一行，n 为正数（0.1~50）');
+        else if(_dgT==='meta')_dgE(i-1,'D406','@@ meta 未生效：须独占一行、不带任何参数');
         else _dgE(i-1,'D405','以 @@ 开头但不是有效方言指令，按普通文本渲染','warn');
       }
     }

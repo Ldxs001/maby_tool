@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "created": "2026-10-31T01:47:36+0800",
+  "creator": {
+    "by": "MDEditor"
+  },
+  "fields": {
+    "title": "MDEditor 使用指南",
+    "author": "wUwproject",
+    "date": "2026-10-31",
+    "tags": "MDEditor, Markdown, 编辑器, 使用说明",
+    "note": "面向使用者的完整说明；两种元数据通道见「十、元数据」。"
+  }
+}

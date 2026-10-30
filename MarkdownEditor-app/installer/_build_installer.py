@@ -30,7 +30,8 @@ DIST_DIRS = ["python", "katex", "pagedjs", "LICENSES",
              "mermaid", "viz", "wavedrom", "vega", "docxdeps"]
 DIST_DOCS_FILES = ["MDEditor 使用指南.md", "版权与开源组件声明.md",
                    "low runner 数据形式规范.md"]
-DIST_DOCS_DIRS = ["MDEditor 使用指南.assets"]
+DIST_DOCS_DIRS = ["MDEditor 使用指南.assets", "版权与开源组件声明.assets"]
+# 两份内置文档都用自有元数据通道：档案在 <文档>.assets/.mde/ 里，漏一整个目录 = 装完打开就没有元数据区。
 # low runner run 库（种子：运行树 runtime/runs/ → 安装后 runtime/runs/，
 # md_server 启动 makedirs 不会清掉既有文件）。
 # 全量打包：run 库是示例与文档的实指对象，缺一个就断链（使用指南、规范、
@@ -46,7 +47,7 @@ DIST_FILES = ["md_launch.pyw", "_md_run.py", "md_server.py", "markdown-editor.ht
               "md-editor.ico", "uninstall-md.ico", "llm_client.py", "web_search.py",
               "rag_client.py", "_smd.py", "md_assets.py", "_splash.py",
               "_pickdir_modern.py", "_pickfile.py", "_picksave.py",
-              "docx_export.py",
+              "docx_export.py", "md_meta.py",
               "md_app.pyw", "LICENSE", "COPYRIGHT", "README.md",
               "install.cmd", "MarkdownEditor.cs", "_mklnk.ps1",
               "uninstall.cmd", "UninstallMDEditor.cs", "desktop-shortcut.cmd", "md_stop.cmd"]
@@ -111,11 +112,26 @@ def make_prebuilt_exes():
         print("prebuilt: %s (%d bytes)" % (out, os.path.getsize(out_path)))
 
 
+def _clear_readonly_tree(root):
+    """递归解掉只读位。构建产物可覆盖是前提，而 docs 里的元数据档案
+    （.mde/zero.json）建档即只读，copytree(dirs_exist_ok=True) 覆盖它必
+    PermissionError（实测复现）。只解位，不动内容。"""
+    if not root or not os.path.isdir(root):
+        return
+    for dp, _dns, fns in os.walk(root):
+        for fn in fns:
+            try:
+                os.chmod(os.path.join(dp, fn), 0o666)
+            except Exception:
+                pass
+
+
 def make_staging(ver):
     # 覆盖式重建：不整目录 rmtree —— 70MB / 1200 个文件的批量删除既慢，也容易被
     # 环境的安全策略整批拦截（构建中间产物本就该可覆盖）。写完按「应到文件集合」
     # 清残留，保证包内不会混进上一轮的文件。
     os.makedirs(STAGING, exist_ok=True)
+    _clear_readonly_tree(STAGING)      # 只读档案会让下面的 copytree 覆盖失败
     for d in DIST_DIRS:
         shutil.copytree(os.path.join(SRC, d), os.path.join(STAGING, d), dirs_exist_ok=True)
     docs = os.path.join(STAGING, "docs")

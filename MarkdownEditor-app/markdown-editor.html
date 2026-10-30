@@ -216,6 +216,24 @@
   .markdown-body .mde-blank{margin:0 !important;padding:0;border:0;overflow:hidden;break-inside:avoid;}
   .markdown-body *:has(+ .mde-blank){margin-bottom:0 !important;}
   .markdown-body .mde-blank + *{margin-top:0 !important;}
+  /* v2.23.0 元数据区：front matter（通道 A）与 @@ meta（通道 B）共用同一视觉，
+     深浅主题靠 --text/--border/--accent 自动跟随，不新增配色常量。
+     **只在预览区出现**：三个导出出口按 data-mde-zone 整块剔除。
+     宽度不撑满版心——它是文档的"标签"，不该看起来像正文段落。 */
+  .markdown-body .mde-fm{
+    margin:1.1em 0 1.4em;padding:.7em 1em;border:1px solid var(--border);
+    border-left:3px solid var(--accent);border-radius:8px;
+    background:var(--accent-soft);font-size:.92em;line-height:1.65;
+    break-inside:avoid;
+  }
+  .markdown-body .mde-fm-h{font-weight:600;font-size:.95em;opacity:.85;margin-bottom:.35em;letter-spacing:.02em;}
+  .markdown-body .mde-fm-row{display:flex;gap:.9em;padding:.1em 0;align-items:baseline;}
+  .markdown-body .mde-fm-k{flex:0 0 auto;min-width:5.5em;opacity:.62;}
+  .markdown-body .mde-fm-v{flex:1 1 auto;word-break:break-word;}
+  .markdown-body .mde-fm-raw .mde-fm-v{opacity:.7;font-style:italic;}
+  .markdown-body .mde-fm-last .mde-fm-v{opacity:.72;font-size:.95em;}
+  .markdown-body .mde-fm-conflict{border-left-color:#d9534f;background:rgba(217,83,79,.09);}
+  .markdown-body .mde-fm-conflict code{font-size:.95em;padding:0 .2em;}
   /* @@ fill 图片分栏：flex 行、各栏比例宽；栏内 {N} 失效——栏内图一律
      相对栏 100%（撑满栏），与不分栏 {N} 相对版心同一语义：分栏的栏比例
      就是宽度参数（版心百分比已经"付过费"），栏内不再二次百分比，小图
@@ -298,7 +316,7 @@
 </style>
   <link rel="stylesheet" href="/static/katex/katex.min.css">
   <style id="ts-ui">
-    #tsOverlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99;display:flex;align-items:center;justify-content:center;}
+    #tsOverlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:18px 0;}
     #tsOverlay[hidden]{display:none !important;}
     #svOverlay[hidden]{display:none !important;}
   .sv-btn{padding:9px 26px;border-radius:8px;font-size:17px;line-height:1.25;
@@ -311,8 +329,12 @@
   .sv-mini{padding:5px 14px;border-radius:7px;font-size:14px;background:#262c38;
            border:1px solid #333c4e;color:#aab2c4;cursor:pointer;}
   .sv-mini:hover{background:#2f3746;color:#e8eaed;}
-  #tsPanel{width:530px;max-height:84vh;overflow:auto;background:#23272f;color:#e8eaed;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.5);}
+  /* 三段式：头 / 内容 / 尾。面板取确定高度 + overflow:hidden 收圆角，内容区
+     flex:1 1 auto + min-height:0 自己滚，头尾是固定 flex 项——底栏的「应用」
+     永远在面板底部，所以全篇只有一个入口，不需要往标题栏再复制一个。 */
+  #tsPanel{position:relative;width:min(1240px,97vw);max-width:97vw;min-width:0;height:min(880px,calc(100vh - 40px));display:flex;flex-direction:column;background:#23272f;color:#e8eaed;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.5);overflow:hidden;}
     body.light #tsPanel{background:#ffffff;color:#222;}
+    body.light #tsPanel>.ts-foot{background:#fff;}
     /* low runner 管理界面（与排版面板同族风格：主题变量 + ts 控件口径） */
     #lrOverlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99;display:flex;align-items:center;justify-content:center;}
     #lrOverlay[hidden]{display:none !important;}
@@ -366,25 +388,85 @@
     body.light .lr-deps .dep-miss{color:#c0392b;}
     .lr-deps .dep-ok{color:var(--muted);}
     .lr-deps code{display:block;margin-top:2px;padding:4px 8px;background:var(--code-bg);border-radius:4px;font-family:Consolas,monospace;font-size:11.5px;user-select:all;word-break:break-all;}
-    .ts-head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;font-weight:600;border-bottom:1px solid rgba(128,128,128,.25);}
+    .ts-head{display:flex;justify-content:space-between;align-items:center;padding:8px 16px;font-weight:600;border-bottom:1px solid rgba(128,128,128,.25);flex:0 0 auto;}
     #tsClose{background:none;border:none;color:inherit;font-size:20px;cursor:pointer;}
+    /* .ts-body 是共用皮（文件面板 / AI 设置 / 批注 / 润色预览 / 报告五个面板
+       都用它），只留 padding，不许挂布局——网格必须落在专属 id 上。 */
     .ts-body{padding:10px 16px 16px;}
-    .ts-row{display:flex;align-items:center;justify-content:space-between;margin:8px 0;gap:8px;}
-    .ts-row label{flex:1;}
-    .ts-hint{flex:2;font-size:11px;line-height:1.55;color:var(--muted,#8a8f98);}
+    /* 排版面板：一张真网格，三列 × 四行，卡片就是格子的内容。
+       align-items:stretch（默认值，这里显式写死）——同一行的卡片必须等高，
+       矮卡被撑满格子，视觉上是一条完整横带；绝不能写成 start，那样矮卡就会
+       缩成小块，行内出现参差和空洞。内容多到装不下时整块滚动，不压缩格子。 */
+    #tsBody{padding:8px 12px 10px;font-size:13.5px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;align-items:stretch;align-content:stretch;flex:1 1 auto;min-height:0;overflow:auto;}
+    .ts-card{border:1px solid rgba(128,128,128,.28);border-radius:9px;padding:5px 9px 6px;min-width:0;display:flex;flex-direction:column;}
+    /* 卡片里的东西只许撑高、不许被压扁：默认 flex-shrink:1 会在同行卡片把行高
+       撑得不够时先压自己的内容，文字就被卡片底边切掉（图片输出那张的说明）。 */
+    .ts-card>*{flex:0 0 auto;}
+    /* 通栏卡：说明文字需要整行宽度，放在最后一条独占三列 */
+    .ts-card.wide{grid-column:1 / -1;}
+    body.light .ts-card{border-color:rgba(0,0,0,.12);background:#fafafa;}
+    .ts-card-h{font-weight:600;font-size:12px;opacity:.8;margin-bottom:3px;letter-spacing:.02em;}
+    /* 列必须写 minmax(0,1fr)：裸 1fr 等于 minmax(auto,1fr)，auto 下限取内容的
+       min-content 宽度，输入框按 100% 撑开就把格子顶大、整块溢出卡片右边界。 */
+    .ts-grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 8px;min-width:0;}
+    /* 两列里 label 必须按内容宽度站定：input.ts-txt 的 min-width:110px 会把它挤成省略号（五个字段全成了"文..."），所以 label 不给 flex-grow、input 去掉 min-width，让剩余宽度全归输入框。 */
+    .ts-grid2 .ts-row label{flex:0 0 4.4em;min-width:4.4em;}
+    .ts-grid2 .ts-row input.ts-txt{min-width:0;}
+    .ts-row{display:flex;align-items:center;gap:7px;margin:0;min-width:0;}
+    /* label 站固定列宽：短标签统一 5.4em，所有行的控件从同一 x 起，视觉上成列。
+       不给 flex-grow——一旦 label 会增长，它就跟控件抢宽度，控件被压到装不下就溢出。 */
+    .ts-row label{flex:0 1 auto;min-width:5.4em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .ts-ctl{flex:1 1 auto;display:flex;align-items:center;gap:5px;min-width:0;justify-content:flex-end;}
+    .ts-ctl:has(.ts-txt){flex:1 1 auto;min-width:0;}
+    /* 长说明文字必须能换行收在本卡内：.ts-ctl 默认 flex:0 0 auto 会按内容
+       宽度撑开，说明一长就横穿到隔壁卡片上（实测盖住右列的行标签）。 */
+    .ts-ctl:has(.ts-hint){flex:1 1 auto;min-width:0;justify-content:flex-start;}
+    .ts-ctl .ts-hint{overflow-wrap:anywhere;}
+    .ts-chks{gap:9px;font-size:12px;opacity:.9;}
+    /* 窄窗口降列：三列在 1100px 以下会把第三列推出可视区（连带底栏的「应用」一起挤走）。分档降到两列 / 一列，宁可长一点也不裁内容。 */
+    @media (max-width:1000px){#tsBody{grid-template-columns:repeat(2,minmax(0,1fr));}}
+    @media (max-width:760px){#tsBody{grid-template-columns:minmax(0,1fr);}}
+    .ts-num{display:inline-flex;align-items:center;gap:3px;}
+    .ts-num i{font-style:normal;font-size:11px;opacity:.55;}
+    .ts-hint{font-size:11px;line-height:1.5;color:var(--muted,#8a8f98);white-space:normal;display:block;text-align:left;}
     .ts-hint b{font-weight:600;}
-    .ts-row select{width:138px;background:#1a1d24;color:#e8eaed;border:1px solid rgba(128,128,128,.35);border-radius:6px;padding:4px 6px;}
-    .ts-row input[type=number]{width:64px;background:#1a1d24;color:#e8eaed;border:1px solid rgba(128,128,128,.35);border-radius:6px;padding:4px 6px;}
-    .ts-row input[type=color]{width:40px;height:26px;padding:1px;border:1px solid rgba(128,128,128,.35);border-radius:4px;background:none;cursor:pointer;}
-    .ts-row input[type=text]{width:190px;background:#1a1d24;color:#e8eaed;border:1px solid rgba(128,128,128,.35);border-radius:6px;padding:4px 8px;}
+    .ts-row select{flex:1 1 0;width:auto;min-width:0;background:#1a1d24;color:#e8eaed;border:1px solid rgba(128,128,128,.35);border-radius:6px;padding:2px 5px;font-size:12.5px;}
+    /* 窄于 54px 时 "0.85" 连同数字框右侧的步进箭头一起被裁掉（实测只能看到
+       「0.8」）；页边距那四个只需两位数，单独收窄，免得四个框把行撑爆。 */
+    .ts-row input[type=number]{width:54px;flex:0 0 auto;background:#1a1d24;color:#e8eaed;border:1px solid rgba(128,128,128,.35);border-radius:6px;padding:2px 5px;font-size:12.5px;}
+    #tsMt,#tsMr,#tsMb,#tsMl{width:46px;}
+    .ts-row input[type=color]{width:34px;height:24px;padding:1px;border:1px solid rgba(128,128,128,.35);border-radius:4px;background:none;cursor:pointer;flex:0 0 auto;}
+    .ts-row input[type=text]{width:150px;background:#1a1d24;color:#e8eaed;border:1px solid rgba(128,128,128,.35);border-radius:6px;padding:2px 7px;font-size:12.5px;}
+    .ts-row input.ts-txt{width:100%;min-width:0;flex:1 1 auto;}
     body.light .ts-row input[type=text]{background:#f5f6f8;color:#222;}
-    .ts-row input[type=number]:invalid{border-color:#c66;}
     body.light .ts-row select,body.light .ts-row input[type=number]{background:#f5f6f8;color:#222;}
+    .ts-row input[type=number]:invalid{border-color:#c66;}
+    /* 开关：一个语义一种控件。原先页码与目录用 select(on/off)、三线表与
+       表头底色用裸 checkbox——同一个"开 / 关"两套写法，这才是界面看起来
+       乱的根源。现在统一成这把滑动开关。 */
+    /* 开关永远是本行的最后一个控件（order:2，其余控件默认 0）：这样三列里
+       每一把开关都落在同一条竖线上，不会出现「表头底色」那两行被色块顶到
+       左边、夹在一行控件中间的情况。语义没变——开关开的是它左边那个量。 */
+    .ts-sw{appearance:none;-webkit-appearance:none;width:34px;height:18px;flex:0 0 auto;order:2;
+      border-radius:9px;background:rgba(128,128,128,.38);position:relative;cursor:pointer;
+      margin:0;transition:background .15s;vertical-align:middle;}
+    .ts-sw:checked{background:#4a6cf7;}
+    .ts-sw::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;
+      border-radius:50%;background:#fff;transition:left .15s;}
+    .ts-sw:checked::after{left:18px;}
+    .ts-chk{accent-color:#4a6cf7;cursor:pointer;margin:0 2px 0 0;vertical-align:middle;}
+    .ts-meta-stat{margin-top:5px;padding-top:5px;border-top:1px dashed rgba(128,128,128,.28);
+      font-size:11px;line-height:1.5;opacity:.62;}
     .ts-sep{display:flex;align-items:center;justify-content:space-between;margin:12px 0 6px;font-weight:600;opacity:.85;font-size:12px;border-top:1px solid rgba(128,128,128,.22);padding-top:8px;}
     .ts-sepbtn{background:#3a4050;color:#e8eaed;border:1px solid rgba(128,128,128,.35);border-radius:6px;padding:4px 12px;cursor:pointer;font-size:12px;font-weight:400;}
     body.light .ts-sepbtn{background:#eef0f4;color:#222;}
-    .ts-foot{padding:0 16px 16px;text-align:right;}
+    #tsPanel>.ts-head{flex:0 0 auto;background:#23272f;border-radius:10px 10px 0 0;}
+    body.light #tsPanel>.ts-head{background:#fff;}
+    #tsPanel>.ts-foot{flex:0 0 auto;padding:7px 16px;text-align:right;border-top:1px solid rgba(128,128,128,.22);background:#23272f;border-radius:0 0 10px 10px;}
+    .ts-foot{padding:7px 16px;text-align:right;flex:0 0 auto;border-top:1px solid rgba(128,128,128,.22);}
     #tsApply{background:#4a6cf7;color:#fff;border:none;border-radius:6px;padding:7px 22px;cursor:pointer;}
+    .ts-head-r{display:flex;align-items:center;gap:10px;}
+    #tsClose{font-size:20px;line-height:1;padding:0 2px;}
     #fmOverlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:98;display:flex;align-items:center;justify-content:center;}
     #fmOverlay[hidden]{display:none !important;}
     #fmPanel{width:530px;max-height:80vh;overflow:auto;background:#23272f;color:#e8eaed;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.5);}
@@ -596,54 +678,94 @@
   </div>
   <div id="tsOverlay" hidden>
    <div id="tsPanel">
-    <div class="ts-head"><span>排版设置</span><button id="tsClose" title="关闭">×</button></div>
-   <div class="ts-body">
-      <div class="ts-row"><label>自动落盘间隔（分钟，0=仅手动）</label><input id="tsAuto" type="number" min="0" max="60" step="1"></div>
-      <div class="ts-sep"><span>字体 / 字号 / 对齐（字号留空 = 保持默认，单位磅；本机字体由后端自动枚举）</span></div>
-      <div class="ts-row"><label>正文</label><select data-ts="p"></select><input data-tssz="p" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="p"></select></div>
-      <div class="ts-row"><label>H1 标题</label><select data-ts="h1"></select><input data-tssz="h1" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="h1"></select></div>
-      <div class="ts-row"><label>H2 标题</label><select data-ts="h2"></select><input data-tssz="h2" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="h2"></select></div>
-      <div class="ts-row"><label>H3 标题</label><select data-ts="h3"></select><input data-tssz="h3" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="h3"></select></div>
-      <div class="ts-row"><label>H4~H6 标题</label><select data-ts="h4"></select><input data-tssz="h4" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="h4"></select></div>
-      <div class="ts-row"><label>引用块</label><select data-ts="quote"></select><input data-tssz="quote" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="quote"></select></div>
-      <div class="ts-row"><label>列表</label><select data-ts="li"></select><input data-tssz="li" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="li"></select></div>
-      <div class="ts-row"><label>表格</label><select data-ts="table"></select><input data-tssz="table" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="table"></select></div>
-      <div class="ts-row"><label>代码</label><select data-ts="code"></select><input data-tssz="code" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="code"></select></div>
-      <div class="ts-row"><label>公式（KaTeX，字体固定）</label><input data-tssz="math" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="math"></select></div>
-      <div class="ts-row"><label>图片</label><select data-algn="img"></select></div>
-      <div class="ts-row"><label>图题</label><select data-ts="figcap"></select><input data-tssz="figcap" type="number" min="6" max="48" step="0.5" placeholder="磅"><select data-algn="figcap"></select></div>
-      <div class="ts-row"><label>表题</label><select data-ts="tabcap"></select><input data-tssz="tabcap" type="number" min="6" max="48" step="0.5" placeholder="磅"><select data-algn="tabcap"></select></div>
-      <div class="ts-sep"><span>段落缩进（按元素独立，字符数 × 当前字号自动换算）</span></div>
-      <div class="ts-row"><label>正文</label><select data-ind="p"></select><input data-indchars="p" type="number" min="0" max="8" step="0.5" value="2"></div>
-      <div class="ts-row"><label>引用块</label><select data-ind="quote"></select><input data-indchars="quote" type="number" min="0" max="8" step="0.5" value="2"></div>
-      <div class="ts-row"><label title="编号/圆点站到文字块外面，多行项的续行与首行文字左沿对齐；关闭则续行顶格（v2.13.5 及更早的口径）">列表标记外凸（续行悬挂）</label><input id="tsHangOn" type="checkbox"></div>
-      <div class="ts-row"><label>列表</label><select data-ind="li"></select><input data-indchars="li" type="number" min="0" max="8" step="0.5" value="2"></div>
-      <div class="ts-sep"><span>段间距（正文块之间的垂直间距，单位 em＝正文字号；@@ blank{n} 逐处硬控可覆盖它）</span></div>
-      <div class="ts-row"><label>统一段间距</label><input id="tsGapOn" type="checkbox"><input id="tsGapEm" type="number" min="0" max="3" step="0.05" value="0.85" placeholder="em"></div>
-      <div class="ts-sep"><span>表格样式</span></div>
-      <div class="ts-row"><label>三线表（去竖线，三条横线）</label><input id="tsThree" type="checkbox"></div>
-      <div class="ts-row"><label>表头底色</label><input id="tsHeadOn" type="checkbox"><input id="tsHeadColor" type="color" value="#dbe5ff"></div>
-      <div class="ts-row"><label>首列底色</label><input id="tsColOn" type="checkbox"><input id="tsColColor" type="color" value="#dbe5ff"></div>
-      <div class="ts-sep"><span>页面（作用于「打印」导出）</span></div>
-      <div class="ts-row"><label>纸张</label><select id="tsPaper"><option>A4</option><option>A3</option><option>A5</option><option>B5</option><option>B4</option><option>Letter</option><option>Legal</option><option>Ledger</option><option>A0</option><option>A1</option><option>A2</option><option>B0</option><option>B1</option><option>B2</option><option>B3</option><option value="custom">自定义</option></select></div>
-      <div class="ts-row" id="tsCustomRow" hidden><label>自定义宽 × 高（mm）</label><input id="tsPw" type="number" min="50" max="3000" step="1" placeholder="宽"><input id="tsPh" type="number" min="50" max="3000" step="1" placeholder="高"></div>
-      <div class="ts-row"><label>页边距 上/右/下/左（mm）</label><input id="tsMt" type="number" min="0" max="100" step="0.5" value="25"><input id="tsMr" type="number" min="0" max="100" step="0.5" value="18"><input id="tsMb" type="number" min="0" max="100" step="0.5" value="25"><input id="tsMl" type="number" min="0" max="100" step="0.5" value="18"></div>
-      <div class="ts-sep"><span>图片输出（「打印」与导出；预览始终按栏宽缩略，不受此项影响）</span></div>
-      <div class="ts-row"><label>像素</label><select id="tsImgMode"><option value="orig">原图输出（不压缩）</option><option value="300">实图输出 · 300dpi（印刷）</option><option value="150">实图输出 · 150dpi（电子交付）</option></select></div>
-      <div class="ts-row"><label>说明</label><span class="ts-hint">按每张图的实际显示宽度换算目标像素再降采样：只缩不放、压完不变小就回滚用原图；源文件与磁盘上的图一个字节都不动。150dpi 下含小字的截图会发糊，慎用。</span></div>
-      <div class="ts-sep"><span>页码（打印导出时渲染）</span></div>
-      <div class="ts-row"><label>页码</label><select id="tsPnOn"><option value="off">无</option><option value="on">显示</option></select><select id="tsPnPos"><option value="outer">外侧（奇右偶左）</option><option value="bc">底部居中</option><option value="br">底部右侧</option><option value="bl">底部左侧</option><option value="tc">顶部居中</option><option value="tr">顶部右侧</option></select></div>
-      <div class="ts-row"><label>页码模板与字号（{p}=页码，{P}=全文总页数，{N}=本区总页数）</label><input id="tsPnTpl" type="text" value="{p}"><input id="tsPnSize" type="number" min="6" max="24" step="0.5" value="9"></div>
-      <div class="ts-sep"><span>目录（打印导出时自动生成，条目带页码）</span></div>
-      <div class="ts-row"><label>目录</label><select id="tsTocOn"><option value="off">不生成</option><option value="on">生成</option></select><select id="tsTocPos"><option value="top">置于文首</option><option value="afterh1">第一个 # 之下</option></select></div>
-      <div class="ts-row"><label>目录独占一页（后续 ## 与正文强制新页，不得侵入）</label><input id="tsTocSolo" type="checkbox" checked></div>
-      <div class="ts-row"><label>不计入目录（勾选的级别照常渲染、只是不进目录）</label><span style="white-space:nowrap"># <input id="tsTocEx1" type="checkbox">　## <input id="tsTocEx2" type="checkbox">　### <input id="tsTocEx3" type="checkbox"></span></div>
-      <div class="ts-sep"><span>标题自动序号（只作用于预览与导出，不改源文；范围 ## ~ #####）</span></div>
-      <div class="ts-row"><label>自动序号</label><input id="tsNumOn" type="checkbox"><select id="tsNumStyle"><option value="cn">中文体　一、（一）1.（1）</option><option value="num">层级体　1 / 1.1 / 1.1.1</option></select></div>
-      <div class="ts-sep"><span>图表自动编号（图、表各自计数；只作用于预览与导出，不改源文）</span></div>
-      <div class="ts-row"><label>图 / 表编号</label><input id="tsCapNumOn" type="checkbox"><select id="tsCapNumMode"><option value="seq">全篇连续　图 1 / 表 1</option><option value="chapter">按章重编　图 1-1 / 表 2-1</option></select></div>
-      <div class="ts-row"><label>编号章级</label><select id="tsCapNumLvl"><option value="##">##　二级标题为章（默认）</option><option value="#">#　一级标题为章</option><option value="###">###　三级标题为章</option></select></div>
-    </div>
+    <div class="ts-head"><span>排版设置</span><span class="ts-head-r"><button id="tsClose" title="关闭">×</button></span></div>
+    <div class="ts-body" id="tsBody">
+     <div class="ts-card">
+     <div class="ts-card-h">字体 · 块级类</div>
+     <div class="ts-row"><label>引用块</label><span class="ts-ctl"><select data-ts="quote"></select><input data-tssz="quote" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="quote"></select></span></div>
+     <div class="ts-row"><label>列表</label><span class="ts-ctl"><select data-ts="li"></select><input data-tssz="li" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="li"></select></span></div>
+     <div class="ts-row"><label>表格</label><span class="ts-ctl"><select data-ts="table"></select><input data-tssz="table" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="table"></select></span></div>
+     <div class="ts-row"><label>代码</label><span class="ts-ctl"><select data-ts="code"></select><input data-tssz="code" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="code"></select></span></div>
+     </div>
+     <div class="ts-card">
+     <div class="ts-card-h">字体 · 正文类</div>
+     <div class="ts-row"><label>正文</label><span class="ts-ctl"><select data-ts="p"></select><input data-tssz="p" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="p"></select></span></div>
+     <div class="ts-row"><label>H1 标题</label><span class="ts-ctl"><select data-ts="h1"></select><input data-tssz="h1" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="h1"></select></span></div>
+     <div class="ts-row"><label>H2 标题</label><span class="ts-ctl"><select data-ts="h2"></select><input data-tssz="h2" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="h2"></select></span></div>
+     <div class="ts-row"><label>H3 标题</label><span class="ts-ctl"><select data-ts="h3"></select><input data-tssz="h3" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="h3"></select></span></div>
+     <div class="ts-row"><label title="H4~H6 标题（四级到六级标题共用一套字体设置）">H4~H6</label><span class="ts-ctl"><select data-ts="h4"></select><input data-tssz="h4" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="h4"></select></span></div>
+     </div>
+     <div class="ts-card">
+     <div class="ts-card-h">元数据</div>
+     <div class="ts-row"><label title="关闭后 front matter 与 @@ meta 都不出元数据区（元数据区只在预览显示，不打印、不进 Word / HTML 导出）">显示元数据区</label><span class="ts-ctl"><input id="tsMetaOn" class="ts-sw" type="checkbox" checked></span></div>
+     <div class="ts-grid2">
+     <div class="ts-row"><label>文档标题</label><span class="ts-ctl"><input id="tsMetaTitle" class="ts-txt" type="text" name="mde-m-f1" autocomplete="off" placeholder="留空则不写"></span></div>
+     <div class="ts-row"><label>作者</label><span class="ts-ctl"><input id="tsMetaAuthor" class="ts-txt" type="text" name="mde-m-f2" autocomplete="off"></span></div>
+     <div class="ts-row"><label>日期</label><span class="ts-ctl"><input id="tsMetaDate" class="ts-txt" type="text" name="mde-m-f3" autocomplete="off" placeholder="如 2026-10-30"></span></div>
+     <div class="ts-row"><label>标签</label><span class="ts-ctl"><input id="tsMetaTags" class="ts-txt" type="text" name="mde-m-f4" autocomplete="off" placeholder="逗号分隔"></span></div>
+     <div class="ts-row"><label>备注</label><span class="ts-ctl"><input id="tsMetaNote" class="ts-txt" type="text" name="mde-m-f5" autocomplete="off"></span></div>
+     </div>
+     <div class="ts-meta-stat" id="tsMetaStat"></div>
+     </div>
+     <div class="ts-card">
+     <div class="ts-card-h">字体 · 公式与题注</div>
+     <div class="ts-row"><label title="公式（KaTeX，字体固定）">公式 KaTeX</label><span class="ts-ctl"><input data-tssz="math" type="number" min="6" max="72" step="0.5" placeholder="磅"><select data-algn="math"></select></span></div>
+     <div class="ts-row"><label>图片</label><span class="ts-ctl"><select data-algn="img"></select></span></div>
+     <div class="ts-row"><label>图题</label><span class="ts-ctl"><select data-ts="figcap"></select><input data-tssz="figcap" type="number" min="6" max="48" step="0.5" placeholder="磅"><select data-algn="figcap"></select></span></div>
+     <div class="ts-row"><label>表题</label><span class="ts-ctl"><select data-ts="tabcap"></select><input data-tssz="tabcap" type="number" min="6" max="48" step="0.5" placeholder="磅"><select data-algn="tabcap"></select></span></div>
+     </div>
+     <div class="ts-card">
+     <div class="ts-card-h">段落缩进</div>
+     <div class="ts-row"><label title="段落缩进（按元素独立，字符数 × 当前字号自动换算）">正文 · 字符数</label><span class="ts-ctl"><select data-ind="p"></select><span class="ts-num"><input data-indchars="p" type="number" min="0" max="8" step="0.5" value="2"><i>字</i></span></span></div>
+     <div class="ts-row"><label title="段落缩进（按元素独立，字符数 × 当前字号自动换算）">引用块 · 字符数</label><span class="ts-ctl"><select data-ind="quote"></select><span class="ts-num"><input data-indchars="quote" type="number" min="0" max="8" step="0.5" value="2"><i>字</i></span></span></div>
+     <div class="ts-row"><label title="段落缩进（按元素独立，字符数 × 当前字号自动换算）">列表 · 字符数</label><span class="ts-ctl"><select data-ind="li"></select><span class="ts-num"><input data-indchars="li" type="number" min="0" max="8" step="0.5" value="2"><i>字</i></span></span></div>
+     <div class="ts-row"><label title="编号/圆点站到文字块外面，多行项的续行与首行文字左沿对齐；关闭则续行顶格（v2.13.5 及更早的口径）">列表标记外凸</label><span class="ts-ctl"><input id="tsHangOn" class="ts-sw" type="checkbox"></span></div>
+     </div>
+     <div class="ts-card">
+     <div class="ts-card-h">目录</div>
+     <div class="ts-row"><label title="目录（打印导出时自动生成，条目带页码）">生成目录</label><span class="ts-ctl"><input id="tsTocOn" class="ts-sw" type="checkbox"></span></div>
+     <div class="ts-row"><label>位置</label><span class="ts-ctl"><select id="tsTocPos"><option value="top">置于文首</option><option value="afterh1">第一个 # 之下</option></select></span></div>
+     <div class="ts-row"><label title="目录独占一页：其后第一个 ## 与正文强制另起新页，不侵入目录页">目录独占一页</label><span class="ts-ctl"><input id="tsTocSolo" class="ts-sw" type="checkbox" checked></span></div>
+     <div class="ts-row"><label>不计入目录</label><span class="ts-ctl ts-chks"><span># <input id="tsTocEx1" class="ts-chk" type="checkbox"></span><span>## <input id="tsTocEx2" class="ts-chk" type="checkbox"></span><span>### <input id="tsTocEx3" class="ts-chk" type="checkbox"></span></span></div>
+     </div>
+     <div class="ts-card">
+     <div class="ts-card-h">页面 · 纸张与边距</div>
+     <div class="ts-row"><label>纸张</label><span class="ts-ctl"><select id="tsPaper"><option>A4</option><option>A3</option><option>A5</option><option>B5</option><option>B4</option><option>Letter</option><option>Legal</option><option>Ledger</option><option>A0</option><option>A1</option><option>A2</option><option>B0</option><option>B1</option><option>B2</option><option>B3</option><option value="custom">自定义</option></select></span></div>
+     <div class="ts-row" id="tsCustomRow" hidden><label>自定义宽 × 高</label><span class="ts-ctl"><span class="ts-num"><input id="tsPw" type="number" min="50" max="3000" step="1" placeholder="宽"></span><span class="ts-num"><input id="tsPh" type="number" min="50" max="3000" step="1" placeholder="高"><i>mm</i></span></span></div>
+     <div class="ts-row"><label title="页边距 上/右/下/左（mm）">页边距</label><span class="ts-ctl"><span class="ts-num"><input id="tsMt" type="number" min="0" max="100" step="0.5" value="25"></span><span class="ts-num"><input id="tsMr" type="number" min="0" max="100" step="0.5" value="18"></span><span class="ts-num"><input id="tsMb" type="number" min="0" max="100" step="0.5" value="25"></span><span class="ts-num"><input id="tsMl" type="number" min="0" max="100" step="0.5" value="18"><i>mm</i></span></span></div>
+     </div>
+     <div class="ts-card">
+     <div class="ts-card-h">页面 · 页码</div>
+     <div class="ts-row"><label title="页码（打印导出时渲染）">显示页码</label><span class="ts-ctl"><input id="tsPnOn" class="ts-sw" type="checkbox"></span></div>
+     <div class="ts-row"><label>位置</label><span class="ts-ctl"><select id="tsPnPos"><option value="outer">外侧（奇右偶左）</option><option value="bc">底部居中</option><option value="br">底部右侧</option><option value="bl">底部左侧</option><option value="tc">顶部居中</option><option value="tr">顶部右侧</option></select></span></div>
+     <div class="ts-row"><label title="页码模板与字号（{p}=页码，{P}=全文总页数，{N}=本区总页数）">模板与字号</label><span class="ts-ctl"><input id="tsPnTpl" type="text" value="{p}"><span class="ts-num"><input id="tsPnSize" type="number" min="6" max="24" step="0.5" value="9"><i>磅</i></span></span></div>
+     </div>
+     <div class="ts-card">
+     <div class="ts-card-h">表格样式</div>
+     <div class="ts-row"><label title="三线表：去掉全部竖线，只留顶线、表头线、底线">三线表</label><span class="ts-ctl"><input id="tsThree" class="ts-sw" type="checkbox"></span></div>
+     <div class="ts-row"><label>表头底色</label><span class="ts-ctl"><input id="tsHeadOn" class="ts-sw" type="checkbox"><input id="tsHeadColor" type="color" value="#dbe5ff"></span></div>
+     <div class="ts-row"><label>首列底色</label><span class="ts-ctl"><input id="tsColOn" class="ts-sw" type="checkbox"><input id="tsColColor" type="color" value="#dbe5ff"></span></div>
+     </div>
+     <div class="ts-card">
+     <div class="ts-card-h">编号</div>
+     <div class="ts-row"><label title="标题自动序号（只作用于预览与导出，不改源文；范围 ## ~ #####）">标题自动序号</label><span class="ts-ctl"><input id="tsNumOn" class="ts-sw" type="checkbox"><select id="tsNumStyle"><option value="cn">中文体　一、（一）1.（1）</option><option value="num">层级体　1 / 1.1 / 1.1.1</option></select></span></div>
+     <div class="ts-row"><label title="图表自动编号（图、表各自计数；只作用于预览与导出，不改源文）">图 / 表编号</label><span class="ts-ctl"><input id="tsCapNumOn" class="ts-sw" type="checkbox"><select id="tsCapNumMode"><option value="seq">全篇连续　图 1 / 表 1</option><option value="chapter">按章重编　图 1-1 / 表 2-1</option></select></span></div>
+     <div class="ts-row"><label>编号章级</label><span class="ts-ctl"><select id="tsCapNumLvl"><option value="##">##　二级标题为章（默认）</option><option value="#">#　一级标题为章</option><option value="###">###　三级标题为章</option></select></span></div>
+     </div>
+     <div class="ts-card">
+     <div class="ts-card-h">保存</div>
+     <div class="ts-row"><label title="自动落盘间隔（分钟，0=仅手动）">自动落盘间隔</label><span class="ts-ctl"><span class="ts-num"><input id="tsAuto" type="number" min="0" max="60" step="1"><i>分</i></span></span></div>
+     </div>
+     <div class="ts-card">
+     <div class="ts-card-h">段间距</div>
+     <div class="ts-row"><label title="段间距（正文块之间的垂直间距，单位 em＝正文字号；@@ blank 逐处硬控可覆盖它）">统一段间距</label><span class="ts-ctl"><input id="tsGapOn" class="ts-sw" type="checkbox"><span class="ts-num"><input id="tsGapEm" type="number" min="0" max="3" step="0.05" value="0.85" placeholder="em"><i>em</i></span></span></div>
+     </div>
+     <div class="ts-card wide">
+     <div class="ts-card-h">图片输出</div>
+     <div class="ts-row"><label>像素</label><span class="ts-ctl"><select id="tsImgMode"><option value="orig">原图输出（不压缩）</option><option value="300">实图输出 · 300dpi（印刷）</option><option value="150">实图输出 · 150dpi（电子交付）</option></select></span></div>
+     <div class="ts-row"><label title="按每张图的实际显示宽度换算目标像素再降采样：只缩不放、压完不变小就回滚用原图；源文件与磁盘上的图一个字节都不动。150dpi 下含小字的截图会发糊，慎用。">说明</label><span class="ts-ctl"><span class="ts-hint">按显示宽度换算像素再降采样：只缩不放，压完没变小就回滚用原图。源文件一个字节都不动。</span></span></div>
+     </div>
+   </div>
      <div class="ts-foot"><button id="tsApply">应用</button></div>
    </div>
  </div>
@@ -1326,7 +1448,7 @@ function parseInline(text,noMde){
       /* 硬块白名单先判：<<< 去空格后是三个同字符，会被 _isHrLine 当分隔线，
          顺序颠倒就会把包围块吞成 li 内的两条横线（实测过） */
       if(/^```/.test(line)||/^(#{1,6})[ ]+/.test(line)||/^[ ]*>/.test(line)||
-         /^[ ]{0,3}<<</.test(line)||/^[ ]{0,3}@@\s*(begin|end|blank|caption)\b/.test(line)||
+         /^[ ]{0,3}<<</.test(line)||/^[ ]{0,3}@@\s*(begin|end|blank|caption|meta)\b/.test(line)||
          /^@@ MDE(_{1,2})?[\w\u4e00-\u9fff.-]*(:[23])?(\([^()]*\))?\{/.test(line)||
          (line.indexOf('|')>=0&&i+1<lines.length&&/^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1])&&lines[i+1].indexOf('-')>=0)){
         break;
@@ -1558,6 +1680,114 @@ function parseMarkdown(src,_lv,opts,_base){
   var curInd=0;
   var pendCap=null;   /* v2.10.0 @@ caption 暂存：只作用于紧随其后的那一个表格 */
   var _dgHit=false;
+  /* ── v2.23.0 元数据：两条互斥通道 ────────────────────────────────
+     通道 A（兼容模式）：文首 --- … --- 的 YAML 平铺键值，值就在正文里。
+     通道 B（自有模式）：正文一行 @@ meta 作位置锚点，值**不进正文**，只存在
+       档案文件（<stem>.assets/.mde/zero.json + up.md），打开文档时随正文取
+       回并落在 window.__MDE_META__；总开关 window.__MDE_META_ON__。
+       渲染函数是同步的，所以只能读已经取回的值，不能在渲染途中去后端读文件。
+     两条同时成立＝冲突：都不渲染，只出一条提示条（不替人挑）。
+     元数据区一律带 data-mde-zone，三个导出出口按此属性整块剔除——
+     元数据只在预览区看得见。 */
+  var MDE_META_KEYS=[['title','标题'],['author','作者'],['date','日期'],['tags','标签'],['note','备注']];
+  function _fmEsc(s){return escapeHtml(String(s==null?'':s));}
+  function _mdeMetaOn(){
+    try{return !(typeof window!=='undefined'&&window.__MDE_META_ON__===false);}catch(e){return true;}
+  }
+  function _fmZone(rows,zone,last){
+    var h='<div class="mde-fm" data-mde-zone="'+zone+'"><div class="mde-fm-h">元数据</div>';
+    for(var k=0;k<rows.length;k++){
+      if(rows[k].k===null){                 /* 不合 key: value 的行按原文行露出，零吞字 */
+        h+='<div class="mde-fm-row mde-fm-raw"><span class="mde-fm-v">'+_fmEsc(rows[k].v)+'</span></div>';
+        continue;
+      }
+      h+='<div class="mde-fm-row"><span class="mde-fm-k">'+_fmEsc(rows[k].k)+'</span>'
+        +'<span class="mde-fm-v">'+_fmEsc(rows[k].v)+'</span></div>';
+    }
+    if(last){
+      h+='<div class="mde-fm-row mde-fm-last"><span class="mde-fm-k">最近修改</span>'
+        +'<span class="mde-fm-v">'+_fmEsc(last)+'</span></div>';
+    }
+    return h+'</div>';
+  }
+  /* 档案元数据 → 渲染行。无任何非空字段即返回 null（没数据就没区域，不占位） */
+  function _metaFromWindow(){
+    try{
+      var m=(typeof window!=='undefined')?window.__MDE_META__:null;
+      if(!m||typeof m!=='object')return null;
+      /* 渲染取的是**当前值**：服务端 read() 已经把 zero.fields 与 up 里的
+         变更叠加成 fields。只读 zero 会把「改过的」值漏掉，等于回到建档那一刻
+         ——这正是主人定的 zero+up 合成渲染（2026-10-31）。 */
+      var f=(m.fields&&typeof m.fields==='object')?m.fields:((m.zero&&m.zero.fields)||{}),rows=[];
+      for(var q=0;q<MDE_META_KEYS.length;q++){
+        var vv=f[MDE_META_KEYS[q][0]];
+        if(vv===undefined||vv===null||String(vv).replace(/^\s+|\s+$/g,'')==='')continue;
+        rows.push({k:MDE_META_KEYS[q][1],v:String(vv)});
+      }
+      if(!rows.length)return null;
+      var up=m.up||[],last=null;
+      if(up.length){
+        var t=up[up.length-1];
+        last=(t&&t.at?String(t.at):'')+(t&&t.key?(' · '+t.key):'');
+        if(!last)last=null;
+      }
+      return {rows:rows,last:last};
+    }catch(e){return null;}
+  }
+  /* 前置消费：四条判据全中才认
+       ① 首行恰为 ---（允许尾随空白，允许一个 BOM）
+       ② 有闭合 ---，且两者之间没有任何空行
+       ③ 闭合前至少一行 key:（防"---／第一章／---"这种装饰横线组被吞）
+       ④ 必须在文首（本函数只在顶层且 _base===0 时尝试）
+     任一不中 → 整段不认，走原有 hr + 段落路径，一字不吞，报 D301。 */
+  var _fmRows=null,_metaLineSeen=false,_fmConflict=false;
+  if(_lv===0&&_base===0&&lines.length){
+    var _fmL0=lines[0];
+    if(_fmL0.charCodeAt(0)===0xFEFF)_fmL0=_fmL0.slice(1);
+    if(/^---[ \t]*$/.test(_fmL0)){
+      var _fmCl=-1,_fmBlank=-1;
+      for(var _fmK=1;_fmK<lines.length;_fmK++){
+        if(/^---[ \t]*$/.test(lines[_fmK])){_fmCl=_fmK;break;}
+        if(/^\s*$/.test(lines[_fmK])){_fmBlank=_fmK;break;}
+      }
+      if(_fmCl>0){
+        var _fmRw=[],_fmKv=false;
+        for(var _fmM=1;_fmM<_fmCl;_fmM++){
+          var _fmLn=lines[_fmM];
+          var _fmMv=/^([A-Za-z_][A-Za-z0-9_\-. ]*?)[ \t]*:[ \t]*(.*)$/.exec(_fmLn);
+          if(_fmMv){
+            _fmKv=true;
+            var _fmV=_fmMv[2].replace(/[ \t]+$/,'');
+            if(_fmV.length>=2&&((_fmV.charAt(0)==='"'&&_fmV.charAt(_fmV.length-1)==='"')||
+                                (_fmV.charAt(0)==="'"&&_fmV.charAt(_fmV.length-1)==="'")))_fmV=_fmV.slice(1,-1);
+            _fmRw.push({k:_fmMv[1],v:_fmV});
+          }else if(_fmLn.replace(/\s/g,'')!==''){
+            _fmRw.push({k:null,v:_fmLn});     /* 不合键值的行按原文行输出，零吞字 */
+          }
+        }
+        if(_fmKv){_fmRows=_fmRw;i=_fmCl+1;}
+        else _dgE(0,'D501','front matter 内没有 key: value 行，未按元数据区渲染（已按普通文本走）','warn');
+      }else if(_fmBlank>0){
+        _dgE(0,'D501','front matter 内含空行，未按元数据区渲染（已按普通文本走）','warn');
+      }
+    }
+  }
+  if(_fmRows){
+    for(var _fmZ=0;_fmZ<lines.length;_fmZ++){
+      if(/^[ ]{0,3}@@\s*meta[ \t]*$/.test(lines[_fmZ])){_metaLineSeen=true;break;}
+    }
+    _fmConflict=_metaLineSeen;
+    if(_fmConflict){
+      html+='<div class="mde-fm mde-fm-conflict" data-mde-zone="x">'
+        +'<div class="mde-fm-h">元数据冲突</div>'
+        +'<div class="mde-fm-row"><span class="mde-fm-v">本文档同时存在首行 YAML front matter 与 '
+        +'<code>@@ meta</code>。二者只能选其一——删掉首行的 <code>---</code> 块，或删掉 <code>@@ meta</code> 行。'
+        +'两者都未渲染。</span></div></div>';
+    }else if(_mdeMetaOn()){
+      html+=_fmZone(_fmRows,'a',null);
+    }
+  }
+  var _metaSeen=false;
   while(i<lines.length){
     var line=lines[i];
     _dgHit=false;
@@ -1591,6 +1821,24 @@ function parseMarkdown(src,_lv,opts,_base){
         i++;curInd=0;continue;
       }
       /* n=0 / 非正数：不生效，落到普通段落按原文露出 */
+    }
+    /* v2.23.0 @@ meta：自有模式元数据区的位置锚点。行级、无参、必须独占一行
+       （不独占则落到段落兜底报 D406 并按原文露出，与 @@ blank 同口径）。
+       数据来自档案文件（window.__MDE_META__）；无数据 / 总开关关闭时静默
+       无输出——**不占位、不出提示条**（没数据就没区域）。冲突时的提示条
+       已由前置消费在文首出过，这里只跳过该行，不重复渲染。
+       重复出现只认第一处，其余报 D302 并跳过（指令「后写无效」的通用语义）。 */
+    if(/^[ ]{0,3}@@\s*meta[ \t]*$/.test(line)){
+      if(_metaSeen){
+        _dgE(i,'D502','重复的 @@ meta 已忽略（只有第一处生效）','warn');
+      }else{
+        _metaSeen=true;
+        if(!_fmConflict&&!_fmRows&&_mdeMetaOn()){
+          var _mz=_metaFromWindow();
+          if(_mz)html+=_fmZone(_mz.rows,'b',_mz.last);
+        }
+      }
+      i++;curInd=0;continue;
     }
     if(/^```/.test(line)){
       var _fenceAt=i;
@@ -2142,11 +2390,11 @@ function parseMarkdown(src,_lv,opts,_base){
     }
     var para=[];
     while(i<lines.length && !/^[ ]*$/.test(lines[i]) && !/^```/.test(lines[i]) && !/^(#{1,6})[ ]+/.test(lines[i]) && !/^[ ]*>/.test(lines[i]) && !/^[ ]*([-+]|[0-9]+\.)[ ]+/.test(lines[i]) && !/^[ ]{0,3}<<<\s*$/.test(lines[i])
-      /* v2.13.2 @@ 家族块（begin/end/caption/blank）紧贴上一行文字时同样终断
+      /* v2.13.2 @@ 家族块（begin/end/caption/blank/meta）紧贴上一行文字时同样终断
          段落——否则"必须独占一行"的块被段落收集器整条吞进 <p>，标记原样
          露出（@@ blank{1} 紧贴正文即中此招）。行内 @@ color / @@ MDE 不在此列
          （它们是真行内语法，本来就可以混在文字里）。 */
-      && !/^[ ]{0,3}@@\s*(begin|end|caption|blank)\b/.test(lines[i])
+      && !/^[ ]{0,3}@@\s*(begin|end|caption|blank|meta)\b/.test(lines[i])
       && !(lines[i].indexOf('|')>=0 && i+1<lines.length && /^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1]) && lines[i+1].indexOf('-')>=0)
       /* v2.6：未闭合的 MDE 表格起始行（@@ MDE_x:2(2x2){ 后无 }）终断
          段落收集——否则连续数据点行把表格语法吞进段落漏成明文 */
@@ -2162,11 +2410,12 @@ function parseMarkdown(src,_lv,opts,_base){
       /* v2.22.0 行尾兜底：@@ 方言前缀行没被任何分支接管＝未生效（fail-closed
          按普通文本渲染）。分支内已上报过的行（_dgHit）不重复报。 */
       if(!_dgHit&&/^[ ]{0,3}@@/.test(para[0])){
-        var _dgT=(para[0].match(/^[ ]{0,3}@@\s*(begin|end|caption|blank|MDE)/)||[])[1]||'';
+        var _dgT=(para[0].match(/^[ ]{0,3}@@\s*(begin|end|caption|blank|meta|MDE)/)||[])[1]||'';
         if(_dgT==='end')_dgE(i-1,'D401','孤 @@ end：前面没有打开的对应 begin 块（检查家族名与配对）');
         else if(_dgT==='begin')_dgE(i-1,'D402','@@ begin 未生效：家族名／参数／嵌套位置有误（fill 分栏／full 独占页／page 页区／color 着色）');
         else if(_dgT==='caption')_dgE(i-1,'D403','@@ caption 未生效：其后必须紧跟表格（下一行表体、再下一行分隔行）');
         else if(_dgT==='blank')_dgE(i-1,'D404','@@ blank 未生效：须独占一行，n 为正数（0.1~50）');
+        else if(_dgT==='meta')_dgE(i-1,'D406','@@ meta 未生效：须独占一行、不带任何参数');
         else _dgE(i-1,'D405','以 @@ 开头但不是有效方言指令，按普通文本渲染','warn');
       }
     }
@@ -2182,8 +2431,9 @@ function parseMarkdown(src,_lv,opts,_base){
 /* 中英双语（v2.15.0）：字典 key = 界面中文原文。默认 zh，切换后只翻 UI 容器，
    预览与编辑区（用户内容）永不触碰。动态节点由 applyLang 的观察器兜住。 */
 var LANG_KEY='md-editor-lang';
-var I18N_EN={"新建": "New","分屏": "Split","跟随": "Follow","暗色": "Dark","亮色": "Light","文件": "Files","打开": "Open","打印": "Print","排版": "TS","保存": "Save","另存为": "As…","替换": "Replace","全部": "All","▶ 运行": "▶ Run","运行中…": "Running…","默认文档": "Default doc","已存入缓存": "Cached","编辑中...": "Editing…","本工具由 AI 生成": "AI-generated","本工具由 AI 辅助生成": "Made with AI assistance","本工具由 AI 辅助生成 (AI-assisted)": "Made with AI assistance","文档批注数": "Number of notes","仅编辑": "Editor","仅预览": "Preview","不跟随": "No follow","大纲": "Outline","查找…": "Find…","区分大小写": "Match case","正则表达式": "Regular expression","全字匹配": "Whole word","上一个（Shift+Enter）": "Previous (Shift+Enter)","下一个（Enter）": "Next (Enter)","展开/收起替换（Ctrl+H）": "Toggle replace (Ctrl+H)","关闭（Esc）": "Close (Esc)","替换为（\\n 换行、\\t 制表；正则模式支持 $1 引用）": "Replace with (\\n newline, \\t tab; $1 backreference in regex mode)","替换当前命中（Ctrl+Z 可撤销）": "Replace this match (Ctrl+Z to undo)","全部替换（整体一步，Ctrl+Z 一次撤销）": "Replace all (one step, undo once with Ctrl+Z)","运行全部 @@ MDE 执行点（手动模式）": "Run all @@ MDE exec points (manual mode)","视图切换": "Switch view","主题切换": "Switch theme","最近文件与切换": "Recent files","打开 .md 文件": "Open a .md file","新建文档 (Ctrl+N)": "New document (Ctrl+N)","保存（Ctrl+S）": "Save (Ctrl+S)","另存为…": "Save as…","导出 HTML": "Export HTML","导出 Word(.docx)：保留样式与可编辑公式": "Export Word (.docx): styles and editable formulas preserved","AI 设置：润色 / 智能备注的后端与模型": "AI settings: backend and model for polish / smart notes","排版设置：字体/表格/缩进/自动落盘": "Typesetting: fonts / tables / indent / autosave","low runner：写/生成 Python run，供 @@ MDE 数据点与执行点调用": "low runner: write/generate Python runs for @@ MDE data and exec points","预览跟随编辑区滚动（仅分屏模式生效），点击开/关": "Preview follows editor scroll (split view only). Click to toggle","打印：生成分页版 HTML（纸张/页码/目录）并在浏览器打开，Ctrl+P 即可打印或存为 PDF": "Print: build a paged HTML (paper, page numbers, contents) and open it; Ctrl+P to print or save as PDF","在这里写 Markdown...": "Write Markdown here…","Markdown 源码编辑区": "Markdown source editor","关闭": "Close","取消": "Cancel","应用": "Apply","保存文档": "Save document","文件名": "File name","格式": "Format","未命名": "Untitled","保存目录": "Folder","浏览…": "Browse…","Markdown 文档（.md，图片存同名 .assets 目录）": "Markdown (.md, images in a sibling .assets folder)","自包含文档（.smd，单文件含全部图片）": "Self-contained (.smd, all images in one file)","可直接粘贴路径，或点「浏览…」": "Paste a path, or click Browse…","排版设置": "Typesetting","自动落盘间隔（分钟，0=仅手动）": "Autosave interval (min, 0 = manual only)","字体 / 字号 / 对齐（字号留空 = 保持默认，单位磅；本机字体由后端自动枚举）": "Font / size / align (blank size keeps default, unit pt; local fonts listed by backend)","正文": "Body","H1 标题": "H1","H2 标题": "H2","H3 标题": "H3","H4~H6 标题": "H4–H6","引用块": "Quote","列表": "List","表格": "Table","代码": "Code","公式（KaTeX，字体固定）": "Math (KaTeX, fixed font)","图片": "Image","图题": "Figure caption","表题": "Table caption","本机字体": "Local fonts","(默认)": "(default)","默认": "Default","左对齐": "Left","居中": "Center","右对齐": "Right","两端对齐": "Justify","无": "None","首行缩进": "First line","悬挂缩进": "Hanging","整体缩进": "Block","磅": "pt","段落缩进（按元素独立，字符数 × 当前字号自动换算）": "Paragraph indent (per element; chars × current size)","列表标记外凸（续行悬挂）": "Hanging list markers","编号/圆点站到文字块外面，多行项的续行与首行文字左沿对齐；关闭则续行顶格（v2.13.5 及更早的口径）": "Markers sit outside the text block, wrapped lines align with the first line. Off = wrapped lines flush left (behaviour before v2.14)","段间距（正文块之间的垂直间距，单位 em＝正文字号；@@ blank{n} 逐处硬控可覆盖它）": "Paragraph gap (em = body size; @@ blank{n} overrides per spot)","统一段间距": "Uniform paragraph gap","表格样式": "Table style","三线表（去竖线，三条横线）": "Booktabs (no vertical rules, three rules)","表头底色": "Header shading","首列底色": "First column shading","页面（作用于「打印」导出）": "Page (used by the Print export)","纸张": "Paper","自定义": "Custom","自定义宽 × 高（mm）": "Custom width × height (mm)","宽": "W","高": "H","页边距 上/右/下/左（mm）": "Margins top/right/bottom/left (mm)","页码（打印导出时渲染）": "Page numbers (rendered on Print export)","页码": "Page number","显示": "Show","外侧（奇右偶左）": "Outside (right odd, left even)","底部居中": "Bottom center","底部右侧": "Bottom right","底部左侧": "Bottom left","顶部居中": "Top center","顶部右侧": "Top right","页码模板与字号（{p}=页码，{P}=全文总页数，{N}=本区总页数）": "Template and size ({p} = page, {P} = total pages, {N} = pages in this region)","目录（打印导出时自动生成，条目带页码）": "Contents (built on Print export, entries carry page numbers)","目录": "Contents","不生成": "None","生成": "Generate","置于文首": "At the start","第一个 # 之下": "After the first #","目录独占一页（后续 ## 与正文强制新页，不得侵入）": "Contents on its own page (following ## and body start a new page)","不计入目录（勾选的级别照常渲染、只是不进目录）": "Excluded from contents (checked levels still render, just not listed)","标题自动序号（只作用于预览与导出，不改源文；范围 ## ~ #####）": "Auto-number headings (preview and export only, source untouched; ## to #####)","自动序号": "Numbering","中文体　一、（一）1.（1）": "Chinese  一、(一) 1.(1)","层级体　1 / 1.1 / 1.1.1": "Decimal  1 / 1.1 / 1.1.1","图 / 表编号": "Figure / table numbering","全篇连续　图 1 / 表 1": "Whole document  图 1 / 表 1","按章重编　图 1-1 / 表 2-1": "Per chapter  图 1-1 / 表 2-1","编号章级": "Chapter level","##　二级标题为章（默认）": "##  (default)","#　一级标题为章": "#","###　三级标题为章": "###","第 {p} 页 / 共 {P} 页": "Page {p} of {P}","low runner · run 库（编辑器级，全文档共用）": "low runner · run library (editor-wide, shared by all documents)","已保存": "Saved","运行": "Run","立即": "Immediately","等待": "Wait","秒": "s","手动": "Manual","名称": "Name","依赖目录": "Deps folder","AI 生成": "AI generate","报告 AI 生成内容": "Report AI content","保存入库": "Save to library","清空编辑区，另写一个新 run": "Clear the editor and start a new run","渲染完成后 0.4 秒自动运行（原行为）": "Run 0.4s after rendering (previous behaviour)","停止输入 N 秒后自动运行": "Run N seconds after typing stops","等待秒数": "Wait seconds","不自动运行：执行点旁 ▶ 单点运行，或左下角「▶ 运行」全部运行": "Never auto-run: use ▶ beside a point, or ▶ Run in the status bar","如 dark、统计（即文件名，@@ MDE import 用它）": "e.g. dark, stats (also the file name used by @@ MDE import)","打开 runtime/pylibs 目录，pip --target 装三方包": "Open runtime/pylibs to pip install --target third-party packages","对 AI 说出需求，如：求数据点里所有数字之和 / 统计某词出现次数 / 画折线图…（生成后需人工查阅）": "Describe what you need, e.g. sum all numbers in the data points / count a word / draw a line chart… (review the result)","向开发者报告不当的 AI 生成内容（微软商店政策 11.16）": "Report inappropriate AI-generated content (Microsoft Store policy 11.16)","先在下方输入框说出需求": "Describe what you need in the box below","AI 生成中（约 10~60 秒，取决于后端），完成后自动填入代码框…": "Generating (about 10–60 s depending on the backend); it will fill the code box…","AI 已生成——人工查阅后再「保存入库」": "Generated. Review it, then Save to library","（AI 未给名字，请手动命名）": " (no name from AI, please name it)","AI 生成失败：": "AI generation failed: ","\n可在工具栏「AI」里检查后端配置。": "\nCheck the backend in AI settings.","代码为空": "Code is empty","请先命名（@@ MDE import 的名字就是它）": "Name it first (this is the name used by @@ MDE import)","尚无文件路径，请先「另存为」": "No file path yet, use Save as first","未另存为": "Not saved yet","已覆盖 ": "Overwrote ","已保存 ": "Saved ","已覆盖": "Overwrote","（pip 名 ": " (pip name ","——运行将失败，请先安装：</div>": " — the run will fail, install it first:</div>","留空则按名称": "Blank uses the name","上一次生成": "Previous output","删": "Del","删除 ": "Delete ","（点两次确认）": " (click twice to confirm)","确定后删不掉": "Cannot be undone","确认删": "Confirm","只显示一次": "Shown only once","已载入 ": "Loaded ","——修改后「保存」即覆盖": " — Save overwrites it","读取失败：": "Read failed: ","run 库读取失败：": "Run library unreadable: ","待运行": "pending","▶ 待运行": "▶ Pending","全部运行": "Run all","打开就自动跑": "Runs on open","切手动不一定显示 ▶": "Manual mode may hide ▶","改别处 = 白跑一次": "Editing elsewhere wastes a run"," · 全局 ": " · global ","运行此执行点": "Run this point","文件改了但数没变": "File changed, data did not","有未完成": "Unfinished","外部改了文件 → 复位后仍命中旧结果": "File changed outside, reset still hits the old result","全局执行点须返回列表（得到 ": "Global points must return a list (got ","返回 ": "Returned "," 项 ≠ 标记 ": " items ≠ "," 个": " markers","执行失败": "Run failed","网络错误": "Network error","缺少包 ": "Missing package ","重试": "Retry","数据没变": "Data unchanged","数据变了": "Data changed","已替 data 运行": "Ran on data"," 个执行点未运行": " exec points not run"," 个执行点运行失败（红色错误信息就在执行点旁，▶ 可重试）": " exec points failed (the red message sits beside the point; ▶ retries)"," 个执行点已置为待运行": " exec points set back to pending","AI 设置（润色 / 智能备注）": "AI settings (polish / smart notes)","后端": "Backend","LM Studio（本地 :1234）": "LM Studio (local :1234)","Ollama（本地 :11434）": "Ollama (local :11434)","OpenAI 兼容（外部 API）": "OpenAI-compatible (external API)","服务地址（留空按后端默认端口）": "Endpoint (blank = backend default port)","API Key（OpenAI 兼容后端必填）": "API Key (required for OpenAI-compatible)","模型（下拉为后端实加载的模型）": "Model (list comes from the backend)","刷新": "Refresh","超时（秒）": "Timeout (s)","最大输出 tokens": "Max output tokens","温度 temperature（0~2）": "Temperature (0–2)","联网查询（润色 / AI 解释时检索网络资料）": "Web search (for polish / explain)","启用联网查询（关闭则 AI 仅凭自身润色/解释）": "Enable web search (off = model knowledge only)","搜索源": "Search provider","DuckDuckGo（免费，无需 Key）": "DuckDuckGo (free, no key)","Tavily（需 API Key）": "Tavily (needs an API key)","Google Custom Search（需 Key + CX）": "Google Custom Search (needs key + CX)","Bing Search（需 API Key）": "Bing Search (needs an API key)","自定义 API": "Custom API","API Key（Tavily / 自定义 API 用）": "API Key (Tavily / custom API)","自定义 API URL（{q} 与 {key} 占位）": "Custom API URL ({q} and {key} placeholders)","结果条数（1~10）": "Results (1–10)","RAG 知识库（检索增强润色 / 解释）": "RAG knowledge base (retrieval-augmented)","rag-assistant 路径（含 main.py 的目录）": "rag-assistant path (the folder holding main.py)","知识库（空 = 自动路由）": "Knowledge base (blank = auto)","RAG 服务（端口 8767）": "RAG service (port 8767)","探测中…": "Probing…","启动": "Start","停止": "Stop","测试连接": "Test connection","本地推理需先启动 LM Studio / Ollama 并加载模型；OpenAI 兼容后端填外部 API 地址与 Key（DeepSeek、硅基流动等均可用）；润色与「AI 解释」都走此配置。": "Local inference needs LM Studio / Ollama running with a model loaded; for OpenAI-compatible backends fill in the endpoint and key (DeepSeek, SiliconFlow and others work). Polish and Explain both use this config.","联网查询开启后，润色 / AI 解释先检索网络资料注入提示词，搜索失败自动降级为纯模型结果；与 RAG 相互独立。": "With web search on, polish / explain first pull web results into the prompt; failures fall back to the model alone. Independent of RAG.","「RAG润色 / RAG解释」在上述基础上检索 rag-assistant 知识库作为参考资料，需先在下方填写路径并启动 RAG 服务；启动/停止仅手动触发，退出编辑器不影响其运行。": "RAG polish / RAG explain also retrieve from the rag-assistant knowledge base. Set the path below and start the service first; start and stop are manual, and quitting the editor leaves it running.","重新探测 RAG 服务与知识库列表": "Re-probe the RAG service and knowledge bases","（点「刷新」拉取模型列表）": " (click Refresh to list models)","（列表外）": " (not listed)","已获取 ": "Loaded "," 个模型。": " models.","模型列表获取失败：": "Could not list models: ","读取 AI 配置失败": "Could not read the AI config","读取 AI 配置失败：": "Could not read the AI config: ","测试中…": "Testing…","连接成功": "Connected","连接失败": "Connection failed","测试失败：": "Test failed: ","AI 配置已保存": "AI settings saved","（自动路由）": " (auto)","在线（": "Online ("," 个知识库）": " knowledge bases)","启动中…（冷加载需数十秒）": "Starting… (cold start can take tens of seconds)","启动中…": "Starting…","RAG 启动失败：": "RAG failed to start: ","RAG 服务已停止": "RAG service stopped","RAG 停止失败：": "Could not stop the RAG service: "," 个结果": " results","无结果": "No results","离线": "Offline","还活着": "Reachable","批注": "Annotate","标注片段（跟文本内容走，原文编辑后自动同步；删光自动失效）": "Anchor text (follows the content and re-syncs after edits; gone when deleted)","AI 解释": "AI explain","RAG 解释": "RAG explain","删除标注": "Delete note","完成": "Done","备注": "Note","润色": "Polish","RAG润色": "RAG polish","AI 润色预览": "AI polish preview","原文": "Original","润色后（可先手动微调）": "Polished (tweak before applying)","替换原文": "Replace","写点备注…": "Add a note…","需 RAG 服务在线（AI 设置中启动）": "Requires the RAG service (start it in AI settings)","给选中片段加批注": "Add a note to the selection","AI 润色选中片段": "Polish the selection with AI","基于 RAG 知识库检索增强润色（需 RAG 服务在线）": "Retrieval-augmented polish (requires the RAG service)","解释中…": "Explaining…","已结合联网资料解释": "Explained with web results","联网搜索失败，已用纯模型结果": "Web search failed, used the model alone","AI 解释失败：": "Explain failed: ","RAG 解释失败：": "RAG explain failed: ","\n可在工具栏「AI」里检查 RAG 服务状态。": "\nCheck the RAG service in AI settings.","选中内容为空": "Nothing selected","无法标注该选区（跨元素边界）": "Cannot anchor this selection (crosses element boundaries)","润色中…（本地模型可能需要一些时间）": "Polishing… (a local model can take a while)","已结合联网资料润色": "Polished with web results","润色失败：": "Polish failed: ","检索知识库并润色中…（RAG 冷启动或本地模型可能需要一些时间）": "Retrieving and polishing… (RAG cold start or a local model can take a while)","RAG 润色失败：": "RAG polish failed: ","原文已变化，无法定位选区，请重新选择后重试。": "The text changed and the selection could not be located. Select again and retry.","报告将发送给开发者（": "The report goes to the developer (","）。未配置邮件客户端时，可复制下方内容自行粘贴发送。": "). With no mail client configured, copy the text below and send it yourself.","问题描述（可留空）": "Problem description (optional)","自动附带的报告内容（只读）": "Attached report (read-only)","复制报告内容": "Copy report","打开邮件客户端": "Open mail client","例如：内容与事实不符 / 出现不当表述 / 代码无法运行…": "e.g. factually wrong / inappropriate wording / code does not run…","报告内容已复制，请粘贴发送给开发者": "Report copied, paste it to the developer","报告内容已复制，请粘贴发送到 ": "Report copied, paste it to ","复制失败，请手动全选复制": "Copy failed, select all and copy manually","可复制下方内容发送给开发者。": "Copy the text below and send it to the developer.","（无）": "(none)","新标签页": "New tab","打开失败：": "Open failed: ","读取失败": "Read failed","读取文件失败：": "Could not read the file: ","已保存到原文件": "Saved to the original file","保存失败：": "Save failed: ","已载入原文件": "Loaded the original file","已打开：": "Opened: ","已载入": "Loaded","载入内置文档失败：": "Could not load the built-in document: ","使用指南": "User guide","版权与开源组件声明": "Copyright and open-source notices","通过「打开」按钮选择（浏览器不提供完整路径）": "Chosen with the Open button (the browser hides the full path)","该文件通过「打开」按钮选择，浏览器不提供完整路径，无法自动重载。\n请通过右键菜单打开它，或再次用「打开」选择。": "This file was picked with the Open button, so the browser hides its path and it cannot reload automatically.\nOpen it from the context menu, or pick it again with Open.","文档尚未保存，无法打开副本": "Save the document before opening a copy","已用系统程序打开副本": "Opened a copy with the system default app","用系统关联程序打开这份副本": "Open this copy with the system default app","选择保存位置失败：": "Could not choose a save location: ","粘贴图片前请先保存文档（Ctrl+S），图片将存入同名 .assets 目录。": "Save the document before pasting images (Ctrl+S); they go into a sibling .assets folder.","图片保存失败：": "Could not save the image: ","粘贴文件前请先保存文档（Ctrl+S），文件将存入同名 .assets 目录。": "Save the document before pasting files (Ctrl+S); they go into a sibling .assets folder.","文件超过 20MB 上限（当前 ": "File exceeds the 20 MB limit (currently ","正在写入 ": "Writing ","已插入数据点：": "Data point inserted: ","文件写入失败：": "Write failed: ","排版已更新（缓存）": "Typesetting updated (cached)","已落盘 ": "Written ","(未命名)": "(untitled)","文档": "Documents","桌面": "Desktop","下载": "Downloads","用户目录": "Home","上次目录": "Last folder","请先选择保存目录（点「浏览…」）": "Choose a folder first (click Browse…)","未命名.md": "Untitled.md","未命名文档": "Untitled document","预览不存在": "Preview not found","已导出：": "Exported: ","导出失败：": "Export failed: ","未知错误": "Unknown error","无法导出：": "Cannot export: ","。请先运行并确认全部执行点结果后再导出": ". Run the exec points and confirm their results before exporting","（状态栏「▶ 运行」一次跑全部）": "(▶ Run in the status bar runs them all)","正在生成打印版，请稍候…": "Building the print version…","打印导出失败（数据序列化错误）：": "Print export failed (data serialisation): ","导出 Word 文档": "Export Word","后台静默落盘 + 浏览器下载": "Saved in the background and downloaded by the browser","运行错误或失败静默导出": "Export silently on errors or failures","来源：": "Source: ","\n时间：": "\nTime: ","构建：": "Build: ","— AI 输出内容（自动附带，最多 1000 字）—\n": "— AI output (attached automatically, up to 1000 chars) —\n","— 问题描述 —\n": "— Problem description —\n","MDEditor AI 生成内容报告（": "MDEditor AI content report (","已恢复未落盘草稿": "Recovered an unsaved draft","检测到未落盘的本地草稿，已为你恢复（磁盘版本未被覆盖）": "An unsaved local draft was found and restored (the file on disk was not overwritten)","用磁盘版本": "Use the file on disk","恢复": "Restore","发现未完成的保存备份（": "Found an unfinished save backup (","），是否用它恢复本文档？": "). Restore this document from it?","恢复失败：": "Restore failed: ","已从保存备份恢复": "Restored from the save backup","就近": "Nearby","已到文末，从头继续": "Reached the end, continuing from the top","替换失败": "Replace failed","无命中": "No match","替换后与原文相同": "Replacement is identical to the original","已替换 ": "Replaced "," 处（Ctrl+Z 一步撤销）": " occurrences (Ctrl+Z undoes in one step)","正则表达式无效": "Invalid regular expression","已撤销全部替换": "Undid all replacements","渲染失败": "Render failed","<h2>请使用正确方式打开</h2>": "<h2>Please open this page properly</h2>","<p>本页面被直接双击打开（file://），此方式<b>没有后端服务</b>，公式、图片、保存、导出均不可用。</p>": "<p>This page was opened directly from disk (file://). <b>There is no backend</b>, so formulas, images, saving and exporting are unavailable.</p>","<p>正确打开方式（任选其一）：</p>": "<p>Open it one of these ways:</p>","<ol><li>右键任意 .md 文件 →「Open with Markdown Editor」</li>": "<ol><li>Right-click any .md file and choose Open with Markdown Editor</li>","<li>双击工具目录中的 <b>MarkdownEditor.exe</b></li>": "<li>Run <b>MarkdownEditor.exe</b> from the tool folder</li>","<li>双击 .md 文件（已关联本编辑器）</li></ol>": "<li>Double-click a .md file already associated with this editor</li></ol>","<p>若点下方按钮无反应，说明后端服务未运行——先做上面第 2 步。</p>": "<p>If the button below does nothing, the backend is not running. Do step 2 above first.</p>","一级标题": "H1","二级标题": "H2","标题": "Heading","加粗": "Bold","粗体": "Bold","斜体": "Italic","删除线": "Strikethrough","删除": "Strike","行内代码": "Code","引用": "Quote","无序列表": "Bullets","列表项": "List item","序号": "Numbering","有序列表": "Numbered list","任务": "Task","任务列表": "Task list","链接": "Link","插入链接": "Insert link","链接文字": "Link text","插入表格": "Insert table","图表自动编号（图、表各自计数；只作用于预览与导出，不改源文）": "Auto-number figures and tables (each counted separately; preview and export only, source untouched)","内置文档": "Built-in documents","内置文档 · 点击载入（可编辑/另存为）": "Built-in · click to load (editable, save as copy)","回到初始示例状态": "Reset to the initial sample","最近文件": "Recent files","暂无标题": "No headings","默认文档（使用指南）": "Default document (user guide)","切换界面语言：中文 / English": "Switch the interface language: 中文 / English","语法提示开关：开启后光标所在行弹出方言速查（语法检查不受影响）": "Syntax hint toggle: shows the dialect cheat-sheet at the cursor when on (lint checks unaffected)","提示": "Hints","保存到 ": "Save to ","图": "Figure","表": "Table","图片输出（「打印」与导出；预览始终按栏宽缩略，不受此项影响）": "Image output (Print and exports; the preview always uses a column-width thumbnail and is unaffected)","像素": "Pixels","原图输出（不压缩）": "Original (no compression)","实图输出 · 300dpi（印刷）": "Fit to display · 300 dpi (print)","实图输出 · 150dpi（电子交付）": "Fit to display · 150 dpi (screen)","说明": "Note","按每张图的实际显示宽度换算目标像素再降采样：只缩不放、压完不变小就回滚用原图；源文件与磁盘上的图一个字节都不动。150dpi 下含小字的截图会发糊，慎用。": "Each image is downscaled to the pixels its real display width needs: never enlarged, and reverted to the original when the result is not smaller. The source files on disk are never touched. At 150 dpi screenshots with small text lose sharpness, so use with care.","def run(data):\n    # data['kv'] = {'键': '值'}（框架按第一个 == 剥离）\n    # data['raw'] = 数据点原文列表（== 不够用时自行解析）\n    return str(...)  # 返回 str 替换执行点；作图存当前目录返回 ![](文件名)": "def run(data):\n    # data['kv'] = {'key': 'value'} (the framework strips the first ==)\n    # data['raw'] = raw text of this data point (parse it yourself if == is not enough)\n    return str(...)  # return a str to replace the exec point; to draw a chart, save the file and return ![](file name)"};
-var I18N_RE=[[new RegExp("^批注 (\\d+)$"),"Notes {1}"],[new RegExp("^(\\d+) 字符$"),"{1} chars"],[new RegExp("^(\\d+) 词$"),"{1} words"],[new RegExp("^(\\d+) 行$"),"{1} lines"],[new RegExp("^第 (\\d+) 页 / 共 (\\d+) 页$"),"Page {1} of {2}"],[new RegExp("^(\\d+) 个结果$"),"{1} results"],[new RegExp("^在线（(\\d+) 个知识库）$"),"Online ({1} knowledge bases)"],[new RegExp("^已获取 (\\d+) 个模型。$"),"Loaded {1} models."],[new RegExp("^共 (\\d+) 条批注，点击正文中的虚线段可查看/编辑$"),"{1} notes; click a dashed span in the text to view or edit"],[new RegExp("^选中文字后点「备注」可加批注（AI 可在设置中配置）$"),"Select text and click Note to annotate (AI is configured in settings)"],[new RegExp("^已替换 (\\d+) 处（Ctrl\\+Z 一步撤销）$"),"Replaced {1} occurrences (Ctrl+Z undoes in one step)"],[new RegExp("^(\\d+) 个执行点未运行$"),"{1} exec points not run"],[new RegExp("^(\\d+) 个执行点已置为待运行$"),"{1} exec points set back to pending"],[new RegExp("^已载入 (.+?)——修改后「保存」即覆盖$"),"Loaded {1} — Save overwrites it"],[new RegExp("^验证失败：(.+)$"),"Verification failed: {1}"],[new RegExp("^删除 (.+)（点两次确认）$"),"Delete {1} (click twice)"],[new RegExp("^保存到 (.+)$"),"Save to {1}"],[new RegExp("^(.+) · (\\d{4}/\\d{1,2}/\\d{1,2} .+)$"),"{1} · {2}"]];
+var I18N_EN={"字体 · 正文类":"Fonts · Body","字体 · 块级类":"Fonts · Blocks","段落缩进":"Indent","段间距":"Gap","页面 · 纸张与边距":"Page · Paper","页面 · 页码":"Page · Numbers","编号":"Numbering","图片输出":"Image output","元数据":"Metadata","字":"chars","分":"min","H4~H6 标题（四级到六级标题共用一套字体设置）":"H4–H6 headings (levels 4 to 6 share one font setting)","关闭后 front matter 与 @@ meta 都不出元数据区（元数据区只在预览显示，不打印、不进 Word / HTML 导出）":"Turn off to hide the metadata block for both front matter and @@ meta (preview only: never printed, never in Word / HTML exports)","目录独占一页：其后第一个 ## 与正文强制另起新页，不侵入目录页":"Contents on its own page: the first following ## starts a new page, so the body never flows onto the contents page","三线表：去掉全部竖线，只留顶线、表头线、底线":"Booktabs: no vertical rules, only top, header and bottom rules","段间距（正文块之间的垂直间距，单位 em＝正文字号；@@ blank 逐处硬控可覆盖它）":"Paragraph gap (vertical space between body blocks, em = body size; @@ blank overrides it per spot)","字体 · 公式与题注":"Fonts · Math & captions","目录独占一页":"Contents on its own page","三线表":"Booktabs","列表标记外凸":"Hanging list markers","页边距":"Margins","自动落盘间隔":"Autosave interval","留空则不写":"Blank = not written","如 2026-10-30":"e.g. 2026-10-30","逗号分隔":"Comma-separated","按显示宽度换算像素再降采样：只缩不放，压完没变小就回滚用原图。源文件一个字节都不动。":"Downscaled to the pixels each image's real display width needs: never enlarged, and reverted to the original when the result is not smaller. The file on disk is never touched.","当前：未建档（首次填写并应用时建档）":"Current: no archive yet (created on the first apply)","当前：首行 YAML front matter（兼容模式），写入会改这段原文":"Current: YAML front matter on line 1 (compatible mode); applying rewrites that block","当前：本文档的元数据文件":"Current: this document's metadata file","当前：本文档的元数据文件 · 建档于 {0}":"Current: this document's metadata file, created {0}",
+"设置里的这份值；应用时写入本文档：没有档案就建档（创建快照只写一次、只读），已有档案只在履历里追加":"Applied to this document: a missing archive is created (snapshot written once, read-only); an existing one only gets an appended log","　⚠ 正文缺 @@ meta 行，填写后自动插入":"  ⚠ no @@ meta line in the text; one is added when you apply","正在读取元数据档案，稍后再点「应用」":"Reading the metadata archive, click Apply again in a moment","请先保存文档（Ctrl+S），元数据档案要跟着文件走":"Save the document first (Ctrl+S); the archive travels with the file","元数据写入失败":"Could not write the metadata","元数据无变化":"Metadata unchanged","保存失败：{0}":"Save failed: {0}","已自动落盘 {0}":"Autosaved {0}","自动落盘已跳过：文档还没有保存路径":"Autosave skipped: the document has no path yet","显示元数据区":"Show metadata","文档标题":"Title","作者":"Author","日期":"Date","标签":"Tags","位置":"Position","模板与字号":"Template & size","生成目录":"Contents","显示页码":"Show numbers","正文 · 字符数":"Body · chars","引用块 · 字符数":"Quote · chars","列表 · 字符数":"List · chars","不计入目录":"Excluded","标题自动序号":"Headings","自定义宽 × 高":"Custom W × H","页边距 上/右/下/左":"Margins T/R/B/L","公式 KaTeX":"Math KaTeX","新建": "New","分屏": "Split","跟随": "Follow","暗色": "Dark","亮色": "Light","文件": "Files","打开": "Open","打印": "Print","排版": "TS","保存": "Save","另存为": "As…","替换": "Replace","全部": "All","▶ 运行": "▶ Run","运行中…": "Running…","默认文档": "Default doc","已存入缓存": "Cached","编辑中...": "Editing…","本工具由 AI 生成": "AI-generated","本工具由 AI 辅助生成": "Made with AI assistance","本工具由 AI 辅助生成 (AI-assisted)": "Made with AI assistance","文档批注数": "Number of notes","仅编辑": "Editor","仅预览": "Preview","不跟随": "No follow","大纲": "Outline","查找…": "Find…","区分大小写": "Match case","正则表达式": "Regular expression","全字匹配": "Whole word","上一个（Shift+Enter）": "Previous (Shift+Enter)","下一个（Enter）": "Next (Enter)","展开/收起替换（Ctrl+H）": "Toggle replace (Ctrl+H)","关闭（Esc）": "Close (Esc)","替换为（\\n 换行、\\t 制表；正则模式支持 $1 引用）": "Replace with (\\n newline, \\t tab; $1 backreference in regex mode)","替换当前命中（Ctrl+Z 可撤销）": "Replace this match (Ctrl+Z to undo)","全部替换（整体一步，Ctrl+Z 一次撤销）": "Replace all (one step, undo once with Ctrl+Z)","运行全部 @@ MDE 执行点（手动模式）": "Run all @@ MDE exec points (manual mode)","视图切换": "Switch view","主题切换": "Switch theme","最近文件与切换": "Recent files","打开 .md 文件": "Open a .md file","新建文档 (Ctrl+N)": "New document (Ctrl+N)","保存（Ctrl+S）": "Save (Ctrl+S)","另存为…": "Save as…","导出 HTML": "Export HTML","导出 Word(.docx)：保留样式与可编辑公式": "Export Word (.docx): styles and editable formulas preserved","AI 设置：润色 / 智能备注的后端与模型": "AI settings: backend and model for polish / smart notes","排版设置：字体/表格/缩进/自动落盘": "Typesetting: fonts / tables / indent / autosave","low runner：写/生成 Python run，供 @@ MDE 数据点与执行点调用": "low runner: write/generate Python runs for @@ MDE data and exec points","预览跟随编辑区滚动（仅分屏模式生效），点击开/关": "Preview follows editor scroll (split view only). Click to toggle","打印：生成分页版 HTML（纸张/页码/目录）并在浏览器打开，Ctrl+P 即可打印或存为 PDF": "Print: build a paged HTML (paper, page numbers, contents) and open it; Ctrl+P to print or save as PDF","在这里写 Markdown...": "Write Markdown here…","Markdown 源码编辑区": "Markdown source editor","关闭": "Close","取消": "Cancel","应用": "Apply","保存文档": "Save document","文件名": "File name","格式": "Format","未命名": "Untitled","保存目录": "Folder","浏览…": "Browse…","Markdown 文档（.md，图片存同名 .assets 目录）": "Markdown (.md, images in a sibling .assets folder)","自包含文档（.smd，单文件含全部图片）": "Self-contained (.smd, all images in one file)","可直接粘贴路径，或点「浏览…」": "Paste a path, or click Browse…","排版设置": "Typesetting","自动落盘间隔（分钟，0=仅手动）": "Autosave interval (min, 0 = manual only)","字体 / 字号 / 对齐（字号留空 = 保持默认，单位磅；本机字体由后端自动枚举）": "Font / size / align (blank size keeps default, unit pt; local fonts listed by backend)","正文": "Body","H1 标题": "H1","H2 标题": "H2","H3 标题": "H3","H4~H6 标题": "H4–H6","引用块": "Quote","列表": "List","表格": "Table","代码": "Code","公式（KaTeX，字体固定）": "Math (KaTeX, fixed font)","图片": "Image","图题": "Figure caption","表题": "Table caption","本机字体": "Local fonts","(默认)": "(default)","默认": "Default","左对齐": "Left","居中": "Center","右对齐": "Right","两端对齐": "Justify","无": "None","首行缩进": "First line","悬挂缩进": "Hanging","整体缩进": "Block","磅": "pt","段落缩进（按元素独立，字符数 × 当前字号自动换算）": "Paragraph indent (per element; chars × current size)","列表标记外凸（续行悬挂）": "Hanging list markers","编号/圆点站到文字块外面，多行项的续行与首行文字左沿对齐；关闭则续行顶格（v2.13.5 及更早的口径）": "Markers sit outside the text block, wrapped lines align with the first line. Off = wrapped lines flush left (behaviour before v2.14)","段间距（正文块之间的垂直间距，单位 em＝正文字号；@@ blank{n} 逐处硬控可覆盖它）": "Paragraph gap (em = body size; @@ blank{n} overrides per spot)","统一段间距": "Uniform paragraph gap","表格样式": "Table style","三线表（去竖线，三条横线）": "Booktabs (no vertical rules, three rules)","表头底色": "Header shading","首列底色": "First column shading","页面（作用于「打印」导出）": "Page (used by the Print export)","纸张": "Paper","自定义": "Custom","自定义宽 × 高（mm）": "Custom width × height (mm)","宽": "W","高": "H","页边距 上/右/下/左（mm）": "Margins top/right/bottom/left (mm)","页码（打印导出时渲染）": "Page numbers (rendered on Print export)","页码": "Page number","显示": "Show","外侧（奇右偶左）": "Outside (right odd, left even)","底部居中": "Bottom center","底部右侧": "Bottom right","底部左侧": "Bottom left","顶部居中": "Top center","顶部右侧": "Top right","页码模板与字号（{p}=页码，{P}=全文总页数，{N}=本区总页数）": "Template and size ({p} = page, {P} = total pages, {N} = pages in this region)","目录（打印导出时自动生成，条目带页码）": "Contents (built on Print export, entries carry page numbers)","目录": "Contents","不生成": "None","生成": "Generate","置于文首": "At the start","第一个 # 之下": "After the first #","目录独占一页（后续 ## 与正文强制新页，不得侵入）": "Contents on its own page (following ## and body start a new page)","不计入目录（勾选的级别照常渲染、只是不进目录）": "Excluded from contents (checked levels still render, just not listed)","标题自动序号（只作用于预览与导出，不改源文；范围 ## ~ #####）": "Auto-number headings (preview and export only, source untouched; ## to #####)","自动序号": "Numbering","中文体　一、（一）1.（1）": "Chinese  一、 1.","层级体　1 / 1.1 / 1.1.1": "Decimal  1 / 1.1 / 1.1.1","图 / 表编号": "Fig. / table","全篇连续　图 1 / 表 1": "Whole doc  Fig. 1 / Tab. 1","按章重编　图 1-1 / 表 2-1": "Per chapter  Fig. 1-1","编号章级": "Chapter level","##　二级标题为章（默认）": "##  (default)","#　一级标题为章": "#","###　三级标题为章": "###","第 {p} 页 / 共 {P} 页": "Page {p} of {P}","low runner · run 库（编辑器级，全文档共用）": "low runner · run library (editor-wide, shared by all documents)","已保存": "Saved","运行": "Run","立即": "Immediately","等待": "Wait","秒": "s","手动": "Manual","名称": "Name","依赖目录": "Deps folder","AI 生成": "AI generate","报告 AI 生成内容": "Report AI content","保存入库": "Save to library","清空编辑区，另写一个新 run": "Clear the editor and start a new run","渲染完成后 0.4 秒自动运行（原行为）": "Run 0.4s after rendering (previous behaviour)","停止输入 N 秒后自动运行": "Run N seconds after typing stops","等待秒数": "Wait seconds","不自动运行：执行点旁 ▶ 单点运行，或左下角「▶ 运行」全部运行": "Never auto-run: use ▶ beside a point, or ▶ Run in the status bar","如 dark、统计（即文件名，@@ MDE import 用它）": "e.g. dark, stats (also the file name used by @@ MDE import)","打开 runtime/pylibs 目录，pip --target 装三方包": "Open runtime/pylibs to pip install --target third-party packages","对 AI 说出需求，如：求数据点里所有数字之和 / 统计某词出现次数 / 画折线图…（生成后需人工查阅）": "Describe what you need, e.g. sum all numbers in the data points / count a word / draw a line chart… (review the result)","向开发者报告不当的 AI 生成内容（微软商店政策 11.16）": "Report inappropriate AI-generated content (Microsoft Store policy 11.16)","先在下方输入框说出需求": "Describe what you need in the box below","AI 生成中（约 10~60 秒，取决于后端），完成后自动填入代码框…": "Generating (about 10–60 s depending on the backend); it will fill the code box…","AI 已生成——人工查阅后再「保存入库」": "Generated. Review it, then Save to library","（AI 未给名字，请手动命名）": " (no name from AI, please name it)","AI 生成失败：": "AI generation failed: ","\n可在工具栏「AI」里检查后端配置。": "\nCheck the backend in AI settings.","代码为空": "Code is empty","请先命名（@@ MDE import 的名字就是它）": "Name it first (this is the name used by @@ MDE import)","尚无文件路径，请先「另存为」": "No file path yet, use Save as first","未另存为": "Not saved yet","已覆盖 ": "Overwrote ","已保存 ": "Saved ","已覆盖": "Overwrote","（pip 名 ": " (pip name ","——运行将失败，请先安装：</div>": " — the run will fail, install it first:</div>","留空则按名称": "Blank uses the name","上一次生成": "Previous output","删": "Del","删除 ": "Delete ","（点两次确认）": " (click twice to confirm)","确定后删不掉": "Cannot be undone","确认删": "Confirm","只显示一次": "Shown only once","已载入 ": "Loaded ","——修改后「保存」即覆盖": " — Save overwrites it","读取失败：": "Read failed: ","run 库读取失败：": "Run library unreadable: ","待运行": "pending","▶ 待运行": "▶ Pending","全部运行": "Run all","打开就自动跑": "Runs on open","切手动不一定显示 ▶": "Manual mode may hide ▶","改别处 = 白跑一次": "Editing elsewhere wastes a run"," · 全局 ": " · global ","运行此执行点": "Run this point","文件改了但数没变": "File changed, data did not","有未完成": "Unfinished","外部改了文件 → 复位后仍命中旧结果": "File changed outside, reset still hits the old result","全局执行点须返回列表（得到 ": "Global points must return a list (got ","返回 ": "Returned "," 项 ≠ 标记 ": " items ≠ "," 个": " markers","执行失败": "Run failed","网络错误": "Network error","缺少包 ": "Missing package ","重试": "Retry","数据没变": "Data unchanged","数据变了": "Data changed","已替 data 运行": "Ran on data"," 个执行点未运行": " exec points not run"," 个执行点运行失败（红色错误信息就在执行点旁，▶ 可重试）": " exec points failed (the red message sits beside the point; ▶ retries)"," 个执行点已置为待运行": " exec points set back to pending","AI 设置（润色 / 智能备注）": "AI settings (polish / smart notes)","后端": "Backend","LM Studio（本地 :1234）": "LM Studio (local :1234)","Ollama（本地 :11434）": "Ollama (local :11434)","OpenAI 兼容（外部 API）": "OpenAI-compatible (external API)","服务地址（留空按后端默认端口）": "Endpoint (blank = backend default port)","API Key（OpenAI 兼容后端必填）": "API Key (required for OpenAI-compatible)","模型（下拉为后端实加载的模型）": "Model (list comes from the backend)","刷新": "Refresh","超时（秒）": "Timeout (s)","最大输出 tokens": "Max output tokens","温度 temperature（0~2）": "Temperature (0–2)","联网查询（润色 / AI 解释时检索网络资料）": "Web search (for polish / explain)","启用联网查询（关闭则 AI 仅凭自身润色/解释）": "Enable web search (off = model knowledge only)","搜索源": "Search provider","DuckDuckGo（免费，无需 Key）": "DuckDuckGo (free, no key)","Tavily（需 API Key）": "Tavily (needs an API key)","Google Custom Search（需 Key + CX）": "Google Custom Search (needs key + CX)","Bing Search（需 API Key）": "Bing Search (needs an API key)","自定义 API": "Custom API","API Key（Tavily / 自定义 API 用）": "API Key (Tavily / custom API)","自定义 API URL（{q} 与 {key} 占位）": "Custom API URL ({q} and {key} placeholders)","结果条数（1~10）": "Results (1–10)","RAG 知识库（检索增强润色 / 解释）": "RAG knowledge base (retrieval-augmented)","rag-assistant 路径（含 main.py 的目录）": "rag-assistant path (the folder holding main.py)","知识库（空 = 自动路由）": "Knowledge base (blank = auto)","RAG 服务（端口 8767）": "RAG service (port 8767)","探测中…": "Probing…","启动": "Start","停止": "Stop","测试连接": "Test connection","本地推理需先启动 LM Studio / Ollama 并加载模型；OpenAI 兼容后端填外部 API 地址与 Key（DeepSeek、硅基流动等均可用）；润色与「AI 解释」都走此配置。": "Local inference needs LM Studio / Ollama running with a model loaded; for OpenAI-compatible backends fill in the endpoint and key (DeepSeek, SiliconFlow and others work). Polish and Explain both use this config.","联网查询开启后，润色 / AI 解释先检索网络资料注入提示词，搜索失败自动降级为纯模型结果；与 RAG 相互独立。": "With web search on, polish / explain first pull web results into the prompt; failures fall back to the model alone. Independent of RAG.","「RAG润色 / RAG解释」在上述基础上检索 rag-assistant 知识库作为参考资料，需先在下方填写路径并启动 RAG 服务；启动/停止仅手动触发，退出编辑器不影响其运行。": "RAG polish / RAG explain also retrieve from the rag-assistant knowledge base. Set the path below and start the service first; start and stop are manual, and quitting the editor leaves it running.","重新探测 RAG 服务与知识库列表": "Re-probe the RAG service and knowledge bases","（点「刷新」拉取模型列表）": " (click Refresh to list models)","（列表外）": " (not listed)","已获取 ": "Loaded "," 个模型。": " models.","模型列表获取失败：": "Could not list models: ","读取 AI 配置失败": "Could not read the AI config","读取 AI 配置失败：": "Could not read the AI config: ","测试中…": "Testing…","连接成功": "Connected","连接失败": "Connection failed","测试失败：": "Test failed: ","AI 配置已保存": "AI settings saved","（自动路由）": " (auto)","在线（": "Online ("," 个知识库）": " knowledge bases)","启动中…（冷加载需数十秒）": "Starting… (cold start can take tens of seconds)","启动中…": "Starting…","RAG 启动失败：": "RAG failed to start: ","RAG 服务已停止": "RAG service stopped","RAG 停止失败：": "Could not stop the RAG service: "," 个结果": " results","无结果": "No results","离线": "Offline","还活着": "Reachable","批注": "Annotate","标注片段（跟文本内容走，原文编辑后自动同步；删光自动失效）": "Anchor text (follows the content and re-syncs after edits; gone when deleted)","AI 解释": "AI explain","RAG 解释": "RAG explain","删除标注": "Delete note","完成": "Done","备注": "Note","润色": "Polish","RAG润色": "RAG polish","AI 润色预览": "AI polish preview","原文": "Original","润色后（可先手动微调）": "Polished (tweak before applying)","替换原文": "Replace","写点备注…": "Add a note…","需 RAG 服务在线（AI 设置中启动）": "Requires the RAG service (start it in AI settings)","给选中片段加批注": "Add a note to the selection","AI 润色选中片段": "Polish the selection with AI","基于 RAG 知识库检索增强润色（需 RAG 服务在线）": "Retrieval-augmented polish (requires the RAG service)","解释中…": "Explaining…","已结合联网资料解释": "Explained with web results","联网搜索失败，已用纯模型结果": "Web search failed, used the model alone","AI 解释失败：": "Explain failed: ","RAG 解释失败：": "RAG explain failed: ","\n可在工具栏「AI」里检查 RAG 服务状态。": "\nCheck the RAG service in AI settings.","选中内容为空": "Nothing selected","无法标注该选区（跨元素边界）": "Cannot anchor this selection (crosses element boundaries)","润色中…（本地模型可能需要一些时间）": "Polishing… (a local model can take a while)","已结合联网资料润色": "Polished with web results","润色失败：": "Polish failed: ","检索知识库并润色中…（RAG 冷启动或本地模型可能需要一些时间）": "Retrieving and polishing… (RAG cold start or a local model can take a while)","RAG 润色失败：": "RAG polish failed: ","原文已变化，无法定位选区，请重新选择后重试。": "The text changed and the selection could not be located. Select again and retry.","报告将发送给开发者（": "The report goes to the developer (","）。未配置邮件客户端时，可复制下方内容自行粘贴发送。": "). With no mail client configured, copy the text below and send it yourself.","问题描述（可留空）": "Problem description (optional)","自动附带的报告内容（只读）": "Attached report (read-only)","复制报告内容": "Copy report","打开邮件客户端": "Open mail client","例如：内容与事实不符 / 出现不当表述 / 代码无法运行…": "e.g. factually wrong / inappropriate wording / code does not run…","报告内容已复制，请粘贴发送给开发者": "Report copied, paste it to the developer","报告内容已复制，请粘贴发送到 ": "Report copied, paste it to ","复制失败，请手动全选复制": "Copy failed, select all and copy manually","可复制下方内容发送给开发者。": "Copy the text below and send it to the developer.","（无）": "(none)","新标签页": "New tab","打开失败：": "Open failed: ","读取失败": "Read failed","读取文件失败：": "Could not read the file: ","已保存到原文件": "Saved to the original file","保存失败：": "Save failed: ","已载入原文件": "Loaded the original file","已打开：": "Opened: ","已载入": "Loaded","载入内置文档失败：": "Could not load the built-in document: ","使用指南": "User guide","版权与开源组件声明": "Copyright and open-source notices","通过「打开」按钮选择（浏览器不提供完整路径）": "Chosen with the Open button (the browser hides the full path)","该文件通过「打开」按钮选择，浏览器不提供完整路径，无法自动重载。\n请通过右键菜单打开它，或再次用「打开」选择。": "This file was picked with the Open button, so the browser hides its path and it cannot reload automatically.\nOpen it from the context menu, or pick it again with Open.","文档尚未保存，无法打开副本": "Save the document before opening a copy","已用系统程序打开副本": "Opened a copy with the system default app","用系统关联程序打开这份副本": "Open this copy with the system default app","选择保存位置失败：": "Could not choose a save location: ","粘贴图片前请先保存文档（Ctrl+S），图片将存入同名 .assets 目录。": "Save the document before pasting images (Ctrl+S); they go into a sibling .assets folder.","图片保存失败：": "Could not save the image: ","粘贴文件前请先保存文档（Ctrl+S），文件将存入同名 .assets 目录。": "Save the document before pasting files (Ctrl+S); they go into a sibling .assets folder.","文件超过 20MB 上限（当前 ": "File exceeds the 20 MB limit (currently ","正在写入 ": "Writing ","已插入数据点：": "Data point inserted: ","文件写入失败：": "Write failed: ","排版已更新（缓存）": "Typesetting updated (cached)","已落盘 ": "Written ","(未命名)": "(untitled)","文档": "Documents","桌面": "Desktop","下载": "Downloads","用户目录": "Home","上次目录": "Last folder","请先选择保存目录（点「浏览…」）": "Choose a folder first (click Browse…)","未命名.md": "Untitled.md","未命名文档": "Untitled document","预览不存在": "Preview not found","已导出：": "Exported: ","导出失败：": "Export failed: ","未知错误": "Unknown error","无法导出：": "Cannot export: ","。请先运行并确认全部执行点结果后再导出": ". Run the exec points and confirm their results before exporting","（状态栏「▶ 运行」一次跑全部）": "(▶ Run in the status bar runs them all)","正在生成打印版，请稍候…": "Building the print version…","打印导出失败（数据序列化错误）：": "Print export failed (data serialisation): ","导出 Word 文档": "Export Word","后台静默落盘 + 浏览器下载": "Saved in the background and downloaded by the browser","运行错误或失败静默导出": "Export silently on errors or failures","来源：": "Source: ","\n时间：": "\nTime: ","构建：": "Build: ","— AI 输出内容（自动附带，最多 1000 字）—\n": "— AI output (attached automatically, up to 1000 chars) —\n","— 问题描述 —\n": "— Problem description —\n","MDEditor AI 生成内容报告（": "MDEditor AI content report (","已恢复未落盘草稿": "Recovered an unsaved draft","检测到未落盘的本地草稿，已为你恢复（磁盘版本未被覆盖）": "An unsaved local draft was found and restored (the file on disk was not overwritten)","用磁盘版本": "Use the file on disk","恢复": "Restore","发现未完成的保存备份（": "Found an unfinished save backup (","），是否用它恢复本文档？": "). Restore this document from it?","恢复失败：": "Restore failed: ","已从保存备份恢复": "Restored from the save backup","就近": "Nearby","已到文末，从头继续": "Reached the end, continuing from the top","替换失败": "Replace failed","无命中": "No match","替换后与原文相同": "Replacement is identical to the original","已替换 ": "Replaced "," 处（Ctrl+Z 一步撤销）": " occurrences (Ctrl+Z undoes in one step)","正则表达式无效": "Invalid regular expression","已撤销全部替换": "Undid all replacements","渲染失败": "Render failed","<h2>请使用正确方式打开</h2>": "<h2>Please open this page properly</h2>","<p>本页面被直接双击打开（file://），此方式<b>没有后端服务</b>，公式、图片、保存、导出均不可用。</p>": "<p>This page was opened directly from disk (file://). <b>There is no backend</b>, so formulas, images, saving and exporting are unavailable.</p>","<p>正确打开方式（任选其一）：</p>": "<p>Open it one of these ways:</p>","<ol><li>右键任意 .md 文件 →「Open with Markdown Editor」</li>": "<ol><li>Right-click any .md file and choose Open with Markdown Editor</li>","<li>双击工具目录中的 <b>MarkdownEditor.exe</b></li>": "<li>Run <b>MarkdownEditor.exe</b> from the tool folder</li>","<li>双击 .md 文件（已关联本编辑器）</li></ol>": "<li>Double-click a .md file already associated with this editor</li></ol>","<p>若点下方按钮无反应，说明后端服务未运行——先做上面第 2 步。</p>": "<p>If the button below does nothing, the backend is not running. Do step 2 above first.</p>","一级标题": "H1","二级标题": "H2","标题": "Heading","加粗": "Bold","粗体": "Bold","斜体": "Italic","删除线": "Strikethrough","删除": "Strike","行内代码": "Code","引用": "Quote","无序列表": "Bullets","列表项": "List item","序号": "Numbering","有序列表": "Numbered list","任务": "Task","任务列表": "Task list","链接": "Link","插入链接": "Insert link","链接文字": "Link text","插入表格": "Insert table","图表自动编号（图、表各自计数；只作用于预览与导出，不改源文）": "Auto-number figures and tables (each counted separately; preview and export only, source untouched)","内置文档": "Built-in documents","内置文档 · 点击载入（可编辑/另存为）": "Built-in · click to load (editable, save as copy)","回到初始示例状态": "Reset to the initial sample","最近文件": "Recent files","暂无标题": "No headings","默认文档（使用指南）": "Default document (user guide)","切换界面语言：中文 / English": "Switch the interface language: 中文 / English","语法提示开关：开启后光标所在行弹出方言速查（语法检查不受影响）": "Syntax hint toggle: shows the dialect cheat-sheet at the cursor when on (lint checks unaffected)","提示": "Hints","保存到 ": "Save to ","图": "Figure","表": "Table","图片输出（「打印」与导出；预览始终按栏宽缩略，不受此项影响）": "Image output (Print and exports; the preview always uses a column-width thumbnail and is unaffected)","像素": "Pixels","原图输出（不压缩）": "Original (no compression)","实图输出 · 300dpi（印刷）": "Fit to display · 300 dpi (print)","实图输出 · 150dpi（电子交付）": "Fit to display · 150 dpi (screen)","说明": "Note","按每张图的实际显示宽度换算目标像素再降采样：只缩不放、压完不变小就回滚用原图；源文件与磁盘上的图一个字节都不动。150dpi 下含小字的截图会发糊，慎用。": "Each image is downscaled to the pixels its real display width needs: never enlarged, and reverted to the original when the result is not smaller. The source files on disk are never touched. At 150 dpi screenshots with small text lose sharpness, so use with care.","def run(data):\n    # data['kv'] = {'键': '值'}（框架按第一个 == 剥离）\n    # data['raw'] = 数据点原文列表（== 不够用时自行解析）\n    return str(...)  # 返回 str 替换执行点；作图存当前目录返回 ![](文件名)": "def run(data):\n    # data['kv'] = {'key': 'value'} (the framework strips the first ==)\n    # data['raw'] = raw text of this data point (parse it yourself if == is not enough)\n    return str(...)  # return a str to replace the exec point; to draw a chart, save the file and return ![](file name)"};
+var I18N_RE=[[new RegExp("^批注 (\\d+)$"),"Notes {1}"],[new RegExp("^(\\d+) 字符$"),"{1} chars"],[new RegExp("^(\\d+) 词$"),"{1} words"],[new RegExp("^(\\d+) 行$"),"{1} lines"],[new RegExp("^第 (\\d+) 页 / 共 (\\d+) 页$"),"Page {1} of {2}"],[new RegExp("^(\\d+) 个结果$"),"{1} results"],[new RegExp("^在线（(\\d+) 个知识库）$"),"Online ({1} knowledge bases)"],[new RegExp("^已获取 (\\d+) 个模型。$"),"Loaded {1} models."],[new RegExp("^共 (\\d+) 条批注，点击正文中的虚线段可查看/编辑$"),"{1} notes; click a dashed span in the text to view or edit"],[new RegExp("^选中文字后点「备注」可加批注（AI 可在设置中配置）$"),"Select text and click Note to annotate (AI is configured in settings)"],[new RegExp("^已替换 (\\d+) 处（Ctrl\\+Z 一步撤销）$"),"Replaced {1} occurrences (Ctrl+Z undoes in one step)"],[new RegExp("^(\\d+) 个执行点未运行$"),"{1} exec points not run"],[new RegExp("^(\\d+) 个执行点已置为待运行$"),"{1} exec points set back to pending"],[new RegExp("^已载入 (.+?)——修改后「保存」即覆盖$"),"Loaded {1} — Save overwrites it"],[new RegExp("^验证失败：(.+)$"),"Verification failed: {1}"],[new RegExp("^删除 (.+)（点两次确认）$"),"Delete {1} (click twice)"],[new RegExp("^保存到 (.+)$"),"Save to {1}"],[new RegExp("^(.+) · (\\d{4}/\\d{1,2}/\\d{1,2} .+)$"),"{1} · {2}"],[new RegExp("^元数据已更新（(\\d+) 项）$"),"Metadata updated ({1} fields)"],[new RegExp("^元数据写入失败：(.+)$"),"Could not write the metadata: {1}"]];
 var _lang='zh';
 function _i18nLookup(t){
   var e=I18N_EN[t];
@@ -2209,7 +2459,9 @@ function TF(s){
   var tpl=s;
   if(_lang==='en'){ var r=_i18nLookup(String(s)); if(r!==null) tpl=r; }
   return String(tpl).replace(/\{(\d+)\}/g,function(m,d){
-    var v=a[+d]; return v==null?m:String(v);});
+    /* a[0] 是模板本身，{0} 指的是第一个**附加**参数，故 +1（v2.23.2 修：
+       以前 a[+d] 把模板自己填进 {0}，英文下出现「Saved Saved {0}」这种串） */
+    var v=a[+d+1]; return v==null?m:String(v);});
 }
 function _i18nTr(raw){
   var t=String(raw).trim();
@@ -2258,7 +2510,16 @@ function _i18nWalk(root){
     if(n.nodeType!==1) continue;
     var tg=n.tagName;
     if(tg==='SCRIPT'||tg==='STYLE') continue;
-    if(tg==='SELECT'&&n.hasAttribute('data-ts')) continue;   /* 字体名不翻 */
+    if(tg==='SELECT'&&n.hasAttribute('data-ts')){
+      /* 字体下拉的 option 文本就是字体名，不翻；但第一项「(默认)」是界面文案，
+         整只 select 跳过会把它漏成中文（v2.23.2：红框里的「（默认）」）。
+         只翻 value 为空的那一项，字体名照旧原样。 */
+      for(i=0;i<n.options.length;i++){
+        var dop=n.options[i];
+        if(!dop.value&&dop.firstChild&&dop.firstChild.nodeType===3) _i18nNode(dop.firstChild);
+      }
+      continue;
+    }
     _i18nEl(n);
     for(i=n.childNodes.length-1;i>=0;i--) stack.push(n.childNodes[i]);
   }
@@ -2299,6 +2560,12 @@ function applyLang(l){
   var rs=_i18nRoots();
   for(var i=0;i<rs.length;i++) _i18nWalk(rs[i]);
   _i18nObserve(_lang==='en');
+  /* 动态生成的文本（元数据卡片的说明句）不靠词表还原：它在英文时被写成英文，
+     _i18nOrig 会把那句英文记成「中文原文」，切回来就再也回不去了。唯一正确的
+     做法是按新语言重新生成一遍。生成函数在下面的 UI 段里（另一个作用域），
+     所以由它自己挂到 window 上，这里只负责有空就调；**只重画那句说明，不动
+     输入框**——框里可能是刚敲、还没应用的设置值。 */
+  try{ if(typeof window.__mdeMetaHint==='function') window.__mdeMetaHint(); }catch(e){}
 }
 /*I18N_END*/
 
@@ -3653,6 +3920,8 @@ function applyLang(l){
         var pv = document.getElementById('preview');
         if (!pv) { showToast('预览不存在'); return; }
         prepareExportClone().then(function(bundle){
+          /* 元数据区按出口分流：docx 全删；html 把 YAML 原文放回文件头不渲染 */
+          stripMetaZones(bundle.clone, ext === 'html');
           var payload;
           var pageCfg=(function(){try{return JSON.parse(JSON.stringify(tsCfg.page));}catch(e){return {};}})();
           if (ext === 'docx') {
@@ -3681,6 +3950,36 @@ function applyLang(l){
     exportWithDialog('html', '/api/export-html', '导出 HTML');
   });
 
+  /* v2.23.0 元数据区不进导出。规矩（主人 2026-10-30 定）：
+       · Word 与分页 PDF：整块删除，一个字都不出；
+       · HTML 导出：YAML 通道（zone=a）的原文**以文件头形式放回**，但不渲染
+         —— 用 pre 装纯文本（浏览器默认等宽 + 保留换行），不加任何自定义
+         样式，所以导出产物里它是一段朴素文字而不是元数据卡片；
+       · 档案通道（zone=b）与冲突提示（zone=x）是编辑器内部信息，一律删。
+     原文从 DOM 结构重建（k: v 逐行），不额外在渲染产物里塞 data 属性——
+     那会污染每一篇文档的正文 HTML。 */
+  function stripMetaZones(root, keepYaml){
+    if(!root)return;
+    var nodes=root.querySelectorAll('[data-mde-zone]');
+    for(var i=nodes.length-1;i>=0;i--){
+      var n=nodes[i];
+      if(keepYaml&&n.getAttribute('data-mde-zone')==='a'){
+        var rows=n.querySelectorAll('.mde-fm-row'),lines=[];
+        for(var r=0;r<rows.length;r++){
+          var kEl=rows[r].querySelector('.mde-fm-k');
+          var vEl=rows[r].querySelector('.mde-fm-v');
+          var vt=vEl?vEl.textContent:'';
+          lines.push(kEl?(kEl.textContent+': '+vt):vt);
+        }
+        var pre=document.createElement('pre');
+        pre.className='mde-fm-src';
+        pre.textContent='---\n'+lines.join('\n')+'\n---\n';
+        n.parentNode.replaceChild(pre,n);
+      }else{
+        n.parentNode.removeChild(n);
+      }
+    }
+  }
   /* 把元素视觉样式计算值内联进 style 属性（供 docx 导出）。
      移除 class/id 避免外部 CSS 干扰；保留 data-*（公式 tex）。 */
   /* 导出准备：克隆预览 → 挂到屏外容器（保持挂载态：getBoundingClientRect /
@@ -3987,6 +4286,8 @@ function applyLang(l){
     uiBeacon('打印:2 preview存在=' + (!!pv));
     if (!pv) { pagedBusy = false; showToast('预览不存在'); return; }
     prepareExportClone().then(function(bundle){
+    /* 打印/分页 PDF：元数据区整块删除（主人定：不打印） */
+    stripMetaZones(bundle.clone, false);
     var bh = bundle.clone.innerHTML;
     bundle.release();
     uiBeacon('打印:3 html长度=' + bh.length);
@@ -4325,6 +4626,28 @@ function applyLang(l){
   /* URL 注入适配层：通过后端 ?file= 打开时载入原文件并支持回写（解析内核不变） */
   var currentFile=null;
   var currentBase=null;   /* .smd 解包工作目录（图片基址）；普通文档 null=用 currentFile 目录 */
+  /* v2.23.0 元数据档案随正文一起取回。渲染函数是同步的，不能在渲染途中发
+     请求，所以数据必须**先**就绪再渲染。失败一律当"无档案"——元数据是
+     文档的附录，不是文档本身，它坏了不能挡住打开。
+     序号用于快速切换文档时丢弃过期响应（否则 A 的档案会渲染进 B）。 */
+  var _metaSeq=0;
+  function loadMetaFor(p){
+    var my=++_metaSeq;
+    window.__MDE_META__=null;
+    window.__MDE_META_LOADED__=false;      /* 已取回（无论有无档案）与"还没取"是两回事 */
+    if(!p){window.__MDE_META_LOADED__=true;return Promise.resolve();}
+    return fetch('/api/meta',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({path:p,action:'read'})})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if(my!==_metaSeq)return;
+        window.__MDE_META__=(j&&j.ok&&j.meta)?j.meta:null;
+        window.__MDE_META_LOADED__=true;
+      })
+      .catch(function(){
+        if(my===_metaSeq)window.__MDE_META_LOADED__=true;
+      });
+  }
   /* 统一载入：.smd 走 JSON 响应（content+base），普通 .md 走纯文本 */
   function fetchDocInto(p){
     return fetch('/api/file?path='+encodeURIComponent(p))
@@ -4338,6 +4661,9 @@ function applyLang(l){
           });
         }
         return r.text().then(function(t){ return {txt:t, base:null}; });
+      })
+      .then(function(d){
+        return loadMetaFor(p).then(function(){ return d; });   /* 元数据先就绪，再交给渲染 */
       });
   }
   function loadFromUrl(){
@@ -4356,6 +4682,13 @@ function applyLang(l){
   /* 保存即归一（三处共享：Ctrl+S / 自动保存 / 另存为）：服务端物化/契约改写后
      回传正文，编辑区同步——否则编辑区与磁盘脱节，重复收编同一张图 */
   function applySavedContent(j){
+    /* 保存响应带回档案（后端在保存同时读档案）：更新缓存并重渲，
+        否则刚在面板里填的元数据要等下次打开文档才看得见 */
+    if (j && Object.prototype.hasOwnProperty.call(j, 'meta')) {
+      window.__MDE_META__ = j.meta || null;
+      window.__MDE_META_LOADED__ = true;
+      scheduleRender();
+    }
     if (typeof j.content === 'string' && j.content !== getText()) {
       /* 服务端物化/契约改写回传的正文：setText 会清掉全部批注 span，
          随后按内存快照在新正文里重锚定（片段仍在则标注无感保留） */
@@ -4364,22 +4697,54 @@ function applyLang(l){
       scheduleRender();
     }
   }
-  document.getElementById('btnSave').addEventListener('click',function(){
-    if(!currentFile){ openSaveAs(); return; }
+  /* ── 落盘唯一出口 ─────────────────────────────────────────────────
+     手动「保存」、Ctrl+S、自动落盘三条路以前各写一遍 fetch，写法已经开始分叉：
+     自动那条没有路径时直接弹「另存为」对话框，失败还静默吞掉；手动那条又少了
+     dirty 复位。现在只有一个 saveToDisk()：同一端点、同一份 body、同一套错误
+     提示、同一处 dirty/setDraft/applySavedContent。silent=true 是自动落盘用的：
+     没有路径就跳过（不弹窗），失败写状态栏而不是弹窗打扰。
+     .md 与 .smd 的差别只在服务端 —— /api/file 内部按扩展名分流，前端不判断。 */
+  var _saving=false;
+  function saveToDisk(silent){
+    var ss=document.getElementById('statSave');
+    if(!currentFile){
+      if(!silent){ openSaveAs(); return Promise.resolve(false); }
+      ss.textContent=TF('自动落盘已跳过：文档还没有保存路径'); ss.className='';
+      return Promise.resolve(false);
+    }
+    if(_saving)return Promise.resolve(false);   /* 手动与自动撞车时只跑一次 */
+    _saving=true;
     var sb=document.getElementById('btnSave');
-    sb.disabled=true; sb.style.opacity='.4';
-    fetch('/api/file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:currentFile,content:getText()})})
+    if(!silent){ sb.disabled=true; sb.style.opacity='.4'; }
+    /* 兜底解锁：fetch 本身没有超时，连接被掐住而不报错时 _saving 会永久为 true，
+       之后的每一次保存都被自己挡掉。15 秒后无论如何放行。 */
+    var _gate=setTimeout(function(){ _saving=false; },15000);
+    return fetch('/api/file',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({path:currentFile,content:getText()})})
       .then(function(r){return r.json();})
       .then(function(j){
-        var ss=document.getElementById('statSave');
         if(j&&j.ok){
+          dirty=false;
           applySavedContent(j);
-          ss.textContent='已保存到原文件'; ss.className='saved'; setDraft(currentFile,undefined);
+          setDraft(currentFile,undefined);
+          ss.textContent=silent?TF('已自动落盘 {0}',new Date().toLocaleTimeString()):'已保存到原文件';
+          ss.className='saved';
+          return true;
         }
-        else { showToast('保存失败：'+((j&&j.error)||'未知错误')); }
+        showToast(TF('保存失败：{0}',(j&&j.error)||T('未知错误')));
+        return false;
       })
-      .catch(function(e){ showToast('保存失败：'+e.message); })
-      .finally(function(){ sb.disabled=false; sb.style.opacity='1'; });
+      .catch(function(e){ showToast(TF('保存失败：{0}',e.message)); return false; })
+      .finally(function(){ clearTimeout(_gate); _saving=false;
+        if(!silent){ sb.disabled=false; sb.style.opacity='1'; } });
+  }
+  document.getElementById('btnSave').addEventListener('click',function(){ saveToDisk(false); });
+  /* 工具栏与提示里一直写着 Ctrl+S，但此前根本没有这个绑定（按下去走的是浏览器
+     自己的「保存网页」）。补上，并且必须 preventDefault。 */
+  document.addEventListener('keydown',function(e){
+    if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&!e.altKey&&(e.key==='s'||e.key==='S')){
+      e.preventDefault(); saveToDisk(false);
+    }
   });
   /* ---- typeset settings v4 (align + local fonts) + auto disk save ---- */
   var TS_KEY='md-editor-typeset-v3';
@@ -4480,6 +4845,21 @@ function applyLang(l){
     /* v2.10 图表自动编号：默认关闭、默认全篇连续；章级默认 ##（# 是文章大标题不当章） */
     o.ncap={on:!!(raw.ncap&&raw.ncap.on),mode:(raw.ncap&&raw.ncap.mode==='chapter')?'chapter':'seq',
       lvl:(raw.ncap&&(raw.ncap.lvl==='#'||raw.ncap.lvl==='##'||raw.ncap.lvl==='###'))?raw.ncap.lvl:'##'};
+    /* v2.23.0 元数据区显示开关：**默认开**。需求是"别人给我的带 front matter
+       的 md 一打开就能看"，默认关等于这条没做（外来文档还得先手动开一次）。
+       关掉后两条通道都不出区域，@@ meta 静默无输出、不报错。 */
+    o.metaOn=(raw.metaOn!==false);
+    /* v2.23.3 元数据是**排版设置**（主人 2026-10-31 定）：存在排版配置里，跟着
+       编辑器走，与当前打开哪个文件无关；面板**不回读**任何文档档案，这里只有
+       "写"。应用时按这份值落到目标文档：没有档案 → 建档（zero.json 只写一次、
+       随后只读隐藏），已有档案 → 只在 up.md 追加。 */
+    o.meta={};
+    var _MK=['title','author','date','tags','note'],
+        _rm=(raw.meta&&typeof raw.meta==='object')?raw.meta:{};
+    for(var _mi=0;_mi<_MK.length;_mi++){
+      var _mv=_rm[_MK[_mi]];
+      o.meta[_MK[_mi]]=(_mv==null?'':String(_mv)).slice(0,200);
+    }
     return o;})();
   function applyTypeset(){
     var old=document.getElementById('ts-style');if(old)old.parentNode.removeChild(old);
@@ -4625,6 +5005,9 @@ function applyLang(l){
       p:(function(){var i=tsCfg.indent.p;return (i&&i.mode==='first'&&i.chars)?Math.round(i.chars*indBase*100)/100:0;})(),
       quote:(function(){var i=tsCfg.indent.quote;return (i&&i.mode==='block'&&i.chars)?Math.round(i.chars*indBase*100)/100:0;})(),
       li:(function(){var i=tsCfg.indent.li;return (i&&i.mode==='block'&&i.chars)?Math.round(i.chars*indBase*100)/100:0;})()};
+    /* v2.23.0 元数据区总开关交给渲染器（渲染函数读全局，与 __IND_PX__ 同一手法：
+       渲染是同步的，参数只能在渲染之前就绪） */
+    window.__MDE_META_ON__=(tsCfg.metaOn!==false);
     try{lsSet(TS_KEY,JSON.stringify(tsCfg));}catch(e){}
   }
   /* 纸张版心宽 → 预览栏宽度：连续流不分页，但宽度/左右边距按排版设置走
@@ -4683,6 +5066,144 @@ function applyLang(l){
       for(var k=0;k<sels.length;k++)addFontGroup(sels[k],cached);
     }
   }
+  /* ── v2.23.0 元数据（面板统一入口）────────────────────────────────
+     面板的 5 个输入框就是统一入口，落到哪种载体由**文档现状**决定：
+       首行有合法 front matter  → 改 front matter 里对应的键（不新增无关键）
+       有 @@ meta / 都没有      → 建/改档案 assets/.mde/，并在缺 @@ meta 时插入
+     判据与渲染侧（parseMarkdown 里的前置消费）逐条对齐，两边不能有两套。 */
+  var META_UI_KEYS=['title','author','date','tags','note'];
+  var META_UI_IDS={title:'tsMetaTitle',author:'tsMetaAuthor',date:'tsMetaDate',
+                   tags:'tsMetaTags',note:'tsMetaNote'};
+  function docFrontMatter(){
+    var t=getText();
+    if(t.charCodeAt(0)===0xFEFF)t=t.slice(1);
+    var lines=t.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
+    if(!lines.length||!/^---[ \t]*$/.test(lines[0]))return null;
+    var close=-1;
+    for(var i=1;i<lines.length;i++){
+      if(/^---[ \t]*$/.test(lines[i])){close=i;break;}
+      if(/^\s*$/.test(lines[i]))return null;
+    }
+    if(close<0)return null;
+    var out={},kv=false;
+    for(var j=1;j<close;j++){
+      var m=/^([A-Za-z_][A-Za-z0-9_\-. ]*?)[ \t]*:[ \t]*(.*)$/.exec(lines[j]);
+      if(!m)continue;
+      kv=true;
+      var v=m[2].replace(/[ \t]+$/,'');
+      if(v.length>=2&&((v.charAt(0)==='"'&&v.charAt(v.length-1)==='"')||
+                       (v.charAt(0)==="'"&&v.charAt(v.length-1)==="'")))v=v.slice(1,-1);
+      out[m[1]]=v;
+    }
+    return kv?out:null;
+  }
+  function hasMetaLine(){return /^[ ]{0,3}@@\s*meta[ \t]*$/m.test(getText());}
+  function docMetaState(){
+    var y=docFrontMatter();
+    if(y)return {source:'yaml',fields:y};
+    var m=window.__MDE_META__;
+    if(m&&m.fields)return {source:'archive',fields:m.fields,zero:m.zero,up:m.up};
+    return {source:'none',fields:{}};
+  }
+  /* 面板五个框 = **排版设置里的那一份元数据**（tsCfg.meta），跟当前打开的是哪个
+     文件毫无关系，也绝不回读文档档案——这里是设置，只有"写"。 */
+  function tsMetaHint(){
+    var el=document.getElementById('tsMetaStat');
+    if(el)el.textContent=TF('设置里的这份值；应用时写入本文档：没有档案就建档（创建快照只写一次、只读），已有档案只在履历里追加');
+  }
+  function tsMetaFill(){
+    for(var i=0;i<META_UI_KEYS.length;i++){
+      var k=META_UI_KEYS[i];
+      document.getElementById(META_UI_IDS[k]).value=tsCfg.meta[k]||'';
+    }
+    document.getElementById('tsMetaOn').checked=(window.__MDE_META_ON__!==false);
+    tsMetaHint();
+  }
+  /* 语言切换只重画这一句，**不动输入框**（里面可能是刚敲、还没应用的设置值） */
+  window.__mdeMetaHint=tsMetaHint;
+  /* 面板 → 待写字段。**只提交填了的项**：留空 = 这次不涉及该字段，绝不因为
+     框里没有字就把文档里已有的值写成空；全部留空 → 不碰文档（返回 null）。
+     重复点「应用」不刷履历：写档案那条路里 md_meta.update 逐字段 diff。 */
+  function collectMetaChanges(){
+    var want={},any=false;
+    for(var i=0;i<META_UI_KEYS.length;i++){
+      var k=META_UI_KEYS[i];
+      var v=(document.getElementById(META_UI_IDS[k]).value||'').replace(/^\s+|\s+$/g,'');
+      if(!v)continue;
+      want[k]=v;any=true;
+    }
+    if(!any)return null;
+    return {source:docMetaState().source,fields:want};
+  }
+  /* 写回 front matter：原地改对应键的值，没有的键**不新增**——面板不该悄悄
+     改变别人文件的键集合。值含 : # 或首尾空白时加引号，避免破坏 YAML 结构。 */
+  function writeFrontMatter(fields){
+    var t=getText(),bom=(t.charCodeAt(0)===0xFEFF);
+    if(bom)t=t.slice(1);
+    var lines=t.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
+    var close=-1;
+    for(var i=1;i<lines.length;i++){
+      if(/^---[ \t]*$/.test(lines[i])){close=i;break;}
+      if(/^\s*$/.test(lines[i]))break;
+    }
+    if(close<0)return false;
+    for(var j=1;j<close;j++){
+      var m=/^([A-Za-z_][A-Za-z0-9_\-. ]*?)([ \t]*:[ \t]*)(.*)$/.exec(lines[j]);
+      if(!m)continue;
+      var k=m[1],cur=m[3].replace(/[ \t]+$/,'');
+      if(cur.length>=2&&((cur.charAt(0)==='"'&&cur.charAt(cur.length-1)==='"')||
+                         (cur.charAt(0)==="'"&&cur.charAt(cur.length-1)==="'")))cur=cur.slice(1,-1);
+      if(!Object.prototype.hasOwnProperty.call(fields,k)||cur===fields[k])continue;
+      var v=fields[k];
+      if(/[:#]|^\s|\s$/.test(v))v='"'+v.replace(/"/g,'\\"')+'"';
+      lines[j]=k+m[2]+v;
+    }
+    setText((bom?'\uFEFF':'')+lines.join('\n'));
+    scheduleRender();
+    return true;
+  }
+  function insertMetaLine(){
+    if(hasMetaLine())return false;
+    var t=getText();
+    setText('@@ meta\n\n'+t);
+    scheduleRender();
+    return true;   /* 调用方据此决定要不要落盘 */
+  }
+  function submitMeta(job){
+    if(job.source==='yaml'){
+      writeFrontMatter(job.fields);
+      if(!currentFile)return null;
+      /* 改完正文必须落盘：面板改的也是正文，不落盘刷新即丢 */
+      return fetch('/api/file',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({path:currentFile,content:getText()})})
+        .then(function(r){return r.json();})
+        .then(function(j){if(j&&j.ok)applySavedContent(j);})
+        .catch(function(){});
+    }
+    if(!currentFile){showToast('请先保存文档（Ctrl+S），元数据档案要跟着文件走');return null;}
+    return fetch('/api/meta',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({path:currentFile,action:'update',fields:job.fields})})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if(!(j&&j.ok)){showToast('元数据写入失败：'+((j&&j.error)||'未知错误'));return;}
+        window.__MDE_META__=j.meta||null;
+        var added=insertMetaLine();   /* 正文缺 @@ meta 就补一行（位置锚点） */
+        scheduleRender();
+        var ss=document.getElementById('statSave');
+        ss.textContent=j.changed?('元数据已更新（'+j.changed+' 项）'):'元数据无变化';
+        ss.className='saved';
+        /* 补的锚点行也算正文改动，必须立刻落盘：setText 不发 input 事件，
+           dirty 不会置位，不写就得等用户自己想起按 Ctrl+S。 */
+        if(added&&currentFile){
+          fetch('/api/file',{method:'POST',headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({path:currentFile,content:getText()})})
+            .then(function(r){return r.json();})
+            .then(function(k){if(k&&k.ok)applySavedContent(k);})
+            .catch(function(){});
+        }
+      })
+      .catch(function(e){showToast('元数据写入失败：'+e.message);});
+  }
   function tsOpen(){
     document.getElementById('tsAuto').value=tsCfg.autoSaveMin;
     var sels=document.querySelectorAll('select[data-ts]');
@@ -4707,9 +5228,9 @@ function applyLang(l){
     document.getElementById('tsMt').value=pg.mt;document.getElementById('tsMr').value=pg.mr;
     document.getElementById('tsMb').value=pg.mb;document.getElementById('tsMl').value=pg.ml;
     document.getElementById('tsImgMode').value=pg.img||'orig';
-    document.getElementById('tsPnOn').value=pg.pn.on;document.getElementById('tsPnPos').value=pg.pn.pos;
+    document.getElementById('tsPnOn').checked=(pg.pn.on==='on');document.getElementById('tsPnPos').value=pg.pn.pos;
     document.getElementById('tsPnTpl').value=pg.pn.tpl;document.getElementById('tsPnSize').value=pg.pn.size;
-    document.getElementById('tsTocOn').value=pg.toc.on;document.getElementById('tsTocPos').value=pg.toc.pos;
+    document.getElementById('tsTocOn').checked=(pg.toc.on==='on');document.getElementById('tsTocPos').value=pg.toc.pos;
     document.getElementById('tsTocSolo').checked=!!pg.toc.solo;
     document.getElementById('tsTocEx1').checked=!!pg.toc.ex1;
     document.getElementById('tsTocEx2').checked=!!pg.toc.ex2;
@@ -4722,9 +5243,11 @@ function applyLang(l){
     document.getElementById('tsGapOn').checked=!!tsCfg.gap.on;
     document.getElementById('tsGapEm').value=tsCfg.gap.em;
     document.getElementById('tsHangOn').checked=!!tsCfg.list.hang;
+    tsMetaFill();   /* 填的是排版设置里那份值，与当前文件无关 */
     document.getElementById('tsOverlay').hidden=false;
   }
   document.getElementById('btnTypeset').addEventListener('click',tsOpen);
+
   document.getElementById('tsClose').addEventListener('click',function(){document.getElementById('tsOverlay').hidden=true;});
   document.getElementById('tsOverlay').addEventListener('click',function(e){if(e.target===this)this.hidden=true;});
 
@@ -5117,7 +5640,12 @@ function applyLang(l){
   }
   function newDoc(){
     currentFile = null; currentBuiltin = -1; currentBase = null;
-    setText('');
+    /* v2.23.0 新建即插入元数据锚点（老文件不管）：@@ meta 本身不渲染任何东西，
+       等人在「排版 → 元数据」里填了第一个字段、首次保存建档之后，区域才出现。
+       光标落在第二行——末尾就是空行，直接开写正文。 */
+    window.__MDE_META__=null;
+    window.__MDE_META_LOADED__=true;
+    setText('@@ meta\n\n');
     dirty = false;
     annotationsLoad(null);
     render();
@@ -5391,10 +5919,10 @@ function applyLang(l){
     pg.mb=parseFloat(document.getElementById('tsMb').value)||0;pg.ml=parseFloat(document.getElementById('tsMl').value)||0;
     var _imgMode=document.getElementById('tsImgMode').value;
     pg.img=(_imgMode==='300'||_imgMode==='150')?_imgMode:'orig';
-    pg.pn.on=document.getElementById('tsPnOn').value;pg.pn.pos=document.getElementById('tsPnPos').value;
+    pg.pn.on=document.getElementById('tsPnOn').checked?'on':'off';pg.pn.pos=document.getElementById('tsPnPos').value;
     pg.pn.tpl=document.getElementById('tsPnTpl').value||'{p}';
     pg.pn.size=parseFloat(document.getElementById('tsPnSize').value)||9;
-    pg.toc.on=document.getElementById('tsTocOn').value;pg.toc.pos=document.getElementById('tsTocPos').value;
+    pg.toc.on=document.getElementById('tsTocOn').checked?'on':'off';pg.toc.pos=document.getElementById('tsTocPos').value;
     pg.toc.solo=document.getElementById('tsTocSolo').checked;
     pg.toc.ex1=document.getElementById('tsTocEx1').checked;
     pg.toc.ex2=document.getElementById('tsTocEx2').checked;
@@ -5409,25 +5937,24 @@ function applyLang(l){
     var _gv=parseFloat(document.getElementById('tsGapEm').value);
     tsCfg.gap.em=isNaN(_gv)?0.85:Math.max(0,Math.min(3,_gv));
     tsCfg.list.hang=!!document.getElementById('tsHangOn').checked;
+    tsCfg.metaOn=!!document.getElementById('tsMetaOn').checked;
+    /* 元数据是排版设置的一部分：先把框里的值存进配置（随 TS_KEY 持久化，
+       以后打开任何文件都在），再按它去写当前文档。 */
+    for(var _mi2=0;_mi2<META_UI_KEYS.length;_mi2++){
+      var _mk2=META_UI_KEYS[_mi2];
+      tsCfg.meta[_mk2]=(document.getElementById(META_UI_IDS[_mk2]).value||'').replace(/^\s+|\s+$/g,'');
+    }
+    var _metaJob=collectMetaChanges();
     applyTypeset();applyPaperWidth();render(true);resetAutoDisk();
     document.getElementById('tsOverlay').hidden=true;
+    if(_metaJob)submitMeta(_metaJob);
     var ss=document.getElementById('statSave');ss.textContent='排版已更新（缓存）';ss.className='saved';
   });
   var dirty=false,diskTimer=null;
   editor.addEventListener('input',function(){dirty=true;});
   function diskNow(){
     if(!dirty)return;
-    if(!currentFile){ openSaveAs(); return; }
-    fetch('/api/file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:currentFile,content:getText()})})
-      .then(function(r){return r.json();})
-      .then(function(j){
-        if(j&&j.ok){dirty=false;
-          applySavedContent(j);
-          setDraft(currentFile,undefined);
-          var ss=document.getElementById('statSave');
-          ss.textContent='已落盘 '+new Date().toLocaleTimeString();ss.className='saved';
-        }
-      }).catch(function(){});
+    saveToDisk(true);        /* 与手动保存同一个出口；无路径时静默跳过，不弹窗 */
   }
   function resetAutoDisk(){
     if(diskTimer)clearInterval(diskTimer);
@@ -5499,10 +6026,15 @@ function applyLang(l){
         currentFile=j.path;          /* 实体文件路径：保存直接落盘，不弹窗 */
         currentBase=null;            /* 内置文档是普通 .md，图片基址回归文件目录 */
         currentBuiltin=idx;
-        applyDocWithDraft(j.path, j.content, '已保存');
-        updateFileIndicator(d.name);
-        updateSaveBtn();
-        addRecent(j.path, d.name);
+        /* 内置文档也是实体文件，档案必须**先就绪再渲染**（v2.23.2）：
+           以前这里直接 applyDocWithDraft，跳过了 loadMetaFor，于是自带档案的
+           使用指南/版权声明打开后元数据区一直是空的，面板也显示「未建档」。 */
+        loadMetaFor(j.path).then(function(){
+          applyDocWithDraft(j.path, j.content, '已保存');
+          updateFileIndicator(d.name);
+          updateSaveBtn();
+          addRecent(j.path, d.name);
+        });
       })
       .catch(function(e){ showToast('载入内置文档失败：'+e.message); });
   }

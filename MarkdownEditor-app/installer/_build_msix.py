@@ -158,6 +158,15 @@ def stage_msix(ver):
     src_stage = _build_installer.STAGING
     dst = os.path.join(SRC, "_setup_msix_stage")
     if os.path.isdir(dst):
+        # 上一轮留下的元数据档案是只读的：rmtree 删不掉它，ignore_errors 又把
+        # 失败吞了，随后 copy2 覆盖同一个 zero.json 直接 PermissionError。
+        # 先递归解位再删，构建目录本来就不需要只读位。
+        for _dp, _dns, _fns in os.walk(dst):
+            for _fn in _fns:
+                try:
+                    os.chmod(os.path.join(_dp, _fn), 0o666)
+                except Exception:
+                    pass
         shutil.rmtree(dst, ignore_errors=True)
     os.makedirs(dst)
     n = 0

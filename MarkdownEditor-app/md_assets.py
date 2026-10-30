@@ -29,7 +29,11 @@ def _ext_from_mime(s):
 
 def _safe_name(alt, idx, ext):
     n = INVALID.sub("", (alt or "")).strip()
-    n = n[:40].strip()
+    # 空白一律折成下划线：文件名带空格会让 markdown 链接目标在首个空白处即被
+    # 截断，"哪些资产被引用"的判定随之变脆（历史上会导致图被判孤儿删掉）。
+    # 生成名从源头掐掉空格，比事后正则猜边界可靠。
+    n = re.sub(r"\s+", "_", n).strip("_")
+    n = n[:40].strip("_")
     if not n:
         n = "image_%d" % idx
     return n + ext

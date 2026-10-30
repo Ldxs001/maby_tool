@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "created": "2026-10-31T01:47:36+0800",
+  "creator": {
+    "by": "MDEditor"
+  },
+  "fields": {
+    "title": "版权与开源组件声明",
+    "author": "wUwproject",
+    "date": "2026-10-31",
+    "tags": "许可证, AGPL, 第三方组件, 版权",
+    "note": "分发本程序时须连同本声明、COPYRIGHT 与 LICENSES/ 一并保留。"
+  }
+}
