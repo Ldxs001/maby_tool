@@ -20,6 +20,7 @@
 - **预览区只按 zero 渲染，up 里的修改不生效**：现象=`zero.json` 里作者是甲，`up.md` 里已改成乙，预览元数据区仍显示甲。根因=`_metaFromWindow()` 取 `m.zero.fields`（建档快照），没用服务端 `read()` 已叠加好的 `m.fields`。修法=优先取 `m.fields`，无则回落 `zero.fields`；`up` 里被改成空的字段因此不再出行。配套新增 `_test_meta_render.cjs`（11 条）钉住「零 + 履历 = 当前值」。
 - **空框会把文档里已有的值写成空**：现象=面板五框为空时点「应用」，档案里对应字段被清掉。根因=提交的是五个字段的整体快照。修法=`collectMetaChanges()` **只提交填了的项**，全空直接返回 `null`（一个字节都不写）。重复点「应用」仍幂等——写档案那条路由 `md_meta.update` 逐字段 diff。
 
+- **MSIX 静默丢弃隐藏文件，商城版缺元数据档案**：现象=exe 包内 `docs/*.assets/.mde/zero.json` 齐备，MSIX 包内只剩 `up.md`，`zero.json` 不见，且构建全程报 pack 成功。根因=`zero.json` 按设计带 ReadOnly + Hidden 属性，`makeappx` 跳过带隐藏属性的文件且不报错；exe 通道走 `zipfile` 打包不受影响，于是两条通道的内容分叉。修法=`stage_msix` 复制完成后把整棵 stage 树的 Windows 属性复位为 Normal（`_clear_win_attrs`）；pack 后按「解码非 ASCII 名、剔除 `AppxBlockMap.xml` 与 `[Content_Types].xml`」做 stage 文件集合对账，缺一即 FAIL。验证=MSIX 内 4 件档案齐、内容与现场逐字节相同，`pack check: 1196 stage files all packaged`。
 - **发行清单漏 `md_meta.py`，装出来元数据功能整条失效**：现象=安装包与 MSIX 内没有该模块，`md_server` 的 `import md_meta` 在首次访问 `/api/meta` 时抛 `ModuleNotFoundError`，元数据面板与预览区一起失效。根因=新增运行时模块只改了代码，未并入 `installer/_build_installer.py` 的 `DIST_FILES`——`make_staging` 只按清单取文件，清单外一律不拷。修法=`DIST_FILES` 增列 `md_meta.py`；`_test_dist_verify.py` 的组装清单同步补项，计数 `16 files`→`17 files`。验证=分发校验 22/22，装包后 `/api/meta` 读档案正常。
 
 **变更**

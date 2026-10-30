@@ -151,6 +151,27 @@ def make_logos(dst_dir):
         canvas.save(os.path.join(dst_dir, name))
 
 
+def _clear_win_attrs(root):
+    """把整个目录树的 Windows 文件属性复位为普通（清掉 Hidden / ReadOnly）。
+
+    makeappx 会**静默跳过带隐藏属性的文件**：元数据档案 `zero.json` 按设计带
+    ReadOnly + Hidden，如果不复位，包里就没有它——exe 通道（zipfile 打包）不受
+    影响，于是表现为「安装版有元数据、商城版没有」，且构建全程零报错。
+    包内条目属性对部署无意义（安装位本身只读），复位不改变运行行为。
+    """
+    if os.name != "nt":
+        return
+    import ctypes
+    FILE_ATTRIBUTE_NORMAL = 0x80
+    for dp, dns, fns in os.walk(root):
+        for name in fns + dns:
+            try:
+                ctypes.windll.kernel32.SetFileAttributesW(
+                    os.path.join(dp, name), FILE_ATTRIBUTE_NORMAL)
+            except Exception:
+                pass
+
+
 def stage_msix(ver):
     sys.path.insert(0, HERE)
     import _build_installer
@@ -182,6 +203,7 @@ def stage_msix(ver):
                 continue
             shutil.copy2(os.path.join(root, fn), os.path.join(target, fn))
             n += 1
+    _clear_win_attrs(dst)          # 隐藏文件会被 makeappx 丢弃，见函数注释
     make_logos(os.path.join(dst, "assets"))
     print("msix staging: %d files + 5 logos" % n)
     return dst
@@ -238,6 +260,25 @@ def main():
     if r.returncode != 0 or not os.path.exists(out_msix):
         print(out)
         raise SystemExit("FAIL makeappx pack")
+    # 包内条目数必须等于 stage 文件数：makeappx 遇到隐藏文件是静默跳过，
+    # 只报「pack 成功」。不做这条对账，「元数据档案没进包」只能靠人眼发现。
+    import urllib.parse
+    import zipfile
+    stage_files = set()
+    for dp, _dns, fns in os.walk(stage):
+        for fn in fns:
+            rel = os.path.relpath(os.path.join(dp, fn), stage).replace(os.sep, "/")
+            stage_files.add(rel)
+    # makeappx 会把非 ASCII 名百分号编码，并自行加两个清单元数据；比对前先归一
+    GENERATED = {"AppxBlockMap.xml", "[Content_Types].xml"}
+    with zipfile.ZipFile(out_msix) as z:
+        packed = {urllib.parse.unquote(x) for x in z.namelist()
+                  if not x.endswith("/")} - GENERATED
+    dropped = sorted(stage_files - packed)
+    if dropped:
+        raise SystemExit("FAIL 包内缺 %d 个 stage 文件（makeappx 丢弃隐藏文件？）: %s"
+                         % (len(dropped), dropped[:5]))
+    print("pack check: %d stage files all packaged" % len(stage_files))
     print("PACK OK: %s (%d KB)" % (out_msix, os.path.getsize(out_msix) // 1024))
     print("identity: Name=%s Publisher=%s" % (name, publisher))
     print("next: 未签名包直接上传合作伙伴中心；本地侧载测试运行 _sign_msix.cmd")
