@@ -3,11 +3,11 @@
 # Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
 """_extract_parser.py -- 从 markdown-editor.html 重抽独立解释器 md-parser.js
 
-流程（与 md-parser.js 首次抽取完全一致）：
+流程（v2.22.0 起）：
   1. 按标记行定位 core 段（/*PARSER_START*/ .. /*PARSER_END*/，含标记行）；
-  2. 应用两处抽取版增强：
-     a. `function parseMarkdown(src){` → `function parseMarkdown(src, opts){`
-     b. IPX 行加 `(opts&&opts.indents)||` 兜底；
+  2. **逐字抽取，不再应用增强**——v2.22.0 起 html core 已自带最终形态
+     （parseMarkdown(src,_lv,opts,_base) 签名与 IPX 的 opts.indents 兜底），
+     html core 与 md-parser.js core 逐字节同文，同步校验零归一化；
   3. 外包 UMD 壳（浏览器 MDParser / CommonJS / ESM 通用），写 md-parser.js。
 
 用法（在 MarkdownEditor-app 目录下）：
@@ -42,11 +42,9 @@ HEADER = '''/*! md-parser.js — MDEditor 自研 Markdown 方言解释器（独�
  *   // ESM
  *   import { parseMarkdown } from './md-parser.js';
  *
- * 相对原文件的两处增强（仅本抽取版，原文件未动）：
- *   1. 外包 UMD：浏览器全局(MDParser) / CommonJS(require) / ESM(import) 通用；
- *   2. parseMarkdown(src, _lv, opts) 增加可选第三参 opts.indents = {p, quote, li}
- *      （容器级缩进档，px）——不传时与原文 100% 一致（默认 {p:0,quote:0,li:0}）；
- *      第二参 _lv 为 v2.18.0 主链嵌套层级（0=文档流顶层，html 内部递归专用）。
+ * 相对原文件：仅外包 UMD 壳，core 段逐字复制未改动（v2.22.0 起 html core
+ *   已含 parseMarkdown(src,_lv,opts,_base) 签名、opts.indents 兜底与语法
+ *   诊断埋点；opts.diag 传数组即可收集 {line,code,msg,sev} 诊断）。
  * 其余解析逻辑逐字复制，未改动。改 html 解析器段后必须重新抽取本文件。
  */
 (function (root, factory) {
@@ -85,12 +83,9 @@ def main():
         raise SystemExit("FAIL 标记异常 START=%s END=%s" % (starts, ends))
     core = "\n".join(lines[starts[0]:ends[0] + 1])
 
-    # 两处抽取版增强（锚点计数断言）
-    anchors = [
-        ("function parseMarkdown(src,_lv){", "function parseMarkdown(src, _lv, opts){"),
-        ("var IPX=(typeof window!=='undefined'&&window.__IND_PX__)||{p:0,quote:0,li:0};",
-         "var IPX=(opts&&opts.indents)||(typeof window!=='undefined'&&window.__IND_PX__)||{p:0,quote:0,li:0};"),
-    ]
+    # v2.22.0 起 core 为最终形态，逐字抽取、无增强锚点（列表保留空结构，
+    # 未来若再出现抽取版差异可在此追加 (old, new) 锚点）
+    anchors = []
     for old, new in anchors:
         if core.count(old) != 1:
             raise SystemExit("FAIL 增强锚点出现 %d 次（应为 1）: %r" % (core.count(old), old[:50]))

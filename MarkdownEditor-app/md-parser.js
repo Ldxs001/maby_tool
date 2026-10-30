@@ -13,11 +13,9 @@
  *   // ESM
  *   import { parseMarkdown } from './md-parser.js';
  *
- * 相对原文件的两处增强（仅本抽取版，原文件未动）：
- *   1. 外包 UMD：浏览器全局(MDParser) / CommonJS(require) / ESM(import) 通用；
- *   2. parseMarkdown(src, _lv, opts) 增加可选第三参 opts.indents = {p, quote, li}
- *      （容器级缩进档，px）——不传时与原文 100% 一致（默认 {p:0,quote:0,li:0}）；
- *      第二参 _lv 为 v2.18.0 主链嵌套层级（0=文档流顶层，html 内部递归专用）。
+ * 相对原文件：仅外包 UMD 壳，core 段逐字复制未改动（v2.22.0 起 html core
+ *   已含 parseMarkdown(src,_lv,opts,_base) 签名、opts.indents 兜底与语法
+ *   诊断埋点；opts.diag 传数组即可收集 {line,code,msg,sev} 诊断）。
  * 其余解析逻辑逐字复制，未改动。改 html 解析器段后必须重新抽取本文件。
  */
 (function (root, factory) {
@@ -745,11 +743,30 @@ function _scanBeginBlock(lines,startIdx,teams){
   }
   return {inner:inner,closed:closed,next:k};
 }
-function parseMarkdown(src, _lv, opts){
+function parseMarkdown(src,_lv,opts,_base){
   _lv=_lv|0;
+  _base=_base||0;
   var lines=src.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
   var html='';
   var i=0;
+  /* v2.22.0 语法诊断：opts.diag 非空才收集（渲染路径不传 → 输出逐字节不变）。
+     fail-closed 降级点在降级同时上报 {line,code,msg,sev}；lint=渲染同源，永不双标。
+     行号=文档绝对行（1-based），_base 由递归调用点按下层内容首行绝对行号下传。 */
+  var _dg=(opts&&opts.diag)||null;
+  function _dgE(rel,code,msg,sev){
+    if(_dg)_dg.push({line:_base+rel+1,code:code,msg:msg,sev:sev||'err'});
+  }
+  /* v2.22.0 同族嵌套检测：_scanBeginBlock 把嵌套的同族 begin/end 对整对加
+     \u200b 前缀（渲染=字面露出），此前静默。结果里有零宽行即报 warn。 */
+  function _dgZw(inner){
+    if(!_dg)return;
+    for(var _zi=0;_zi<inner.length;_zi++){
+      if(inner[_zi].charCodeAt(0)===0x200b){
+        _dgE(i+1+_zi,'D204','同族嵌套：内层 begin/end 对被零宽处理（fill/full/page/color 不支持嵌套自身）','warn');
+        return;
+      }
+    }
+  }
   var olSeq=0;   /* 编号区域接力计数：v2.13 起只被空行打断（见 parseList 注释） */
   /* <<< 缩进包围块 · 当前位置状态机（v2.1；档位 v2.2.1 起为 px，正文字号基准）：
      只流容器级缩进（px）——空行/标题/围栏/hr/表格清零；顶层段落=正文首行缩进档、
@@ -758,8 +775,10 @@ function parseMarkdown(src, _lv, opts){
   var IPX=(opts&&opts.indents)||(typeof window!=='undefined'&&window.__IND_PX__)||{p:0,quote:0,li:0};
   var curInd=0;
   var pendCap=null;   /* v2.10.0 @@ caption 暂存：只作用于紧随其后的那一个表格 */
+  var _dgHit=false;
   while(i<lines.length){
     var line=lines[i];
+    _dgHit=false;
     /* v2.10.0 表格题注：@@ caption{l c t n s0.3} 表 1　标题
        必须先于竖线/表格/段落判断消费掉，否则整行会被当普通段落渲染。
        只认「下一行起就是表格」这一种位置——后面不是表格则整行按普通
@@ -792,12 +811,14 @@ function parseMarkdown(src, _lv, opts){
       /* n=0 / 非正数：不生效，落到普通段落按原文露出 */
     }
     if(/^```/.test(line)){
+      var _fenceAt=i;
       var rawLang=line.slice(3).trim();
        var fl=parseFenceLang(rawLang);   /* 图表围栏支持 ```mermaid {30} 版面百分比宽度 + c/l/r 对齐；v2.10.0 再加 "题注"{图参:题参} */
        var lang=fl.lang, fW=fl.width, fA=fl.align;
       i++;
       var code='';
       while(i<lines.length && !/^```/.test(lines[i])){code+=lines[i]+'\n';i++;}
+      if(i>=lines.length)_dgE(_fenceAt,'D103','代码围栏未闭合：文末缺收尾 ```','warn');
       i++;
       code=code.replace(/\n$/,'');
       if(lang==='mermaid'||lang==='dot'||lang==='graphviz'||lang==='viz'||lang==='wavedrom'||lang==='wavejson'||lang==='vega'||lang==='vega-lite'||lang==='vegalite'){
@@ -855,6 +876,7 @@ function parseMarkdown(src, _lv, opts){
         inner.push(lines[j]);j++;
       }
       if(!closed){
+        _dgE(i,'D101','<<< 未闭合：到文末没有第二个 <<<（开与闭用同一个符号）');
         html+='<p>'+parseInline(line)+'</p>';
         i++;curInd=0;continue;
       }
@@ -869,10 +891,14 @@ function parseMarkdown(src, _lv, opts){
          em 时基准随容器字号漂移（继承链 15px 环境下 2em 渲染 30px，
          与正文首行 37.3px 不齐）。 */
       var left=curInd;
-      html+='<div class="ind-blk" style="margin-left:'+left+'px">'+parseMarkdown(inner.join('\n'),_lv)+'</div>';
+      html+='<div class="ind-blk" style="margin-left:'+left+'px">'+parseMarkdown(inner.join('\n'),_lv,opts,_base+i+1)+'</div>';
       curInd=left+Math.max(hasList?IPX.li:0,hasQuote?IPX.quote:0);
       i=j;
       continue;
+    }
+    /* v2.22.0 <<< 须独占一行：行尾带内容不构成包围块（fail-closed 按普通文本） */
+    if(/^[ ]{0,3}<<</.test(line)&&!/^[ ]{0,3}<<<\s*$/.test(line)){
+      _dgE(i,'D102','<<< 须独占一行：行尾还有内容，本行按普通文本渲染','warn');
     }
     /* @@ fill 分栏（v2.3 图片语法，v2.13 泛化为文字/图片任意组合）：
        @@ begin fill{a|b[|c[|d]]} 或 @@ begin fill（无参 = 栏数等分，2~4 栏）
@@ -889,6 +915,7 @@ function parseMarkdown(src, _lv, opts){
     var fm=line.match(/^[ ]{0,3}@@\s*begin\s+fill\s*(?:\{([\d|]+)\})?\s*$/);
     if(fm){
       if(!(_LV.fill>_lv)){
+        _dgE(i,'D201','fill 不能在这里再开：fill 套 fill，或 full/page 区里开 fill（主链层级 page＞full＞fill）');
         /* v2.18.0 越界/同族：fill 是主链最内层（rank 3），_lv>=3 时不可再开
            （fill 套 fill、full/page 区里的 fill——full 2、page 1 都推不进
            _lv=3 的位置）。标记行按原文露出，i++ 推进，内容与结束行交主循环
@@ -900,15 +927,18 @@ function parseMarkdown(src, _lv, opts){
       }
       var _fr=_scanBeginBlock(lines,i+1,['fill']);
       var finner=_fr.inner,fclosed=_fr.closed,fj=_fr.next;
+      if(!fclosed){_dgE(i,'D203','fill 未闭合：到文末没有 @@ end fill，整块按普通文本渲染');_dgHit=true;}
+      _dgZw(finner);
       if(fclosed){
         /* 空行分栏：连续非空行属同栏（栏内可放文字行/图片行/围栏） */
-        var cols=[],cur=[];
+        var cols=[],cur=[],colAt=[],cAt=0;
         for(var c=0;c<finner.length;c++){
           if(/^[ ]*$/.test(finner[c])){
-            if(cur.length){cols.push(cur.join('\n'));cur=[];}
-          }else{cur.push(finner[c]);}
+            if(cur.length){cols.push(cur.join('\n'));colAt.push(cAt);cur=[];}
+            cAt=c+1;
+          }else{if(!cur.length)cAt=c;cur.push(finner[c]);}
         }
-        if(cur.length)cols.push(cur.join('\n'));
+        if(cur.length){cols.push(cur.join('\n'));colAt.push(cAt);}
         var ratios=[],okFill=false;
         if(fm[1]!==undefined){
           var parts=fm[1].split('|');
@@ -939,7 +969,7 @@ function parseMarkdown(src, _lv, opts){
              内层 fill 相对容器左边界即 0，故不写 margin-left。 */
           var fh='<div class="fill-row">';
           for(var ci=0;ci<cols.length;ci++){
-            fh+='<div class="fill-col" style="width:'+ratios[ci]+'%">'+parseMarkdown(cols[ci],_LV.fill)+'</div>';
+            fh+='<div class="fill-col" style="width:'+ratios[ci]+'%">'+parseMarkdown(cols[ci],_LV.fill,opts,_base+i+1+colAt[ci])+'</div>';
           }
           fh+='</div>';
           html+=fh;
@@ -949,9 +979,27 @@ function parseMarkdown(src, _lv, opts){
       }
       /* fail-closed：整块（含标记行）按普通文本渲染 */
       if(fclosed){
+        if(_dg){
+          var _rsn='';
+          if(fm[1]!==undefined){
+            var _pp=fm[1].split('|');
+            if(_pp.length!==cols.length)_rsn='比例段数 '+_pp.length+' ≠ 栏数 '+cols.length;
+            else{
+              var _ssum=0,_badv=false;
+              for(var _pr=0;_pr<_pp.length;_pr++){
+                var _pv=parseInt(_pp[_pr],10);
+                if(isNaN(_pv)||_pv<1||_pv>100){_badv=true;break;}
+                _ssum+=_pv;
+              }
+              if(_badv)_rsn='比例值须为 1~100 的整数';
+              else if(_ssum!==100)_rsn='比例之和须为 100（当前 '+_ssum+'）';
+            }
+          }else if(cols.length<2||cols.length>4)_rsn='无参 fill 须 2~4 栏（当前 '+cols.length+' 栏）';
+          _dgE(i,'D202','fill 参数不匹配'+(_rsn?('：'+_rsn):''));
+        }
         html+='<p>'+parseInline(line)+'</p>';
         var ftxt=finner.join('\n');
-        if(ftxt.trim()){html+=parseMarkdown(ftxt,_lv);}
+        if(ftxt.trim()){html+=parseMarkdown(ftxt,_lv,opts,_base+i+1);}
         i=fj;curInd=0;
         continue;
       }
@@ -970,6 +1018,8 @@ function parseMarkdown(src, _lv, opts){
       var cval=_colorVal(cm[1]!==undefined?cm[1]:cm[2]);
       var _cr=_scanBeginBlock(lines,i+1,['color']);
       var cinner=_cr.inner,cclosed=_cr.closed,cj=_cr.next;
+      if(!cclosed){_dgE(i,'D212','color 未闭合：缺 @@ end color，内容照常渲染');_dgHit=true;}
+      _dgZw(cinner);
       if(cval&&cclosed){
         /* v2.13.3 同 fill：不继承兄弟块缩进（紧贴列表时会被带出一档），
            容器缩进由外层 .ind-blk 承担。color 不占主链（v2.18.0）：层级
@@ -977,14 +1027,15 @@ function parseMarkdown(src, _lv, opts){
            @@ begin color 由 _scanBeginBlock 整对零宽露出（禁同族，
            行内 @@ color 就是就近覆盖，块级自嵌套无意义）。 */
         html+='<div class="mde-color" style="color:'+cval+'">'+
-          parseMarkdown(cinner.join('\n'),_lv)+'</div>';
+          parseMarkdown(cinner.join('\n'),_lv,opts,_base+i+1)+'</div>';
         i=cj;
         continue;
       }
       if(cclosed){
+        if(!cval)_dgE(i,'D211','color 色值非法：{X} 须为颜色名或 #rgb / #rrggbb');
         html+='<p>'+parseInline(line)+'</p>';
         var ctxt=cinner.join('\n');
-        if(ctxt.trim()){html+=parseMarkdown(ctxt,_lv);}
+        if(ctxt.trim()){html+=parseMarkdown(ctxt,_lv,opts,_base+i+1);}
         i=cj;
         continue;
       }
@@ -1002,6 +1053,7 @@ function parseMarkdown(src, _lv, opts){
     var um=line.match(/^[ ]{0,3}@@\s*begin\s+full\s*(?:\{([tmb])\})?\s*$/);
     if(um){
       if(!(_LV.full>_lv)){
+        _dgE(i,'D221','full 不能在这里再开：full 套 full，或 fill 区里开 full（主链层级 page＞full＞fill）');
         /* v2.18.0 越界/同族：full 是主链中层（rank 2），_lv>=2 时不可再开
            （full 套 full、fill 里的 full）。标记行按原文露出，i++ 推进，
            内容与结束行交主循环照常渲染——end 行走孤 end 兜底按原文露出，
@@ -1013,13 +1065,15 @@ function parseMarkdown(src, _lv, opts){
       }
       var _ur=_scanBeginBlock(lines,i+1,['full']);
       var uinner=_ur.inner,uclosed=_ur.closed,uj=_ur.next;
+      _dgZw(uinner);
       if(uclosed){
         html+='<div class="full-page" data-full-pos="'+(um[1]||'m')+'">'+
-          parseMarkdown(uinner.join('\n'),_LV.full)+'</div>';
+          parseMarkdown(uinner.join('\n'),_LV.full,opts,_base+i+1)+'</div>';
         i=uj;
         continue;
       }
       /* 未闭合 fail-closed：标记行按原文，内容照常渲染 */
+      _dgE(i,'D222','full 未闭合：缺 @@ end full，内容照常渲染');
       html+='<p>'+parseInline(line)+'</p>';
       i++;
       continue;
@@ -1042,6 +1096,7 @@ function parseMarkdown(src, _lv, opts){
       var _pgn=(pgm[1]||'').trim();
       if(_pgn==='noll'||_pgn==='1'||_pgn==='i'||_pgn==='I'){
         if(!(_LV.page>_lv)){
+          _dgE(i,'D231','page 不能在这里再开：页区套页区，或 full/fill 区里开 page（主链层级 page＞full＞fill）');
           /* v2.18.0 越界/同族：page 是主链最外层（rank 1），_lv>=1 时不可
              再开（页区套页区、full/fill 里的 page）。标记行按原文露出，
              i++ 推进，内容与结束行交主循环照常渲染——end 行走孤 end 兜底
@@ -1052,18 +1107,21 @@ function parseMarkdown(src, _lv, opts){
         }
         var _pgr=_scanBeginBlock(lines,i+1,['page']);
         var pginner=_pgr.inner,pgclosed=_pgr.closed,pgj=_pgr.next;
+        _dgZw(pginner);
         if(pgclosed){
           _pgRegSeq++;
           html+='<div class="page-region" data-pn="'+_pgn+'" data-pr-id="pr'+_pgRegSeq+'">'+
-            parseMarkdown(pginner.join('\n'),_LV.page)+'</div>';
+            parseMarkdown(pginner.join('\n'),_LV.page,opts,_base+i+1)+'</div>';
           i=pgj;
           continue;
         }
+        _dgE(i,'D233','page 未闭合：缺 @@ end page，内容照常渲染');
         html+='<p>'+parseInline(line)+'</p>';
         i++;
         continue;
       }
       /* 参数非法：不接管，落到下面普通段落按原文露出 */
+      _dgE(i,'D232','page 参数非法：{...} 里须为 noll / 1 / i / I');_dgHit=true;
     }
     /* v2.19.0 并写（end 集合语义）：@@ begin page{noll|1|i|I} full{t|m|b} color{X} …
        begin 并写 = 展开成嵌套：page 压 full 压 color，一层一个 div，容器
@@ -1132,7 +1190,7 @@ function parseMarkdown(src, _lv, opts){
         }
         if(_mgOk){
           /* 分段扫描：per-family 深度计数 + openSet */
-          var _mgSegs=[],_mgBuf=[],_mgOpen={},_mgDepth={page:0,full:0,fill:0,color:0},_mgOpenN=_mgl.length,_mgOk2=true,_mgK2=i+1;
+          var _mgSegs=[],_mgBuf=[],_mgOpen={},_mgDepth={page:0,full:0,fill:0,color:0},_mgOpenN=_mgl.length,_mgOk2=true,_mgK2=i+1,_mgSegAt=i+1;
           for(var _md=0;_md<_mgl.length;_md++){_mgOpen[_mgl[_md].f]=true;_mgDepth[_mgl[_md].f]=1;}
           while(_mgK2<lines.length){
             var _mln=lines[_mgK2];
@@ -1158,11 +1216,12 @@ function parseMarkdown(src, _lv, opts){
                 /* 分段点：本段收尾，成员移出集合；end 行是结构行不进内容 */
                 var _oarr=[];
                 for(var _oq=0;_oq<_mgl.length;_oq++){if(_mgOpen[_mgl[_oq].f])_oarr.push(_mgl[_oq].f);}
-                _mgSegs.push({c:_mgBuf,o:_oarr});
+                _mgSegs.push({c:_mgBuf,o:_oarr,at:_mgSegAt});
                 _mgBuf=[];
                 for(var _mc2=0;_mc2<_mgClose.length;_mc2++){delete _mgOpen[_mgClose[_mc2]];}
                 _mgOpenN-=_mgClose.length;
                 _mgK2++;
+                _mgSegAt=_mgK2;
                 if(_mgOpenN===0){break;}   /* 集合清空 → 块闭合 */
               }else{
                 _mgBuf.push(_mln);_mgK2++;   /* 纯内层闭合：行进内容交递归 */
@@ -1196,7 +1255,7 @@ function parseMarkdown(src, _lv, opts){
                   _mgHtml+='<div class="mde-color" style="color:'+_mgA.color+'">';
                 }
               }
-              if(_mgSegs[_ms].c.length){_mgHtml+=parseMarkdown(_mgSegs[_ms].c.join('\n'),_mgLv);}
+              if(_mgSegs[_ms].c.length){_mgHtml+=parseMarkdown(_mgSegs[_ms].c.join('\n'),_mgLv,opts,_base+_mgSegs[_ms].at);}
               _mgPrev=_so;
             }
             for(var _cl3=_mgPrev.length-1;_cl3>=0;_cl3--){_mgHtml+='</div>';}
@@ -1204,6 +1263,10 @@ function parseMarkdown(src, _lv, opts){
             i=_mgK2;
             continue;
           }
+          if(!_mgOk2){_dgE(_mgK2,'D242','并写块：@@ end 关闭了未打开的家族');_dgHit=true;}
+          else{_dgE(i,'D243','并写块未闭合：文末仍有开着的 page/full/color 层');_dgHit=true;}
+        }else{
+          _dgE(i,'D241','并写 begin 不成立：家族顺序须 page→full→color、同族不重复、参数合法');_dgHit=true;
         }
       }
       /* 不成立（单家族 / 参数非法 / 顺序错 / end 未开家族 / 未闭合）→ 落到下面普通段落按原文露出 */
@@ -1220,6 +1283,7 @@ function parseMarkdown(src, _lv, opts){
          if(lines[dj].indexOf('}')>=0){dclosed=true;dj++;break;}
          dj++;
        }
+       if(!dclosed){_dgE(i,'D301','@@ MDE 数据点未闭合：到文末没有 }');_dgHit=true;}
        if(dclosed){
          var dfull=dchunks.join('\n');
          var dmm=dfull.match(/@@ MDE(_{1,2})([\w\u4e00-\u9fff.-]*)(?::([23]))?(\([^()]*\))?\{([\s\S]*?)\}/);
@@ -1240,7 +1304,7 @@ function parseMarkdown(src, _lv, opts){
                }else{
                  /* 显性（v2.6.12）：表格原文照原样渲染成真表格。行列裁剪
                     (RxC) 只作用于 data-dp-val，屏幕显示整张原表 */
-                 dsp='<div class="mde-dp mde-dp-block"'+dattrs+'>'+parseMarkdown(_dpTableSrc(dmm[5]),_lv)+'</div>';
+                 dsp='<div class="mde-dp mde-dp-block"'+dattrs+'>'+parseMarkdown(_dpTableSrc(dmm[5]),_lv,null,0)+'</div>';
                  dspBlock=true;
                }
              }
@@ -1265,6 +1329,7 @@ function parseMarkdown(src, _lv, opts){
              continue;
            }
            /* fail-closed：整块按普通段落（含标记行原文） */
+           _dgE(i,'D302','@@ MDE 数据点内容不合规范：(( )) 混用／键值段缺 ==／表格行列或坐标错——按普通文本渲染');
            html+='<p>'+parseInline(dfull.replace(/\n/g,' '))+'</p>';
            i=dj;curInd=0;
            continue;
@@ -1274,9 +1339,10 @@ function parseMarkdown(src, _lv, opts){
     /* v2.13.2 分隔线与列表内共用同一判据（_isHrLine），两条路径不得分叉 */
     if(_isHrLine(line)){html+='<hr>';i++;curInd=0;continue;}
     if(/^[ ]*>/.test(line)){
+      var _qAt=i;
       var quote=[];
       while(i<lines.length && /^[ ]*>/.test(lines[i])){quote.push(lines[i].replace(/^[ ]*>[ ]?/,''));i++;}
-      html+='<blockquote>'+parseMarkdown(quote.join('\n'),_lv)+'</blockquote>';
+      html+='<blockquote>'+parseMarkdown(quote.join('\n'),_lv,opts,_base+_qAt)+'</blockquote>';
       curInd=IPX.quote;
       continue;
     }
@@ -1309,7 +1375,19 @@ function parseMarkdown(src, _lv, opts){
        未推进；若照旧输出空 <p> 并回到循环，就会永远停在同一行（主线程死锁 = 打开
        文件即卡死，文末未闭合数据点必中）。这里保证每轮至少吃掉一行，该行按普通
        文本 fail-closed 渲染。 */
-    if(!para.length){para.push(lines[i]);i++;}
+    if(!para.length){
+      para.push(lines[i]);i++;
+      /* v2.22.0 行尾兜底：@@ 方言前缀行没被任何分支接管＝未生效（fail-closed
+         按普通文本渲染）。分支内已上报过的行（_dgHit）不重复报。 */
+      if(!_dgHit&&/^[ ]{0,3}@@/.test(para[0])){
+        var _dgT=(para[0].match(/^[ ]{0,3}@@\s*(begin|end|caption|blank|MDE)/)||[])[1]||'';
+        if(_dgT==='end')_dgE(i-1,'D401','孤 @@ end：前面没有打开的对应 begin 块（检查家族名与配对）');
+        else if(_dgT==='begin')_dgE(i-1,'D402','@@ begin 未生效：家族名／参数／嵌套位置有误（fill 分栏／full 独占页／page 页区／color 着色）');
+        else if(_dgT==='caption')_dgE(i-1,'D403','@@ caption 未生效：其后必须紧跟表格（下一行表体、再下一行分隔行）');
+        else if(_dgT==='blank')_dgE(i-1,'D404','@@ blank 未生效：须独占一行，n 为正数（0.1~50）');
+        else _dgE(i-1,'D405','以 @@ 开头但不是有效方言指令，按普通文本渲染','warn');
+      }
+    }
     var _pd=parseInline(para.join('\n'));
     var _fg=_asFigure(_pd);
     html+=_fg?_fg:('<p>'+_pd.replace(/\n/g,'<br>')+'</p>');

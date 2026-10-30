@@ -9,8 +9,8 @@
 
 口径：
   1. 两个文件均按标记行定位 core 段（不硬编码行号，行号可漂、标记不可丢）；
-  2. 对 html core 应用抽取时的两处已知增强（parseMarkdown 加 _lv/opts 形参、
-     IPX 行加 opts.indents 兜底），归一化后与 js core 做**字节级**全等比对；
+  2. v2.22.0 起 core 为最终形态，**逐字节全等比对、零归一化**（原两处抽取
+     增强——签名与 IPX 兜底——已直接写进 html core，增强列表清空）；
   3. 任何在 html 解析器段或 md-parser.js core 段的改动，若未同步另一方，
      本测试 FAIL。改动流程：改 html 解析器段 → 重新抽取 md-parser.js → 本测试 PASS。
 
@@ -30,13 +30,8 @@ JS = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "md-parser.js")
 START_MARK = "/*PARSER_START*/"
 END_MARK = "/*PARSER_END*/"
 
-# 抽取时对 core 段做的两处增强（与生成脚本完全一致）
-ENHANCE = [
-    ("function parseMarkdown(src,_lv){",
-     "function parseMarkdown(src, _lv, opts){"),
-    ("var IPX=(typeof window!=='undefined'&&window.__IND_PX__)||{p:0,quote:0,li:0};",
-     "var IPX=(opts&&opts.indents)||(typeof window!=='undefined'&&window.__IND_PX__)||{p:0,quote:0,li:0};"),
-]
+# v2.22.0 起 core 为最终形态，逐字抽取、零归一化（历史增强锚点已清空）
+ENHANCE = []
 
 
 def extract_core(path):
@@ -74,7 +69,7 @@ def main():
     js_text = "\n".join(js_core)
     if norm == js_text:
         print("PASS  md-parser.js core 与 markdown-editor.html 解析器段一致"
-              "（%d 行，含两处已知增强归一）" % len(js_core))
+              "（%d 行，逐字节全等）" % len(js_core))
         return 0
 
     # 差异定位：逐行找第一处分歧，给出可行动信息

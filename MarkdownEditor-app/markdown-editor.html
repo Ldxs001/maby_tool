@@ -271,11 +271,12 @@
   #btnRunAll[hidden]{display:none;}
   #btnRunAll:disabled{opacity:.55;cursor:default;}
   /* v2.15.0 语言切换：状态栏内、运行按钮右侧；显示的是「可切换到的目标语言」 */
-  #btnLang{background:transparent;color:var(--muted);border:1px solid var(--border);
+  #btnLang,#btnHint{background:transparent;color:var(--muted);border:1px solid var(--border);
     border-radius:10px;padding:2px 9px;font-size:11px;line-height:1.5;cursor:pointer;
     font-family:var(--sans);letter-spacing:.4px;flex:0 0 auto;}
-  #btnLang:hover{color:var(--fg);border-color:var(--accent);}
-  #btnLang:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+  #btnLang:hover,#btnHint:hover{color:var(--fg);border-color:var(--accent);}
+  #btnLang:focus-visible,#btnHint:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+  #btnHint.hint-on{color:var(--accent);border-color:var(--accent);}
   /* v2.15.0：英文标签比中文长（Numbering/Follow/Quote 等），窄窗会把「保存/另存为」
      挤出视口。英文态先收紧间距与内边距；仍不够时工具栏可横向滚动，不丢按钮。
      中文态不套用紧凑规则，排版与 v2.14.0 一致。 */
@@ -460,6 +461,46 @@
     body.light #findBar .fb-btn:hover{background:#e8e6e1;color:#111;}
     body.light .fb-row input{background:#f5f6f8;color:#2b2b2e;border-color:#d8d4cb;}
     body.light .fb-count{color:#777;}
+
+    /* v2.22.0 语法诊断面板 + 方言提示条 */
+    #dgBadge{cursor:pointer;font-weight:600;}
+    #dgBadge.dg-err{color:#ff8f8f;}
+    #dgBadge.dg-warn{color:#f0c060;}
+    #dgPanel{position:fixed;left:0;right:0;bottom:38px;max-height:46vh;overflow:auto;
+      background:#1e222b;border-top:2px solid #3a4358;z-index:70;
+      box-shadow:0 -8px 30px rgba(0,0,0,.4);font-size:14px;display:none;}
+    #dgPanel.on{display:block;}
+    #dgPanel .dg-head{display:flex;justify-content:space-between;align-items:center;
+      padding:8px 14px;border-bottom:1px solid #2c313d;color:#aab3c5;
+      position:sticky;top:0;background:#1e222b;}
+    #dgPanel .dg-item{display:flex;gap:10px;padding:7px 14px;cursor:pointer;color:#d5dae4;line-height:1.5;align-items:baseline;}
+    #dgPanel .dg-item:hover{background:#262b36;}
+    #dgPanel .dg-code{flex:none;font-family:Consolas,monospace;font-size:12px;color:#8a93a6;width:44px;}
+    #dgPanel .dg-line{flex:none;color:#7fb0ff;font-family:Consolas,monospace;font-size:12px;min-width:52px;text-align:right;}
+    #dgPanel .dg-w .dg-code{color:#f0c060;}
+    #dgHint{position:fixed;z-index:80;background:rgba(32,36,46,.78);border:1px solid rgba(88,100,128,.55);border-radius:8px;
+      padding:8px 12px;font-size:13px;color:#c8cfdd;max-width:560px;
+      box-shadow:0 8px 26px rgba(0,0,0,.45);display:none;pointer-events:none;
+      backdrop-filter:blur(10px) saturate(1.3);-webkit-backdrop-filter:blur(10px) saturate(1.3);}
+    #dgHint.on{display:block;}
+    #dgHint .dh-t{font-family:Consolas,monospace;color:#f0c060;margin-right:10px;}
+    #dgHint .dh-d{color:#8a93a6;}
+    #dgHint div{padding:2px 0;}
+    #dgHint::before{content:'语法';display:inline-block;margin:0 0 5px;padding:1px 9px;
+      border:1px solid #4a5568;border-radius:4px;font-size:11px;letter-spacing:3px;
+      color:#9aa5ba;background:rgba(154,165,186,.08);}
+    body.light #dgPanel{background:#ffffff;border-top-color:#d8d4cb;box-shadow:0 -8px 30px rgba(0,0,0,.15);}
+    body.light #dgPanel .dg-head{background:#ffffff;color:#666;border-bottom-color:#e5e2db;}
+    body.light #dgPanel .dg-item{color:#333;}
+    body.light #dgPanel .dg-item:hover{background:#f2f0ea;}
+    body.light #dgPanel .dg-code{color:#999;}
+    body.light #dgPanel .dg-line{color:#3a6fd8;}
+    body.light #dgPanel .dg-w .dg-code{color:#b07d1a;}
+    body.light #dgBadge.dg-err{color:#c0392b;}
+    body.light #dgBadge.dg-warn{color:#b07d1a;}
+    body.light #dgHint{background:rgba(255,255,255,.72);border-color:rgba(200,195,185,.8);color:#333;box-shadow:0 8px 26px rgba(0,0,0,.18);}
+    body.light #dgHint .dh-d{color:#777;}
+    body.light #dgHint::before{color:#666;border-color:#c9c4ba;background:rgba(0,0,0,.04);}
   </style>
   <meta name="generator" content="MDEditor - AI-assisted (generated with an AI coding agent)">
 </head>
@@ -516,14 +557,21 @@
 <footer id="status">
   <button id="btnRunAll" hidden title="运行全部 @@ MDE 执行点（手动模式）">▶ 运行</button>
   <button id="btnLang" title="切换界面语言：中文 / English">EN</button>
+  <button id="btnHint" title="语法提示开关：开启后光标所在行弹出方言速查（语法检查不受影响）">提示</button>
   <span id="statFile" class="saved">默认文档</span>
   <span id="statAnns" title="文档批注数">批注 0</span>
   <span id="statChars">0 字符</span>
   <span id="statWords">0 词</span>
   <span id="statLines">0 行</span>
   <span id="statSave" class="saved">已存入缓存</span>
+  <span id="dgBadge" hidden title="语法检查"></span>
   <span class="ai-mark" title="本工具由 AI 辅助生成">本工具由 AI 生成</span>
 </footer>
+<div id="dgPanel">
+  <div class="dg-head"><span>语法检查</span><span id="dgClose" style="cursor:pointer;">✕</span></div>
+  <div id="dgList"></div>
+</div>
+<div id="dgHint"></div>
       <div id="svOverlay" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:60;display:flex;align-items:center;justify-content:center;">
     <div style="width:520px;background:#23272f;border-radius:14px;padding:26px 30px;box-shadow:0 24px 70px rgba(0,0,0,.55);">
       <div style="font-size:24px;font-weight:700;margin-bottom:18px;">保存文档</div>
@@ -1477,21 +1525,42 @@ function _scanBeginBlock(lines,startIdx,teams){
   }
   return {inner:inner,closed:closed,next:k};
 }
-function parseMarkdown(src,_lv){
+function parseMarkdown(src,_lv,opts,_base){
   _lv=_lv|0;
+  _base=_base||0;
   var lines=src.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
   var html='';
   var i=0;
+  /* v2.22.0 语法诊断：opts.diag 非空才收集（渲染路径不传 → 输出逐字节不变）。
+     fail-closed 降级点在降级同时上报 {line,code,msg,sev}；lint=渲染同源，永不双标。
+     行号=文档绝对行（1-based），_base 由递归调用点按下层内容首行绝对行号下传。 */
+  var _dg=(opts&&opts.diag)||null;
+  function _dgE(rel,code,msg,sev){
+    if(_dg)_dg.push({line:_base+rel+1,code:code,msg:msg,sev:sev||'err'});
+  }
+  /* v2.22.0 同族嵌套检测：_scanBeginBlock 把嵌套的同族 begin/end 对整对加
+     \u200b 前缀（渲染=字面露出），此前静默。结果里有零宽行即报 warn。 */
+  function _dgZw(inner){
+    if(!_dg)return;
+    for(var _zi=0;_zi<inner.length;_zi++){
+      if(inner[_zi].charCodeAt(0)===0x200b){
+        _dgE(i+1+_zi,'D204','同族嵌套：内层 begin/end 对被零宽处理（fill/full/page/color 不支持嵌套自身）','warn');
+        return;
+      }
+    }
+  }
   var olSeq=0;   /* 编号区域接力计数：v2.13 起只被空行打断（见 parseList 注释） */
   /* <<< 缩进包围块 · 当前位置状态机（v2.1；档位 v2.2.1 起为 px，正文字号基准）：
      只流容器级缩进（px）——空行/标题/围栏/hr/表格清零；顶层段落=正文首行缩进档、
      列表=列表档、引用=引用档；<<< 冻结当前值为块内左边界（块内封闭不更新），
      闭合时 += 块内容器级子块叠加（列表/引用档，取 max）。段内 text-indent 永不进链。 */
-  var IPX=(typeof window!=='undefined'&&window.__IND_PX__)||{p:0,quote:0,li:0};
+  var IPX=(opts&&opts.indents)||(typeof window!=='undefined'&&window.__IND_PX__)||{p:0,quote:0,li:0};
   var curInd=0;
   var pendCap=null;   /* v2.10.0 @@ caption 暂存：只作用于紧随其后的那一个表格 */
+  var _dgHit=false;
   while(i<lines.length){
     var line=lines[i];
+    _dgHit=false;
     /* v2.10.0 表格题注：@@ caption{l c t n s0.3} 表 1　标题
        必须先于竖线/表格/段落判断消费掉，否则整行会被当普通段落渲染。
        只认「下一行起就是表格」这一种位置——后面不是表格则整行按普通
@@ -1524,12 +1593,14 @@ function parseMarkdown(src,_lv){
       /* n=0 / 非正数：不生效，落到普通段落按原文露出 */
     }
     if(/^```/.test(line)){
+      var _fenceAt=i;
       var rawLang=line.slice(3).trim();
        var fl=parseFenceLang(rawLang);   /* 图表围栏支持 ```mermaid {30} 版面百分比宽度 + c/l/r 对齐；v2.10.0 再加 "题注"{图参:题参} */
        var lang=fl.lang, fW=fl.width, fA=fl.align;
       i++;
       var code='';
       while(i<lines.length && !/^```/.test(lines[i])){code+=lines[i]+'\n';i++;}
+      if(i>=lines.length)_dgE(_fenceAt,'D103','代码围栏未闭合：文末缺收尾 ```','warn');
       i++;
       code=code.replace(/\n$/,'');
       if(lang==='mermaid'||lang==='dot'||lang==='graphviz'||lang==='viz'||lang==='wavedrom'||lang==='wavejson'||lang==='vega'||lang==='vega-lite'||lang==='vegalite'){
@@ -1587,6 +1658,7 @@ function parseMarkdown(src,_lv){
         inner.push(lines[j]);j++;
       }
       if(!closed){
+        _dgE(i,'D101','<<< 未闭合：到文末没有第二个 <<<（开与闭用同一个符号）');
         html+='<p>'+parseInline(line)+'</p>';
         i++;curInd=0;continue;
       }
@@ -1601,10 +1673,14 @@ function parseMarkdown(src,_lv){
          em 时基准随容器字号漂移（继承链 15px 环境下 2em 渲染 30px，
          与正文首行 37.3px 不齐）。 */
       var left=curInd;
-      html+='<div class="ind-blk" style="margin-left:'+left+'px">'+parseMarkdown(inner.join('\n'),_lv)+'</div>';
+      html+='<div class="ind-blk" style="margin-left:'+left+'px">'+parseMarkdown(inner.join('\n'),_lv,opts,_base+i+1)+'</div>';
       curInd=left+Math.max(hasList?IPX.li:0,hasQuote?IPX.quote:0);
       i=j;
       continue;
+    }
+    /* v2.22.0 <<< 须独占一行：行尾带内容不构成包围块（fail-closed 按普通文本） */
+    if(/^[ ]{0,3}<<</.test(line)&&!/^[ ]{0,3}<<<\s*$/.test(line)){
+      _dgE(i,'D102','<<< 须独占一行：行尾还有内容，本行按普通文本渲染','warn');
     }
     /* @@ fill 分栏（v2.3 图片语法，v2.13 泛化为文字/图片任意组合）：
        @@ begin fill{a|b[|c[|d]]} 或 @@ begin fill（无参 = 栏数等分，2~4 栏）
@@ -1621,6 +1697,7 @@ function parseMarkdown(src,_lv){
     var fm=line.match(/^[ ]{0,3}@@\s*begin\s+fill\s*(?:\{([\d|]+)\})?\s*$/);
     if(fm){
       if(!(_LV.fill>_lv)){
+        _dgE(i,'D201','fill 不能在这里再开：fill 套 fill，或 full/page 区里开 fill（主链层级 page＞full＞fill）');
         /* v2.18.0 越界/同族：fill 是主链最内层（rank 3），_lv>=3 时不可再开
            （fill 套 fill、full/page 区里的 fill——full 2、page 1 都推不进
            _lv=3 的位置）。标记行按原文露出，i++ 推进，内容与结束行交主循环
@@ -1632,15 +1709,18 @@ function parseMarkdown(src,_lv){
       }
       var _fr=_scanBeginBlock(lines,i+1,['fill']);
       var finner=_fr.inner,fclosed=_fr.closed,fj=_fr.next;
+      if(!fclosed){_dgE(i,'D203','fill 未闭合：到文末没有 @@ end fill，整块按普通文本渲染');_dgHit=true;}
+      _dgZw(finner);
       if(fclosed){
         /* 空行分栏：连续非空行属同栏（栏内可放文字行/图片行/围栏） */
-        var cols=[],cur=[];
+        var cols=[],cur=[],colAt=[],cAt=0;
         for(var c=0;c<finner.length;c++){
           if(/^[ ]*$/.test(finner[c])){
-            if(cur.length){cols.push(cur.join('\n'));cur=[];}
-          }else{cur.push(finner[c]);}
+            if(cur.length){cols.push(cur.join('\n'));colAt.push(cAt);cur=[];}
+            cAt=c+1;
+          }else{if(!cur.length)cAt=c;cur.push(finner[c]);}
         }
-        if(cur.length)cols.push(cur.join('\n'));
+        if(cur.length){cols.push(cur.join('\n'));colAt.push(cAt);}
         var ratios=[],okFill=false;
         if(fm[1]!==undefined){
           var parts=fm[1].split('|');
@@ -1671,7 +1751,7 @@ function parseMarkdown(src,_lv){
              内层 fill 相对容器左边界即 0，故不写 margin-left。 */
           var fh='<div class="fill-row">';
           for(var ci=0;ci<cols.length;ci++){
-            fh+='<div class="fill-col" style="width:'+ratios[ci]+'%">'+parseMarkdown(cols[ci],_LV.fill)+'</div>';
+            fh+='<div class="fill-col" style="width:'+ratios[ci]+'%">'+parseMarkdown(cols[ci],_LV.fill,opts,_base+i+1+colAt[ci])+'</div>';
           }
           fh+='</div>';
           html+=fh;
@@ -1681,9 +1761,27 @@ function parseMarkdown(src,_lv){
       }
       /* fail-closed：整块（含标记行）按普通文本渲染 */
       if(fclosed){
+        if(_dg){
+          var _rsn='';
+          if(fm[1]!==undefined){
+            var _pp=fm[1].split('|');
+            if(_pp.length!==cols.length)_rsn='比例段数 '+_pp.length+' ≠ 栏数 '+cols.length;
+            else{
+              var _ssum=0,_badv=false;
+              for(var _pr=0;_pr<_pp.length;_pr++){
+                var _pv=parseInt(_pp[_pr],10);
+                if(isNaN(_pv)||_pv<1||_pv>100){_badv=true;break;}
+                _ssum+=_pv;
+              }
+              if(_badv)_rsn='比例值须为 1~100 的整数';
+              else if(_ssum!==100)_rsn='比例之和须为 100（当前 '+_ssum+'）';
+            }
+          }else if(cols.length<2||cols.length>4)_rsn='无参 fill 须 2~4 栏（当前 '+cols.length+' 栏）';
+          _dgE(i,'D202','fill 参数不匹配'+(_rsn?('：'+_rsn):''));
+        }
         html+='<p>'+parseInline(line)+'</p>';
         var ftxt=finner.join('\n');
-        if(ftxt.trim()){html+=parseMarkdown(ftxt,_lv);}
+        if(ftxt.trim()){html+=parseMarkdown(ftxt,_lv,opts,_base+i+1);}
         i=fj;curInd=0;
         continue;
       }
@@ -1702,6 +1800,8 @@ function parseMarkdown(src,_lv){
       var cval=_colorVal(cm[1]!==undefined?cm[1]:cm[2]);
       var _cr=_scanBeginBlock(lines,i+1,['color']);
       var cinner=_cr.inner,cclosed=_cr.closed,cj=_cr.next;
+      if(!cclosed){_dgE(i,'D212','color 未闭合：缺 @@ end color，内容照常渲染');_dgHit=true;}
+      _dgZw(cinner);
       if(cval&&cclosed){
         /* v2.13.3 同 fill：不继承兄弟块缩进（紧贴列表时会被带出一档），
            容器缩进由外层 .ind-blk 承担。color 不占主链（v2.18.0）：层级
@@ -1709,14 +1809,15 @@ function parseMarkdown(src,_lv){
            @@ begin color 由 _scanBeginBlock 整对零宽露出（禁同族，
            行内 @@ color 就是就近覆盖，块级自嵌套无意义）。 */
         html+='<div class="mde-color" style="color:'+cval+'">'+
-          parseMarkdown(cinner.join('\n'),_lv)+'</div>';
+          parseMarkdown(cinner.join('\n'),_lv,opts,_base+i+1)+'</div>';
         i=cj;
         continue;
       }
       if(cclosed){
+        if(!cval)_dgE(i,'D211','color 色值非法：{X} 须为颜色名或 #rgb / #rrggbb');
         html+='<p>'+parseInline(line)+'</p>';
         var ctxt=cinner.join('\n');
-        if(ctxt.trim()){html+=parseMarkdown(ctxt,_lv);}
+        if(ctxt.trim()){html+=parseMarkdown(ctxt,_lv,opts,_base+i+1);}
         i=cj;
         continue;
       }
@@ -1734,6 +1835,7 @@ function parseMarkdown(src,_lv){
     var um=line.match(/^[ ]{0,3}@@\s*begin\s+full\s*(?:\{([tmb])\})?\s*$/);
     if(um){
       if(!(_LV.full>_lv)){
+        _dgE(i,'D221','full 不能在这里再开：full 套 full，或 fill 区里开 full（主链层级 page＞full＞fill）');
         /* v2.18.0 越界/同族：full 是主链中层（rank 2），_lv>=2 时不可再开
            （full 套 full、fill 里的 full）。标记行按原文露出，i++ 推进，
            内容与结束行交主循环照常渲染——end 行走孤 end 兜底按原文露出，
@@ -1745,13 +1847,15 @@ function parseMarkdown(src,_lv){
       }
       var _ur=_scanBeginBlock(lines,i+1,['full']);
       var uinner=_ur.inner,uclosed=_ur.closed,uj=_ur.next;
+      _dgZw(uinner);
       if(uclosed){
         html+='<div class="full-page" data-full-pos="'+(um[1]||'m')+'">'+
-          parseMarkdown(uinner.join('\n'),_LV.full)+'</div>';
+          parseMarkdown(uinner.join('\n'),_LV.full,opts,_base+i+1)+'</div>';
         i=uj;
         continue;
       }
       /* 未闭合 fail-closed：标记行按原文，内容照常渲染 */
+      _dgE(i,'D222','full 未闭合：缺 @@ end full，内容照常渲染');
       html+='<p>'+parseInline(line)+'</p>';
       i++;
       continue;
@@ -1774,6 +1878,7 @@ function parseMarkdown(src,_lv){
       var _pgn=(pgm[1]||'').trim();
       if(_pgn==='noll'||_pgn==='1'||_pgn==='i'||_pgn==='I'){
         if(!(_LV.page>_lv)){
+          _dgE(i,'D231','page 不能在这里再开：页区套页区，或 full/fill 区里开 page（主链层级 page＞full＞fill）');
           /* v2.18.0 越界/同族：page 是主链最外层（rank 1），_lv>=1 时不可
              再开（页区套页区、full/fill 里的 page）。标记行按原文露出，
              i++ 推进，内容与结束行交主循环照常渲染——end 行走孤 end 兜底
@@ -1784,18 +1889,21 @@ function parseMarkdown(src,_lv){
         }
         var _pgr=_scanBeginBlock(lines,i+1,['page']);
         var pginner=_pgr.inner,pgclosed=_pgr.closed,pgj=_pgr.next;
+        _dgZw(pginner);
         if(pgclosed){
           _pgRegSeq++;
           html+='<div class="page-region" data-pn="'+_pgn+'" data-pr-id="pr'+_pgRegSeq+'">'+
-            parseMarkdown(pginner.join('\n'),_LV.page)+'</div>';
+            parseMarkdown(pginner.join('\n'),_LV.page,opts,_base+i+1)+'</div>';
           i=pgj;
           continue;
         }
+        _dgE(i,'D233','page 未闭合：缺 @@ end page，内容照常渲染');
         html+='<p>'+parseInline(line)+'</p>';
         i++;
         continue;
       }
       /* 参数非法：不接管，落到下面普通段落按原文露出 */
+      _dgE(i,'D232','page 参数非法：{...} 里须为 noll / 1 / i / I');_dgHit=true;
     }
     /* v2.19.0 并写（end 集合语义）：@@ begin page{noll|1|i|I} full{t|m|b} color{X} …
        begin 并写 = 展开成嵌套：page 压 full 压 color，一层一个 div，容器
@@ -1864,7 +1972,7 @@ function parseMarkdown(src,_lv){
         }
         if(_mgOk){
           /* 分段扫描：per-family 深度计数 + openSet */
-          var _mgSegs=[],_mgBuf=[],_mgOpen={},_mgDepth={page:0,full:0,fill:0,color:0},_mgOpenN=_mgl.length,_mgOk2=true,_mgK2=i+1;
+          var _mgSegs=[],_mgBuf=[],_mgOpen={},_mgDepth={page:0,full:0,fill:0,color:0},_mgOpenN=_mgl.length,_mgOk2=true,_mgK2=i+1,_mgSegAt=i+1;
           for(var _md=0;_md<_mgl.length;_md++){_mgOpen[_mgl[_md].f]=true;_mgDepth[_mgl[_md].f]=1;}
           while(_mgK2<lines.length){
             var _mln=lines[_mgK2];
@@ -1890,11 +1998,12 @@ function parseMarkdown(src,_lv){
                 /* 分段点：本段收尾，成员移出集合；end 行是结构行不进内容 */
                 var _oarr=[];
                 for(var _oq=0;_oq<_mgl.length;_oq++){if(_mgOpen[_mgl[_oq].f])_oarr.push(_mgl[_oq].f);}
-                _mgSegs.push({c:_mgBuf,o:_oarr});
+                _mgSegs.push({c:_mgBuf,o:_oarr,at:_mgSegAt});
                 _mgBuf=[];
                 for(var _mc2=0;_mc2<_mgClose.length;_mc2++){delete _mgOpen[_mgClose[_mc2]];}
                 _mgOpenN-=_mgClose.length;
                 _mgK2++;
+                _mgSegAt=_mgK2;
                 if(_mgOpenN===0){break;}   /* 集合清空 → 块闭合 */
               }else{
                 _mgBuf.push(_mln);_mgK2++;   /* 纯内层闭合：行进内容交递归 */
@@ -1928,7 +2037,7 @@ function parseMarkdown(src,_lv){
                   _mgHtml+='<div class="mde-color" style="color:'+_mgA.color+'">';
                 }
               }
-              if(_mgSegs[_ms].c.length){_mgHtml+=parseMarkdown(_mgSegs[_ms].c.join('\n'),_mgLv);}
+              if(_mgSegs[_ms].c.length){_mgHtml+=parseMarkdown(_mgSegs[_ms].c.join('\n'),_mgLv,opts,_base+_mgSegs[_ms].at);}
               _mgPrev=_so;
             }
             for(var _cl3=_mgPrev.length-1;_cl3>=0;_cl3--){_mgHtml+='</div>';}
@@ -1936,6 +2045,10 @@ function parseMarkdown(src,_lv){
             i=_mgK2;
             continue;
           }
+          if(!_mgOk2){_dgE(_mgK2,'D242','并写块：@@ end 关闭了未打开的家族');_dgHit=true;}
+          else{_dgE(i,'D243','并写块未闭合：文末仍有开着的 page/full/color 层');_dgHit=true;}
+        }else{
+          _dgE(i,'D241','并写 begin 不成立：家族顺序须 page→full→color、同族不重复、参数合法');_dgHit=true;
         }
       }
       /* 不成立（单家族 / 参数非法 / 顺序错 / end 未开家族 / 未闭合）→ 落到下面普通段落按原文露出 */
@@ -1952,6 +2065,7 @@ function parseMarkdown(src,_lv){
          if(lines[dj].indexOf('}')>=0){dclosed=true;dj++;break;}
          dj++;
        }
+       if(!dclosed){_dgE(i,'D301','@@ MDE 数据点未闭合：到文末没有 }');_dgHit=true;}
        if(dclosed){
          var dfull=dchunks.join('\n');
          var dmm=dfull.match(/@@ MDE(_{1,2})([\w\u4e00-\u9fff.-]*)(?::([23]))?(\([^()]*\))?\{([\s\S]*?)\}/);
@@ -1972,7 +2086,7 @@ function parseMarkdown(src,_lv){
                }else{
                  /* 显性（v2.6.12）：表格原文照原样渲染成真表格。行列裁剪
                     (RxC) 只作用于 data-dp-val，屏幕显示整张原表 */
-                 dsp='<div class="mde-dp mde-dp-block"'+dattrs+'>'+parseMarkdown(_dpTableSrc(dmm[5]),_lv)+'</div>';
+                 dsp='<div class="mde-dp mde-dp-block"'+dattrs+'>'+parseMarkdown(_dpTableSrc(dmm[5]),_lv,null,0)+'</div>';
                  dspBlock=true;
                }
              }
@@ -1997,6 +2111,7 @@ function parseMarkdown(src,_lv){
              continue;
            }
            /* fail-closed：整块按普通段落（含标记行原文） */
+           _dgE(i,'D302','@@ MDE 数据点内容不合规范：(( )) 混用／键值段缺 ==／表格行列或坐标错——按普通文本渲染');
            html+='<p>'+parseInline(dfull.replace(/\n/g,' '))+'</p>';
            i=dj;curInd=0;
            continue;
@@ -2006,9 +2121,10 @@ function parseMarkdown(src,_lv){
     /* v2.13.2 分隔线与列表内共用同一判据（_isHrLine），两条路径不得分叉 */
     if(_isHrLine(line)){html+='<hr>';i++;curInd=0;continue;}
     if(/^[ ]*>/.test(line)){
+      var _qAt=i;
       var quote=[];
       while(i<lines.length && /^[ ]*>/.test(lines[i])){quote.push(lines[i].replace(/^[ ]*>[ ]?/,''));i++;}
-      html+='<blockquote>'+parseMarkdown(quote.join('\n'),_lv)+'</blockquote>';
+      html+='<blockquote>'+parseMarkdown(quote.join('\n'),_lv,opts,_base+_qAt)+'</blockquote>';
       curInd=IPX.quote;
       continue;
     }
@@ -2041,7 +2157,19 @@ function parseMarkdown(src,_lv){
        未推进；若照旧输出空 <p> 并回到循环，就会永远停在同一行（主线程死锁 = 打开
        文件即卡死，文末未闭合数据点必中）。这里保证每轮至少吃掉一行，该行按普通
        文本 fail-closed 渲染。 */
-    if(!para.length){para.push(lines[i]);i++;}
+    if(!para.length){
+      para.push(lines[i]);i++;
+      /* v2.22.0 行尾兜底：@@ 方言前缀行没被任何分支接管＝未生效（fail-closed
+         按普通文本渲染）。分支内已上报过的行（_dgHit）不重复报。 */
+      if(!_dgHit&&/^[ ]{0,3}@@/.test(para[0])){
+        var _dgT=(para[0].match(/^[ ]{0,3}@@\s*(begin|end|caption|blank|MDE)/)||[])[1]||'';
+        if(_dgT==='end')_dgE(i-1,'D401','孤 @@ end：前面没有打开的对应 begin 块（检查家族名与配对）');
+        else if(_dgT==='begin')_dgE(i-1,'D402','@@ begin 未生效：家族名／参数／嵌套位置有误（fill 分栏／full 独占页／page 页区／color 着色）');
+        else if(_dgT==='caption')_dgE(i-1,'D403','@@ caption 未生效：其后必须紧跟表格（下一行表体、再下一行分隔行）');
+        else if(_dgT==='blank')_dgE(i-1,'D404','@@ blank 未生效：须独占一行，n 为正数（0.1~50）');
+        else _dgE(i-1,'D405','以 @@ 开头但不是有效方言指令，按普通文本渲染','warn');
+      }
+    }
     var _pd=parseInline(para.join('\n'));
     var _fg=_asFigure(_pd);
     html+=_fg?_fg:('<p>'+_pd.replace(/\n/g,'<br>')+'</p>');
@@ -2054,7 +2182,7 @@ function parseMarkdown(src,_lv){
 /* 中英双语（v2.15.0）：字典 key = 界面中文原文。默认 zh，切换后只翻 UI 容器，
    预览与编辑区（用户内容）永不触碰。动态节点由 applyLang 的观察器兜住。 */
 var LANG_KEY='md-editor-lang';
-var I18N_EN={"新建": "New","分屏": "Split","跟随": "Follow","暗色": "Dark","亮色": "Light","文件": "Files","打开": "Open","打印": "Print","排版": "TS","保存": "Save","另存为": "As…","替换": "Replace","全部": "All","▶ 运行": "▶ Run","运行中…": "Running…","默认文档": "Default doc","已存入缓存": "Cached","编辑中...": "Editing…","本工具由 AI 生成": "AI-generated","本工具由 AI 辅助生成": "Made with AI assistance","本工具由 AI 辅助生成 (AI-assisted)": "Made with AI assistance","文档批注数": "Number of notes","仅编辑": "Editor","仅预览": "Preview","不跟随": "No follow","大纲": "Outline","查找…": "Find…","区分大小写": "Match case","正则表达式": "Regular expression","全字匹配": "Whole word","上一个（Shift+Enter）": "Previous (Shift+Enter)","下一个（Enter）": "Next (Enter)","展开/收起替换（Ctrl+H）": "Toggle replace (Ctrl+H)","关闭（Esc）": "Close (Esc)","替换为（\\n 换行、\\t 制表；正则模式支持 $1 引用）": "Replace with (\\n newline, \\t tab; $1 backreference in regex mode)","替换当前命中（Ctrl+Z 可撤销）": "Replace this match (Ctrl+Z to undo)","全部替换（整体一步，Ctrl+Z 一次撤销）": "Replace all (one step, undo once with Ctrl+Z)","运行全部 @@ MDE 执行点（手动模式）": "Run all @@ MDE exec points (manual mode)","视图切换": "Switch view","主题切换": "Switch theme","最近文件与切换": "Recent files","打开 .md 文件": "Open a .md file","新建文档 (Ctrl+N)": "New document (Ctrl+N)","保存（Ctrl+S）": "Save (Ctrl+S)","另存为…": "Save as…","导出 HTML": "Export HTML","导出 Word(.docx)：保留样式与可编辑公式": "Export Word (.docx): styles and editable formulas preserved","AI 设置：润色 / 智能备注的后端与模型": "AI settings: backend and model for polish / smart notes","排版设置：字体/表格/缩进/自动落盘": "Typesetting: fonts / tables / indent / autosave","low runner：写/生成 Python run，供 @@ MDE 数据点与执行点调用": "low runner: write/generate Python runs for @@ MDE data and exec points","预览跟随编辑区滚动（仅分屏模式生效），点击开/关": "Preview follows editor scroll (split view only). Click to toggle","打印：生成分页版 HTML（纸张/页码/目录）并在浏览器打开，Ctrl+P 即可打印或存为 PDF": "Print: build a paged HTML (paper, page numbers, contents) and open it; Ctrl+P to print or save as PDF","在这里写 Markdown...": "Write Markdown here…","Markdown 源码编辑区": "Markdown source editor","关闭": "Close","取消": "Cancel","应用": "Apply","保存文档": "Save document","文件名": "File name","格式": "Format","未命名": "Untitled","保存目录": "Folder","浏览…": "Browse…","Markdown 文档（.md，图片存同名 .assets 目录）": "Markdown (.md, images in a sibling .assets folder)","自包含文档（.smd，单文件含全部图片）": "Self-contained (.smd, all images in one file)","可直接粘贴路径，或点「浏览…」": "Paste a path, or click Browse…","排版设置": "Typesetting","自动落盘间隔（分钟，0=仅手动）": "Autosave interval (min, 0 = manual only)","字体 / 字号 / 对齐（字号留空 = 保持默认，单位磅；本机字体由后端自动枚举）": "Font / size / align (blank size keeps default, unit pt; local fonts listed by backend)","正文": "Body","H1 标题": "H1","H2 标题": "H2","H3 标题": "H3","H4~H6 标题": "H4–H6","引用块": "Quote","列表": "List","表格": "Table","代码": "Code","公式（KaTeX，字体固定）": "Math (KaTeX, fixed font)","图片": "Image","图题": "Figure caption","表题": "Table caption","本机字体": "Local fonts","(默认)": "(default)","默认": "Default","左对齐": "Left","居中": "Center","右对齐": "Right","两端对齐": "Justify","无": "None","首行缩进": "First line","悬挂缩进": "Hanging","整体缩进": "Block","磅": "pt","段落缩进（按元素独立，字符数 × 当前字号自动换算）": "Paragraph indent (per element; chars × current size)","列表标记外凸（续行悬挂）": "Hanging list markers","编号/圆点站到文字块外面，多行项的续行与首行文字左沿对齐；关闭则续行顶格（v2.13.5 及更早的口径）": "Markers sit outside the text block, wrapped lines align with the first line. Off = wrapped lines flush left (behaviour before v2.14)","段间距（正文块之间的垂直间距，单位 em＝正文字号；@@ blank{n} 逐处硬控可覆盖它）": "Paragraph gap (em = body size; @@ blank{n} overrides per spot)","统一段间距": "Uniform paragraph gap","表格样式": "Table style","三线表（去竖线，三条横线）": "Booktabs (no vertical rules, three rules)","表头底色": "Header shading","首列底色": "First column shading","页面（作用于「打印」导出）": "Page (used by the Print export)","纸张": "Paper","自定义": "Custom","自定义宽 × 高（mm）": "Custom width × height (mm)","宽": "W","高": "H","页边距 上/右/下/左（mm）": "Margins top/right/bottom/left (mm)","页码（打印导出时渲染）": "Page numbers (rendered on Print export)","页码": "Page number","显示": "Show","外侧（奇右偶左）": "Outside (right odd, left even)","底部居中": "Bottom center","底部右侧": "Bottom right","底部左侧": "Bottom left","顶部居中": "Top center","顶部右侧": "Top right","页码模板与字号（{p}=页码，{P}=全文总页数，{N}=本区总页数）": "Template and size ({p} = page, {P} = total pages, {N} = pages in this region)","目录（打印导出时自动生成，条目带页码）": "Contents (built on Print export, entries carry page numbers)","目录": "Contents","不生成": "None","生成": "Generate","置于文首": "At the start","第一个 # 之下": "After the first #","目录独占一页（后续 ## 与正文强制新页，不得侵入）": "Contents on its own page (following ## and body start a new page)","不计入目录（勾选的级别照常渲染、只是不进目录）": "Excluded from contents (checked levels still render, just not listed)","标题自动序号（只作用于预览与导出，不改源文；范围 ## ~ #####）": "Auto-number headings (preview and export only, source untouched; ## to #####)","自动序号": "Numbering","中文体　一、（一）1.（1）": "Chinese  一、(一) 1.(1)","层级体　1 / 1.1 / 1.1.1": "Decimal  1 / 1.1 / 1.1.1","图 / 表编号": "Figure / table numbering","全篇连续　图 1 / 表 1": "Whole document  图 1 / 表 1","按章重编　图 1-1 / 表 2-1": "Per chapter  图 1-1 / 表 2-1","编号章级": "Chapter level","##　二级标题为章（默认）": "##  (default)","#　一级标题为章": "#","###　三级标题为章": "###","第 {p} 页 / 共 {P} 页": "Page {p} of {P}","low runner · run 库（编辑器级，全文档共用）": "low runner · run library (editor-wide, shared by all documents)","已保存": "Saved","运行": "Run","立即": "Immediately","等待": "Wait","秒": "s","手动": "Manual","名称": "Name","依赖目录": "Deps folder","AI 生成": "AI generate","报告 AI 生成内容": "Report AI content","保存入库": "Save to library","清空编辑区，另写一个新 run": "Clear the editor and start a new run","渲染完成后 0.4 秒自动运行（原行为）": "Run 0.4s after rendering (previous behaviour)","停止输入 N 秒后自动运行": "Run N seconds after typing stops","等待秒数": "Wait seconds","不自动运行：执行点旁 ▶ 单点运行，或左下角「▶ 运行」全部运行": "Never auto-run: use ▶ beside a point, or ▶ Run in the status bar","如 dark、统计（即文件名，@@ MDE import 用它）": "e.g. dark, stats (also the file name used by @@ MDE import)","打开 runtime/pylibs 目录，pip --target 装三方包": "Open runtime/pylibs to pip install --target third-party packages","对 AI 说出需求，如：求数据点里所有数字之和 / 统计某词出现次数 / 画折线图…（生成后需人工查阅）": "Describe what you need, e.g. sum all numbers in the data points / count a word / draw a line chart… (review the result)","向开发者报告不当的 AI 生成内容（微软商店政策 11.16）": "Report inappropriate AI-generated content (Microsoft Store policy 11.16)","先在下方输入框说出需求": "Describe what you need in the box below","AI 生成中（约 10~60 秒，取决于后端），完成后自动填入代码框…": "Generating (about 10–60 s depending on the backend); it will fill the code box…","AI 已生成——人工查阅后再「保存入库」": "Generated. Review it, then Save to library","（AI 未给名字，请手动命名）": " (no name from AI, please name it)","AI 生成失败：": "AI generation failed: ","\n可在工具栏「AI」里检查后端配置。": "\nCheck the backend in AI settings.","代码为空": "Code is empty","请先命名（@@ MDE import 的名字就是它）": "Name it first (this is the name used by @@ MDE import)","尚无文件路径，请先「另存为」": "No file path yet, use Save as first","未另存为": "Not saved yet","已覆盖 ": "Overwrote ","已保存 ": "Saved ","已覆盖": "Overwrote","（pip 名 ": " (pip name ","——运行将失败，请先安装：</div>": " — the run will fail, install it first:</div>","留空则按名称": "Blank uses the name","上一次生成": "Previous output","删": "Del","删除 ": "Delete ","（点两次确认）": " (click twice to confirm)","确定后删不掉": "Cannot be undone","确认删": "Confirm","只显示一次": "Shown only once","已载入 ": "Loaded ","——修改后「保存」即覆盖": " — Save overwrites it","读取失败：": "Read failed: ","run 库读取失败：": "Run library unreadable: ","待运行": "pending","▶ 待运行": "▶ Pending","全部运行": "Run all","打开就自动跑": "Runs on open","切手动不一定显示 ▶": "Manual mode may hide ▶","改别处 = 白跑一次": "Editing elsewhere wastes a run"," · 全局 ": " · global ","运行此执行点": "Run this point","文件改了但数没变": "File changed, data did not","有未完成": "Unfinished","外部改了文件 → 复位后仍命中旧结果": "File changed outside, reset still hits the old result","全局执行点须返回列表（得到 ": "Global points must return a list (got ","返回 ": "Returned "," 项 ≠ 标记 ": " items ≠ "," 个": " markers","执行失败": "Run failed","网络错误": "Network error","缺少包 ": "Missing package ","重试": "Retry","数据没变": "Data unchanged","数据变了": "Data changed","已替 data 运行": "Ran on data"," 个执行点未运行": " exec points not run"," 个执行点运行失败（红色错误信息就在执行点旁，▶ 可重试）": " exec points failed (the red message sits beside the point; ▶ retries)"," 个执行点已置为待运行": " exec points set back to pending","AI 设置（润色 / 智能备注）": "AI settings (polish / smart notes)","后端": "Backend","LM Studio（本地 :1234）": "LM Studio (local :1234)","Ollama（本地 :11434）": "Ollama (local :11434)","OpenAI 兼容（外部 API）": "OpenAI-compatible (external API)","服务地址（留空按后端默认端口）": "Endpoint (blank = backend default port)","API Key（OpenAI 兼容后端必填）": "API Key (required for OpenAI-compatible)","模型（下拉为后端实加载的模型）": "Model (list comes from the backend)","刷新": "Refresh","超时（秒）": "Timeout (s)","最大输出 tokens": "Max output tokens","温度 temperature（0~2）": "Temperature (0–2)","联网查询（润色 / AI 解释时检索网络资料）": "Web search (for polish / explain)","启用联网查询（关闭则 AI 仅凭自身润色/解释）": "Enable web search (off = model knowledge only)","搜索源": "Search provider","DuckDuckGo（免费，无需 Key）": "DuckDuckGo (free, no key)","Tavily（需 API Key）": "Tavily (needs an API key)","Google Custom Search（需 Key + CX）": "Google Custom Search (needs key + CX)","Bing Search（需 API Key）": "Bing Search (needs an API key)","自定义 API": "Custom API","API Key（Tavily / 自定义 API 用）": "API Key (Tavily / custom API)","自定义 API URL（{q} 与 {key} 占位）": "Custom API URL ({q} and {key} placeholders)","结果条数（1~10）": "Results (1–10)","RAG 知识库（检索增强润色 / 解释）": "RAG knowledge base (retrieval-augmented)","rag-assistant 路径（含 main.py 的目录）": "rag-assistant path (the folder holding main.py)","知识库（空 = 自动路由）": "Knowledge base (blank = auto)","RAG 服务（端口 8767）": "RAG service (port 8767)","探测中…": "Probing…","启动": "Start","停止": "Stop","测试连接": "Test connection","本地推理需先启动 LM Studio / Ollama 并加载模型；OpenAI 兼容后端填外部 API 地址与 Key（DeepSeek、硅基流动等均可用）；润色与「AI 解释」都走此配置。": "Local inference needs LM Studio / Ollama running with a model loaded; for OpenAI-compatible backends fill in the endpoint and key (DeepSeek, SiliconFlow and others work). Polish and Explain both use this config.","联网查询开启后，润色 / AI 解释先检索网络资料注入提示词，搜索失败自动降级为纯模型结果；与 RAG 相互独立。": "With web search on, polish / explain first pull web results into the prompt; failures fall back to the model alone. Independent of RAG.","「RAG润色 / RAG解释」在上述基础上检索 rag-assistant 知识库作为参考资料，需先在下方填写路径并启动 RAG 服务；启动/停止仅手动触发，退出编辑器不影响其运行。": "RAG polish / RAG explain also retrieve from the rag-assistant knowledge base. Set the path below and start the service first; start and stop are manual, and quitting the editor leaves it running.","重新探测 RAG 服务与知识库列表": "Re-probe the RAG service and knowledge bases","（点「刷新」拉取模型列表）": " (click Refresh to list models)","（列表外）": " (not listed)","已获取 ": "Loaded "," 个模型。": " models.","模型列表获取失败：": "Could not list models: ","读取 AI 配置失败": "Could not read the AI config","读取 AI 配置失败：": "Could not read the AI config: ","测试中…": "Testing…","连接成功": "Connected","连接失败": "Connection failed","测试失败：": "Test failed: ","AI 配置已保存": "AI settings saved","（自动路由）": " (auto)","在线（": "Online ("," 个知识库）": " knowledge bases)","启动中…（冷加载需数十秒）": "Starting… (cold start can take tens of seconds)","启动中…": "Starting…","RAG 启动失败：": "RAG failed to start: ","RAG 服务已停止": "RAG service stopped","RAG 停止失败：": "Could not stop the RAG service: "," 个结果": " results","无结果": "No results","离线": "Offline","还活着": "Reachable","批注": "Annotate","标注片段（跟文本内容走，原文编辑后自动同步；删光自动失效）": "Anchor text (follows the content and re-syncs after edits; gone when deleted)","AI 解释": "AI explain","RAG 解释": "RAG explain","删除标注": "Delete note","完成": "Done","备注": "Note","润色": "Polish","RAG润色": "RAG polish","AI 润色预览": "AI polish preview","原文": "Original","润色后（可先手动微调）": "Polished (tweak before applying)","替换原文": "Replace","写点备注…": "Add a note…","需 RAG 服务在线（AI 设置中启动）": "Requires the RAG service (start it in AI settings)","给选中片段加批注": "Add a note to the selection","AI 润色选中片段": "Polish the selection with AI","基于 RAG 知识库检索增强润色（需 RAG 服务在线）": "Retrieval-augmented polish (requires the RAG service)","解释中…": "Explaining…","已结合联网资料解释": "Explained with web results","联网搜索失败，已用纯模型结果": "Web search failed, used the model alone","AI 解释失败：": "Explain failed: ","RAG 解释失败：": "RAG explain failed: ","\n可在工具栏「AI」里检查 RAG 服务状态。": "\nCheck the RAG service in AI settings.","选中内容为空": "Nothing selected","无法标注该选区（跨元素边界）": "Cannot anchor this selection (crosses element boundaries)","润色中…（本地模型可能需要一些时间）": "Polishing… (a local model can take a while)","已结合联网资料润色": "Polished with web results","润色失败：": "Polish failed: ","检索知识库并润色中…（RAG 冷启动或本地模型可能需要一些时间）": "Retrieving and polishing… (RAG cold start or a local model can take a while)","RAG 润色失败：": "RAG polish failed: ","原文已变化，无法定位选区，请重新选择后重试。": "The text changed and the selection could not be located. Select again and retry.","报告将发送给开发者（": "The report goes to the developer (","）。未配置邮件客户端时，可复制下方内容自行粘贴发送。": "). With no mail client configured, copy the text below and send it yourself.","问题描述（可留空）": "Problem description (optional)","自动附带的报告内容（只读）": "Attached report (read-only)","复制报告内容": "Copy report","打开邮件客户端": "Open mail client","例如：内容与事实不符 / 出现不当表述 / 代码无法运行…": "e.g. factually wrong / inappropriate wording / code does not run…","报告内容已复制，请粘贴发送给开发者": "Report copied, paste it to the developer","报告内容已复制，请粘贴发送到 ": "Report copied, paste it to ","复制失败，请手动全选复制": "Copy failed, select all and copy manually","可复制下方内容发送给开发者。": "Copy the text below and send it to the developer.","（无）": "(none)","新标签页": "New tab","打开失败：": "Open failed: ","读取失败": "Read failed","读取文件失败：": "Could not read the file: ","已保存到原文件": "Saved to the original file","保存失败：": "Save failed: ","已载入原文件": "Loaded the original file","已打开：": "Opened: ","已载入": "Loaded","载入内置文档失败：": "Could not load the built-in document: ","使用指南": "User guide","版权与开源组件声明": "Copyright and open-source notices","通过「打开」按钮选择（浏览器不提供完整路径）": "Chosen with the Open button (the browser hides the full path)","该文件通过「打开」按钮选择，浏览器不提供完整路径，无法自动重载。\n请通过右键菜单打开它，或再次用「打开」选择。": "This file was picked with the Open button, so the browser hides its path and it cannot reload automatically.\nOpen it from the context menu, or pick it again with Open.","文档尚未保存，无法打开副本": "Save the document before opening a copy","已用系统程序打开副本": "Opened a copy with the system default app","用系统关联程序打开这份副本": "Open this copy with the system default app","选择保存位置失败：": "Could not choose a save location: ","粘贴图片前请先保存文档（Ctrl+S），图片将存入同名 .assets 目录。": "Save the document before pasting images (Ctrl+S); they go into a sibling .assets folder.","图片保存失败：": "Could not save the image: ","粘贴文件前请先保存文档（Ctrl+S），文件将存入同名 .assets 目录。": "Save the document before pasting files (Ctrl+S); they go into a sibling .assets folder.","文件超过 20MB 上限（当前 ": "File exceeds the 20 MB limit (currently ","正在写入 ": "Writing ","已插入数据点：": "Data point inserted: ","文件写入失败：": "Write failed: ","排版已更新（缓存）": "Typesetting updated (cached)","已落盘 ": "Written ","(未命名)": "(untitled)","文档": "Documents","桌面": "Desktop","下载": "Downloads","用户目录": "Home","上次目录": "Last folder","请先选择保存目录（点「浏览…」）": "Choose a folder first (click Browse…)","未命名.md": "Untitled.md","未命名文档": "Untitled document","预览不存在": "Preview not found","已导出：": "Exported: ","导出失败：": "Export failed: ","未知错误": "Unknown error","无法导出：": "Cannot export: ","。请先运行并确认全部执行点结果后再导出": ". Run the exec points and confirm their results before exporting","（状态栏「▶ 运行」一次跑全部）": "(▶ Run in the status bar runs them all)","正在生成打印版，请稍候…": "Building the print version…","打印导出失败（数据序列化错误）：": "Print export failed (data serialisation): ","导出 Word 文档": "Export Word","后台静默落盘 + 浏览器下载": "Saved in the background and downloaded by the browser","运行错误或失败静默导出": "Export silently on errors or failures","来源：": "Source: ","\n时间：": "\nTime: ","构建：": "Build: ","— AI 输出内容（自动附带，最多 1000 字）—\n": "— AI output (attached automatically, up to 1000 chars) —\n","— 问题描述 —\n": "— Problem description —\n","MDEditor AI 生成内容报告（": "MDEditor AI content report (","已恢复未落盘草稿": "Recovered an unsaved draft","检测到未落盘的本地草稿，已为你恢复（磁盘版本未被覆盖）": "An unsaved local draft was found and restored (the file on disk was not overwritten)","用磁盘版本": "Use the file on disk","恢复": "Restore","发现未完成的保存备份（": "Found an unfinished save backup (","），是否用它恢复本文档？": "). Restore this document from it?","恢复失败：": "Restore failed: ","已从保存备份恢复": "Restored from the save backup","就近": "Nearby","已到文末，从头继续": "Reached the end, continuing from the top","替换失败": "Replace failed","无命中": "No match","替换后与原文相同": "Replacement is identical to the original","已替换 ": "Replaced "," 处（Ctrl+Z 一步撤销）": " occurrences (Ctrl+Z undoes in one step)","正则表达式无效": "Invalid regular expression","已撤销全部替换": "Undid all replacements","渲染失败": "Render failed","<h2>请使用正确方式打开</h2>": "<h2>Please open this page properly</h2>","<p>本页面被直接双击打开（file://），此方式<b>没有后端服务</b>，公式、图片、保存、导出均不可用。</p>": "<p>This page was opened directly from disk (file://). <b>There is no backend</b>, so formulas, images, saving and exporting are unavailable.</p>","<p>正确打开方式（任选其一）：</p>": "<p>Open it one of these ways:</p>","<ol><li>右键任意 .md 文件 →「Open with Markdown Editor」</li>": "<ol><li>Right-click any .md file and choose Open with Markdown Editor</li>","<li>双击工具目录中的 <b>MarkdownEditor.exe</b></li>": "<li>Run <b>MarkdownEditor.exe</b> from the tool folder</li>","<li>双击 .md 文件（已关联本编辑器）</li></ol>": "<li>Double-click a .md file already associated with this editor</li></ol>","<p>若点下方按钮无反应，说明后端服务未运行——先做上面第 2 步。</p>": "<p>If the button below does nothing, the backend is not running. Do step 2 above first.</p>","一级标题": "H1","二级标题": "H2","标题": "Heading","加粗": "Bold","粗体": "Bold","斜体": "Italic","删除线": "Strikethrough","删除": "Strike","行内代码": "Code","引用": "Quote","无序列表": "Bullets","列表项": "List item","序号": "Numbering","有序列表": "Numbered list","任务": "Task","任务列表": "Task list","链接": "Link","插入链接": "Insert link","链接文字": "Link text","插入表格": "Insert table","图表自动编号（图、表各自计数；只作用于预览与导出，不改源文）": "Auto-number figures and tables (each counted separately; preview and export only, source untouched)","内置文档": "Built-in documents","内置文档 · 点击载入（可编辑/另存为）": "Built-in · click to load (editable, save as copy)","回到初始示例状态": "Reset to the initial sample","最近文件": "Recent files","暂无标题": "No headings","默认文档（使用指南）": "Default document (user guide)","切换界面语言：中文 / English": "Switch the interface language: 中文 / English","保存到 ": "Save to ","图": "Figure","表": "Table","图片输出（「打印」与导出；预览始终按栏宽缩略，不受此项影响）": "Image output (Print and exports; the preview always uses a column-width thumbnail and is unaffected)","像素": "Pixels","原图输出（不压缩）": "Original (no compression)","实图输出 · 300dpi（印刷）": "Fit to display · 300 dpi (print)","实图输出 · 150dpi（电子交付）": "Fit to display · 150 dpi (screen)","说明": "Note","按每张图的实际显示宽度换算目标像素再降采样：只缩不放、压完不变小就回滚用原图；源文件与磁盘上的图一个字节都不动。150dpi 下含小字的截图会发糊，慎用。": "Each image is downscaled to the pixels its real display width needs: never enlarged, and reverted to the original when the result is not smaller. The source files on disk are never touched. At 150 dpi screenshots with small text lose sharpness, so use with care.","def run(data):\n    # data['kv'] = {'键': '值'}（框架按第一个 == 剥离）\n    # data['raw'] = 数据点原文列表（== 不够用时自行解析）\n    return str(...)  # 返回 str 替换执行点；作图存当前目录返回 ![](文件名)": "def run(data):\n    # data['kv'] = {'key': 'value'} (the framework strips the first ==)\n    # data['raw'] = raw text of this data point (parse it yourself if == is not enough)\n    return str(...)  # return a str to replace the exec point; to draw a chart, save the file and return ![](file name)"};
+var I18N_EN={"新建": "New","分屏": "Split","跟随": "Follow","暗色": "Dark","亮色": "Light","文件": "Files","打开": "Open","打印": "Print","排版": "TS","保存": "Save","另存为": "As…","替换": "Replace","全部": "All","▶ 运行": "▶ Run","运行中…": "Running…","默认文档": "Default doc","已存入缓存": "Cached","编辑中...": "Editing…","本工具由 AI 生成": "AI-generated","本工具由 AI 辅助生成": "Made with AI assistance","本工具由 AI 辅助生成 (AI-assisted)": "Made with AI assistance","文档批注数": "Number of notes","仅编辑": "Editor","仅预览": "Preview","不跟随": "No follow","大纲": "Outline","查找…": "Find…","区分大小写": "Match case","正则表达式": "Regular expression","全字匹配": "Whole word","上一个（Shift+Enter）": "Previous (Shift+Enter)","下一个（Enter）": "Next (Enter)","展开/收起替换（Ctrl+H）": "Toggle replace (Ctrl+H)","关闭（Esc）": "Close (Esc)","替换为（\\n 换行、\\t 制表；正则模式支持 $1 引用）": "Replace with (\\n newline, \\t tab; $1 backreference in regex mode)","替换当前命中（Ctrl+Z 可撤销）": "Replace this match (Ctrl+Z to undo)","全部替换（整体一步，Ctrl+Z 一次撤销）": "Replace all (one step, undo once with Ctrl+Z)","运行全部 @@ MDE 执行点（手动模式）": "Run all @@ MDE exec points (manual mode)","视图切换": "Switch view","主题切换": "Switch theme","最近文件与切换": "Recent files","打开 .md 文件": "Open a .md file","新建文档 (Ctrl+N)": "New document (Ctrl+N)","保存（Ctrl+S）": "Save (Ctrl+S)","另存为…": "Save as…","导出 HTML": "Export HTML","导出 Word(.docx)：保留样式与可编辑公式": "Export Word (.docx): styles and editable formulas preserved","AI 设置：润色 / 智能备注的后端与模型": "AI settings: backend and model for polish / smart notes","排版设置：字体/表格/缩进/自动落盘": "Typesetting: fonts / tables / indent / autosave","low runner：写/生成 Python run，供 @@ MDE 数据点与执行点调用": "low runner: write/generate Python runs for @@ MDE data and exec points","预览跟随编辑区滚动（仅分屏模式生效），点击开/关": "Preview follows editor scroll (split view only). Click to toggle","打印：生成分页版 HTML（纸张/页码/目录）并在浏览器打开，Ctrl+P 即可打印或存为 PDF": "Print: build a paged HTML (paper, page numbers, contents) and open it; Ctrl+P to print or save as PDF","在这里写 Markdown...": "Write Markdown here…","Markdown 源码编辑区": "Markdown source editor","关闭": "Close","取消": "Cancel","应用": "Apply","保存文档": "Save document","文件名": "File name","格式": "Format","未命名": "Untitled","保存目录": "Folder","浏览…": "Browse…","Markdown 文档（.md，图片存同名 .assets 目录）": "Markdown (.md, images in a sibling .assets folder)","自包含文档（.smd，单文件含全部图片）": "Self-contained (.smd, all images in one file)","可直接粘贴路径，或点「浏览…」": "Paste a path, or click Browse…","排版设置": "Typesetting","自动落盘间隔（分钟，0=仅手动）": "Autosave interval (min, 0 = manual only)","字体 / 字号 / 对齐（字号留空 = 保持默认，单位磅；本机字体由后端自动枚举）": "Font / size / align (blank size keeps default, unit pt; local fonts listed by backend)","正文": "Body","H1 标题": "H1","H2 标题": "H2","H3 标题": "H3","H4~H6 标题": "H4–H6","引用块": "Quote","列表": "List","表格": "Table","代码": "Code","公式（KaTeX，字体固定）": "Math (KaTeX, fixed font)","图片": "Image","图题": "Figure caption","表题": "Table caption","本机字体": "Local fonts","(默认)": "(default)","默认": "Default","左对齐": "Left","居中": "Center","右对齐": "Right","两端对齐": "Justify","无": "None","首行缩进": "First line","悬挂缩进": "Hanging","整体缩进": "Block","磅": "pt","段落缩进（按元素独立，字符数 × 当前字号自动换算）": "Paragraph indent (per element; chars × current size)","列表标记外凸（续行悬挂）": "Hanging list markers","编号/圆点站到文字块外面，多行项的续行与首行文字左沿对齐；关闭则续行顶格（v2.13.5 及更早的口径）": "Markers sit outside the text block, wrapped lines align with the first line. Off = wrapped lines flush left (behaviour before v2.14)","段间距（正文块之间的垂直间距，单位 em＝正文字号；@@ blank{n} 逐处硬控可覆盖它）": "Paragraph gap (em = body size; @@ blank{n} overrides per spot)","统一段间距": "Uniform paragraph gap","表格样式": "Table style","三线表（去竖线，三条横线）": "Booktabs (no vertical rules, three rules)","表头底色": "Header shading","首列底色": "First column shading","页面（作用于「打印」导出）": "Page (used by the Print export)","纸张": "Paper","自定义": "Custom","自定义宽 × 高（mm）": "Custom width × height (mm)","宽": "W","高": "H","页边距 上/右/下/左（mm）": "Margins top/right/bottom/left (mm)","页码（打印导出时渲染）": "Page numbers (rendered on Print export)","页码": "Page number","显示": "Show","外侧（奇右偶左）": "Outside (right odd, left even)","底部居中": "Bottom center","底部右侧": "Bottom right","底部左侧": "Bottom left","顶部居中": "Top center","顶部右侧": "Top right","页码模板与字号（{p}=页码，{P}=全文总页数，{N}=本区总页数）": "Template and size ({p} = page, {P} = total pages, {N} = pages in this region)","目录（打印导出时自动生成，条目带页码）": "Contents (built on Print export, entries carry page numbers)","目录": "Contents","不生成": "None","生成": "Generate","置于文首": "At the start","第一个 # 之下": "After the first #","目录独占一页（后续 ## 与正文强制新页，不得侵入）": "Contents on its own page (following ## and body start a new page)","不计入目录（勾选的级别照常渲染、只是不进目录）": "Excluded from contents (checked levels still render, just not listed)","标题自动序号（只作用于预览与导出，不改源文；范围 ## ~ #####）": "Auto-number headings (preview and export only, source untouched; ## to #####)","自动序号": "Numbering","中文体　一、（一）1.（1）": "Chinese  一、(一) 1.(1)","层级体　1 / 1.1 / 1.1.1": "Decimal  1 / 1.1 / 1.1.1","图 / 表编号": "Figure / table numbering","全篇连续　图 1 / 表 1": "Whole document  图 1 / 表 1","按章重编　图 1-1 / 表 2-1": "Per chapter  图 1-1 / 表 2-1","编号章级": "Chapter level","##　二级标题为章（默认）": "##  (default)","#　一级标题为章": "#","###　三级标题为章": "###","第 {p} 页 / 共 {P} 页": "Page {p} of {P}","low runner · run 库（编辑器级，全文档共用）": "low runner · run library (editor-wide, shared by all documents)","已保存": "Saved","运行": "Run","立即": "Immediately","等待": "Wait","秒": "s","手动": "Manual","名称": "Name","依赖目录": "Deps folder","AI 生成": "AI generate","报告 AI 生成内容": "Report AI content","保存入库": "Save to library","清空编辑区，另写一个新 run": "Clear the editor and start a new run","渲染完成后 0.4 秒自动运行（原行为）": "Run 0.4s after rendering (previous behaviour)","停止输入 N 秒后自动运行": "Run N seconds after typing stops","等待秒数": "Wait seconds","不自动运行：执行点旁 ▶ 单点运行，或左下角「▶ 运行」全部运行": "Never auto-run: use ▶ beside a point, or ▶ Run in the status bar","如 dark、统计（即文件名，@@ MDE import 用它）": "e.g. dark, stats (also the file name used by @@ MDE import)","打开 runtime/pylibs 目录，pip --target 装三方包": "Open runtime/pylibs to pip install --target third-party packages","对 AI 说出需求，如：求数据点里所有数字之和 / 统计某词出现次数 / 画折线图…（生成后需人工查阅）": "Describe what you need, e.g. sum all numbers in the data points / count a word / draw a line chart… (review the result)","向开发者报告不当的 AI 生成内容（微软商店政策 11.16）": "Report inappropriate AI-generated content (Microsoft Store policy 11.16)","先在下方输入框说出需求": "Describe what you need in the box below","AI 生成中（约 10~60 秒，取决于后端），完成后自动填入代码框…": "Generating (about 10–60 s depending on the backend); it will fill the code box…","AI 已生成——人工查阅后再「保存入库」": "Generated. Review it, then Save to library","（AI 未给名字，请手动命名）": " (no name from AI, please name it)","AI 生成失败：": "AI generation failed: ","\n可在工具栏「AI」里检查后端配置。": "\nCheck the backend in AI settings.","代码为空": "Code is empty","请先命名（@@ MDE import 的名字就是它）": "Name it first (this is the name used by @@ MDE import)","尚无文件路径，请先「另存为」": "No file path yet, use Save as first","未另存为": "Not saved yet","已覆盖 ": "Overwrote ","已保存 ": "Saved ","已覆盖": "Overwrote","（pip 名 ": " (pip name ","——运行将失败，请先安装：</div>": " — the run will fail, install it first:</div>","留空则按名称": "Blank uses the name","上一次生成": "Previous output","删": "Del","删除 ": "Delete ","（点两次确认）": " (click twice to confirm)","确定后删不掉": "Cannot be undone","确认删": "Confirm","只显示一次": "Shown only once","已载入 ": "Loaded ","——修改后「保存」即覆盖": " — Save overwrites it","读取失败：": "Read failed: ","run 库读取失败：": "Run library unreadable: ","待运行": "pending","▶ 待运行": "▶ Pending","全部运行": "Run all","打开就自动跑": "Runs on open","切手动不一定显示 ▶": "Manual mode may hide ▶","改别处 = 白跑一次": "Editing elsewhere wastes a run"," · 全局 ": " · global ","运行此执行点": "Run this point","文件改了但数没变": "File changed, data did not","有未完成": "Unfinished","外部改了文件 → 复位后仍命中旧结果": "File changed outside, reset still hits the old result","全局执行点须返回列表（得到 ": "Global points must return a list (got ","返回 ": "Returned "," 项 ≠ 标记 ": " items ≠ "," 个": " markers","执行失败": "Run failed","网络错误": "Network error","缺少包 ": "Missing package ","重试": "Retry","数据没变": "Data unchanged","数据变了": "Data changed","已替 data 运行": "Ran on data"," 个执行点未运行": " exec points not run"," 个执行点运行失败（红色错误信息就在执行点旁，▶ 可重试）": " exec points failed (the red message sits beside the point; ▶ retries)"," 个执行点已置为待运行": " exec points set back to pending","AI 设置（润色 / 智能备注）": "AI settings (polish / smart notes)","后端": "Backend","LM Studio（本地 :1234）": "LM Studio (local :1234)","Ollama（本地 :11434）": "Ollama (local :11434)","OpenAI 兼容（外部 API）": "OpenAI-compatible (external API)","服务地址（留空按后端默认端口）": "Endpoint (blank = backend default port)","API Key（OpenAI 兼容后端必填）": "API Key (required for OpenAI-compatible)","模型（下拉为后端实加载的模型）": "Model (list comes from the backend)","刷新": "Refresh","超时（秒）": "Timeout (s)","最大输出 tokens": "Max output tokens","温度 temperature（0~2）": "Temperature (0–2)","联网查询（润色 / AI 解释时检索网络资料）": "Web search (for polish / explain)","启用联网查询（关闭则 AI 仅凭自身润色/解释）": "Enable web search (off = model knowledge only)","搜索源": "Search provider","DuckDuckGo（免费，无需 Key）": "DuckDuckGo (free, no key)","Tavily（需 API Key）": "Tavily (needs an API key)","Google Custom Search（需 Key + CX）": "Google Custom Search (needs key + CX)","Bing Search（需 API Key）": "Bing Search (needs an API key)","自定义 API": "Custom API","API Key（Tavily / 自定义 API 用）": "API Key (Tavily / custom API)","自定义 API URL（{q} 与 {key} 占位）": "Custom API URL ({q} and {key} placeholders)","结果条数（1~10）": "Results (1–10)","RAG 知识库（检索增强润色 / 解释）": "RAG knowledge base (retrieval-augmented)","rag-assistant 路径（含 main.py 的目录）": "rag-assistant path (the folder holding main.py)","知识库（空 = 自动路由）": "Knowledge base (blank = auto)","RAG 服务（端口 8767）": "RAG service (port 8767)","探测中…": "Probing…","启动": "Start","停止": "Stop","测试连接": "Test connection","本地推理需先启动 LM Studio / Ollama 并加载模型；OpenAI 兼容后端填外部 API 地址与 Key（DeepSeek、硅基流动等均可用）；润色与「AI 解释」都走此配置。": "Local inference needs LM Studio / Ollama running with a model loaded; for OpenAI-compatible backends fill in the endpoint and key (DeepSeek, SiliconFlow and others work). Polish and Explain both use this config.","联网查询开启后，润色 / AI 解释先检索网络资料注入提示词，搜索失败自动降级为纯模型结果；与 RAG 相互独立。": "With web search on, polish / explain first pull web results into the prompt; failures fall back to the model alone. Independent of RAG.","「RAG润色 / RAG解释」在上述基础上检索 rag-assistant 知识库作为参考资料，需先在下方填写路径并启动 RAG 服务；启动/停止仅手动触发，退出编辑器不影响其运行。": "RAG polish / RAG explain also retrieve from the rag-assistant knowledge base. Set the path below and start the service first; start and stop are manual, and quitting the editor leaves it running.","重新探测 RAG 服务与知识库列表": "Re-probe the RAG service and knowledge bases","（点「刷新」拉取模型列表）": " (click Refresh to list models)","（列表外）": " (not listed)","已获取 ": "Loaded "," 个模型。": " models.","模型列表获取失败：": "Could not list models: ","读取 AI 配置失败": "Could not read the AI config","读取 AI 配置失败：": "Could not read the AI config: ","测试中…": "Testing…","连接成功": "Connected","连接失败": "Connection failed","测试失败：": "Test failed: ","AI 配置已保存": "AI settings saved","（自动路由）": " (auto)","在线（": "Online ("," 个知识库）": " knowledge bases)","启动中…（冷加载需数十秒）": "Starting… (cold start can take tens of seconds)","启动中…": "Starting…","RAG 启动失败：": "RAG failed to start: ","RAG 服务已停止": "RAG service stopped","RAG 停止失败：": "Could not stop the RAG service: "," 个结果": " results","无结果": "No results","离线": "Offline","还活着": "Reachable","批注": "Annotate","标注片段（跟文本内容走，原文编辑后自动同步；删光自动失效）": "Anchor text (follows the content and re-syncs after edits; gone when deleted)","AI 解释": "AI explain","RAG 解释": "RAG explain","删除标注": "Delete note","完成": "Done","备注": "Note","润色": "Polish","RAG润色": "RAG polish","AI 润色预览": "AI polish preview","原文": "Original","润色后（可先手动微调）": "Polished (tweak before applying)","替换原文": "Replace","写点备注…": "Add a note…","需 RAG 服务在线（AI 设置中启动）": "Requires the RAG service (start it in AI settings)","给选中片段加批注": "Add a note to the selection","AI 润色选中片段": "Polish the selection with AI","基于 RAG 知识库检索增强润色（需 RAG 服务在线）": "Retrieval-augmented polish (requires the RAG service)","解释中…": "Explaining…","已结合联网资料解释": "Explained with web results","联网搜索失败，已用纯模型结果": "Web search failed, used the model alone","AI 解释失败：": "Explain failed: ","RAG 解释失败：": "RAG explain failed: ","\n可在工具栏「AI」里检查 RAG 服务状态。": "\nCheck the RAG service in AI settings.","选中内容为空": "Nothing selected","无法标注该选区（跨元素边界）": "Cannot anchor this selection (crosses element boundaries)","润色中…（本地模型可能需要一些时间）": "Polishing… (a local model can take a while)","已结合联网资料润色": "Polished with web results","润色失败：": "Polish failed: ","检索知识库并润色中…（RAG 冷启动或本地模型可能需要一些时间）": "Retrieving and polishing… (RAG cold start or a local model can take a while)","RAG 润色失败：": "RAG polish failed: ","原文已变化，无法定位选区，请重新选择后重试。": "The text changed and the selection could not be located. Select again and retry.","报告将发送给开发者（": "The report goes to the developer (","）。未配置邮件客户端时，可复制下方内容自行粘贴发送。": "). With no mail client configured, copy the text below and send it yourself.","问题描述（可留空）": "Problem description (optional)","自动附带的报告内容（只读）": "Attached report (read-only)","复制报告内容": "Copy report","打开邮件客户端": "Open mail client","例如：内容与事实不符 / 出现不当表述 / 代码无法运行…": "e.g. factually wrong / inappropriate wording / code does not run…","报告内容已复制，请粘贴发送给开发者": "Report copied, paste it to the developer","报告内容已复制，请粘贴发送到 ": "Report copied, paste it to ","复制失败，请手动全选复制": "Copy failed, select all and copy manually","可复制下方内容发送给开发者。": "Copy the text below and send it to the developer.","（无）": "(none)","新标签页": "New tab","打开失败：": "Open failed: ","读取失败": "Read failed","读取文件失败：": "Could not read the file: ","已保存到原文件": "Saved to the original file","保存失败：": "Save failed: ","已载入原文件": "Loaded the original file","已打开：": "Opened: ","已载入": "Loaded","载入内置文档失败：": "Could not load the built-in document: ","使用指南": "User guide","版权与开源组件声明": "Copyright and open-source notices","通过「打开」按钮选择（浏览器不提供完整路径）": "Chosen with the Open button (the browser hides the full path)","该文件通过「打开」按钮选择，浏览器不提供完整路径，无法自动重载。\n请通过右键菜单打开它，或再次用「打开」选择。": "This file was picked with the Open button, so the browser hides its path and it cannot reload automatically.\nOpen it from the context menu, or pick it again with Open.","文档尚未保存，无法打开副本": "Save the document before opening a copy","已用系统程序打开副本": "Opened a copy with the system default app","用系统关联程序打开这份副本": "Open this copy with the system default app","选择保存位置失败：": "Could not choose a save location: ","粘贴图片前请先保存文档（Ctrl+S），图片将存入同名 .assets 目录。": "Save the document before pasting images (Ctrl+S); they go into a sibling .assets folder.","图片保存失败：": "Could not save the image: ","粘贴文件前请先保存文档（Ctrl+S），文件将存入同名 .assets 目录。": "Save the document before pasting files (Ctrl+S); they go into a sibling .assets folder.","文件超过 20MB 上限（当前 ": "File exceeds the 20 MB limit (currently ","正在写入 ": "Writing ","已插入数据点：": "Data point inserted: ","文件写入失败：": "Write failed: ","排版已更新（缓存）": "Typesetting updated (cached)","已落盘 ": "Written ","(未命名)": "(untitled)","文档": "Documents","桌面": "Desktop","下载": "Downloads","用户目录": "Home","上次目录": "Last folder","请先选择保存目录（点「浏览…」）": "Choose a folder first (click Browse…)","未命名.md": "Untitled.md","未命名文档": "Untitled document","预览不存在": "Preview not found","已导出：": "Exported: ","导出失败：": "Export failed: ","未知错误": "Unknown error","无法导出：": "Cannot export: ","。请先运行并确认全部执行点结果后再导出": ". Run the exec points and confirm their results before exporting","（状态栏「▶ 运行」一次跑全部）": "(▶ Run in the status bar runs them all)","正在生成打印版，请稍候…": "Building the print version…","打印导出失败（数据序列化错误）：": "Print export failed (data serialisation): ","导出 Word 文档": "Export Word","后台静默落盘 + 浏览器下载": "Saved in the background and downloaded by the browser","运行错误或失败静默导出": "Export silently on errors or failures","来源：": "Source: ","\n时间：": "\nTime: ","构建：": "Build: ","— AI 输出内容（自动附带，最多 1000 字）—\n": "— AI output (attached automatically, up to 1000 chars) —\n","— 问题描述 —\n": "— Problem description —\n","MDEditor AI 生成内容报告（": "MDEditor AI content report (","已恢复未落盘草稿": "Recovered an unsaved draft","检测到未落盘的本地草稿，已为你恢复（磁盘版本未被覆盖）": "An unsaved local draft was found and restored (the file on disk was not overwritten)","用磁盘版本": "Use the file on disk","恢复": "Restore","发现未完成的保存备份（": "Found an unfinished save backup (","），是否用它恢复本文档？": "). Restore this document from it?","恢复失败：": "Restore failed: ","已从保存备份恢复": "Restored from the save backup","就近": "Nearby","已到文末，从头继续": "Reached the end, continuing from the top","替换失败": "Replace failed","无命中": "No match","替换后与原文相同": "Replacement is identical to the original","已替换 ": "Replaced "," 处（Ctrl+Z 一步撤销）": " occurrences (Ctrl+Z undoes in one step)","正则表达式无效": "Invalid regular expression","已撤销全部替换": "Undid all replacements","渲染失败": "Render failed","<h2>请使用正确方式打开</h2>": "<h2>Please open this page properly</h2>","<p>本页面被直接双击打开（file://），此方式<b>没有后端服务</b>，公式、图片、保存、导出均不可用。</p>": "<p>This page was opened directly from disk (file://). <b>There is no backend</b>, so formulas, images, saving and exporting are unavailable.</p>","<p>正确打开方式（任选其一）：</p>": "<p>Open it one of these ways:</p>","<ol><li>右键任意 .md 文件 →「Open with Markdown Editor」</li>": "<ol><li>Right-click any .md file and choose Open with Markdown Editor</li>","<li>双击工具目录中的 <b>MarkdownEditor.exe</b></li>": "<li>Run <b>MarkdownEditor.exe</b> from the tool folder</li>","<li>双击 .md 文件（已关联本编辑器）</li></ol>": "<li>Double-click a .md file already associated with this editor</li></ol>","<p>若点下方按钮无反应，说明后端服务未运行——先做上面第 2 步。</p>": "<p>If the button below does nothing, the backend is not running. Do step 2 above first.</p>","一级标题": "H1","二级标题": "H2","标题": "Heading","加粗": "Bold","粗体": "Bold","斜体": "Italic","删除线": "Strikethrough","删除": "Strike","行内代码": "Code","引用": "Quote","无序列表": "Bullets","列表项": "List item","序号": "Numbering","有序列表": "Numbered list","任务": "Task","任务列表": "Task list","链接": "Link","插入链接": "Insert link","链接文字": "Link text","插入表格": "Insert table","图表自动编号（图、表各自计数；只作用于预览与导出，不改源文）": "Auto-number figures and tables (each counted separately; preview and export only, source untouched)","内置文档": "Built-in documents","内置文档 · 点击载入（可编辑/另存为）": "Built-in · click to load (editable, save as copy)","回到初始示例状态": "Reset to the initial sample","最近文件": "Recent files","暂无标题": "No headings","默认文档（使用指南）": "Default document (user guide)","切换界面语言：中文 / English": "Switch the interface language: 中文 / English","语法提示开关：开启后光标所在行弹出方言速查（语法检查不受影响）": "Syntax hint toggle: shows the dialect cheat-sheet at the cursor when on (lint checks unaffected)","提示": "Hints","保存到 ": "Save to ","图": "Figure","表": "Table","图片输出（「打印」与导出；预览始终按栏宽缩略，不受此项影响）": "Image output (Print and exports; the preview always uses a column-width thumbnail and is unaffected)","像素": "Pixels","原图输出（不压缩）": "Original (no compression)","实图输出 · 300dpi（印刷）": "Fit to display · 300 dpi (print)","实图输出 · 150dpi（电子交付）": "Fit to display · 150 dpi (screen)","说明": "Note","按每张图的实际显示宽度换算目标像素再降采样：只缩不放、压完不变小就回滚用原图；源文件与磁盘上的图一个字节都不动。150dpi 下含小字的截图会发糊，慎用。": "Each image is downscaled to the pixels its real display width needs: never enlarged, and reverted to the original when the result is not smaller. The source files on disk are never touched. At 150 dpi screenshots with small text lose sharpness, so use with care.","def run(data):\n    # data['kv'] = {'键': '值'}（框架按第一个 == 剥离）\n    # data['raw'] = 数据点原文列表（== 不够用时自行解析）\n    return str(...)  # 返回 str 替换执行点；作图存当前目录返回 ![](文件名)": "def run(data):\n    # data['kv'] = {'key': 'value'} (the framework strips the first ==)\n    # data['raw'] = raw text of this data point (parse it yourself if == is not enough)\n    return str(...)  # return a str to replace the exec point; to draw a chart, save the file and return ![](file name)"};
 var I18N_RE=[[new RegExp("^批注 (\\d+)$"),"Notes {1}"],[new RegExp("^(\\d+) 字符$"),"{1} chars"],[new RegExp("^(\\d+) 词$"),"{1} words"],[new RegExp("^(\\d+) 行$"),"{1} lines"],[new RegExp("^第 (\\d+) 页 / 共 (\\d+) 页$"),"Page {1} of {2}"],[new RegExp("^(\\d+) 个结果$"),"{1} results"],[new RegExp("^在线（(\\d+) 个知识库）$"),"Online ({1} knowledge bases)"],[new RegExp("^已获取 (\\d+) 个模型。$"),"Loaded {1} models."],[new RegExp("^共 (\\d+) 条批注，点击正文中的虚线段可查看/编辑$"),"{1} notes; click a dashed span in the text to view or edit"],[new RegExp("^选中文字后点「备注」可加批注（AI 可在设置中配置）$"),"Select text and click Note to annotate (AI is configured in settings)"],[new RegExp("^已替换 (\\d+) 处（Ctrl\\+Z 一步撤销）$"),"Replaced {1} occurrences (Ctrl+Z undoes in one step)"],[new RegExp("^(\\d+) 个执行点未运行$"),"{1} exec points not run"],[new RegExp("^(\\d+) 个执行点已置为待运行$"),"{1} exec points set back to pending"],[new RegExp("^已载入 (.+?)——修改后「保存」即覆盖$"),"Loaded {1} — Save overwrites it"],[new RegExp("^验证失败：(.+)$"),"Verification failed: {1}"],[new RegExp("^删除 (.+)（点两次确认）$"),"Delete {1} (click twice)"],[new RegExp("^保存到 (.+)$"),"Save to {1}"],[new RegExp("^(.+) · (\\d{4}/\\d{1,2}/\\d{1,2} .+)$"),"{1} · {2}"]];
 var _lang='zh';
 function _i18nLookup(t){
@@ -5697,7 +5825,8 @@ function applyLang(l){
     setTimeout(selToolsUpdate,0);
   });
   document.addEventListener('keyup',function(e){
-    if(e.shiftKey||e.key==='Shift'||e.key.indexOf('Arrow')===0){ setTimeout(selToolsUpdate,0); }
+    /* v2.22.0 补防：合成 keyup 事件无 key（undefined），直接 .indexOf 会炸 */
+    if(e.shiftKey||e.key==='Shift'||(e.key&&e.key.indexOf('Arrow')===0)){ setTimeout(selToolsUpdate,0); }
   });
   editor.addEventListener('scroll',function(){ selTools.hidden=true; });
   selTools.addEventListener('mousedown',function(e){ e.preventDefault(); });  /* 防点击夺焦丢选区 */
@@ -6386,6 +6515,163 @@ function applyLang(l){
     else if(!document.getElementById('rwOverlay').hidden){ closeRw(); }
     else { selTools.hidden=true; }
   });
+  /* ── v2.22.0 语法诊断 + 方言提示条 ────────────────────────────────
+     lint 与渲染同源：整篇跑一次 parseMarkdown(src,0,{diag:arr})，收集
+     fail-closed 降级点上报——不另立规则引擎，永不与渲染双标。
+     触发：MutationObserver 盯 #preview（任何渲染路径——输入/开文件/执行点
+     回填——都会让预览变化），700ms 防抖后重查。
+     提示条：纯展示浮层（pointer-events:none，零插入、不碰 IME 与撤销栈），
+     当前行命中方言前缀才出现；编辑区滚动/失焦/Esc 即隐。 */
+  var dgDiags=[],dgTimer=null,dgPanelOn=false;
+  function lintDoc(){
+    var src=getText(),arr=[];
+    if(src&&src.trim()){
+      try{ parseMarkdown(src,0,{diag:arr}); }
+      catch(e){ arr.push({line:1,code:'E000',msg:'解析器异常：'+e.message,sev:'err'}); }
+      arr.sort(function(a,b){return a.line-b.line||a.code.localeCompare(b.code);});
+    }
+    return arr;
+  }
+  function dgLineOff(t,n){
+    var off=0;
+    for(var k=1;k<n;k++){var nl=t.indexOf('\n',off);if(nl<0)return t.length;off=nl+1;}
+    return off;
+  }
+  function dgUpdate(){
+    dgDiags=lintDoc();
+    var nE=0,nW=0;
+    dgDiags.forEach(function(d){ if(d.sev==='warn')nW++;else nE++; });
+    var b=document.getElementById('dgBadge');
+    if(b){
+      if(nE+nW===0){ b.hidden=true; }
+      else{
+        b.hidden=false;
+        b.textContent=(nE?('⚠ '+nE):'')+(nE&&nW?' / ':'')+(nW?('◑ '+nW):'');
+        b.className=nE?'dg-err':'dg-warn';
+        b.title=nE?(nE+' 处方言未生效'):(nW+' 处可疑写法');
+      }
+    }
+    if(dgPanelOn)dgRender();
+  }
+  function dgRender(){
+    var list=document.getElementById('dgList');
+    if(!list)return;
+    var lines=getText().split('\n');
+    list.innerHTML='';
+    if(!dgDiags.length){
+      var ok=document.createElement('div');
+      ok.className='dg-item';
+      ok.innerHTML='<span style="color:#7dc98f;">✓ 未发现方言写法问题</span>';
+      list.appendChild(ok);
+      return;
+    }
+    dgDiags.forEach(function(d){
+      var it=document.createElement('div');
+      it.className='dg-item'+(d.sev==='warn'?' dg-w':'');
+      var sn=(lines[d.line-1]||'').trim().slice(0,40);
+      var se=document.createElement('span');se.className='dg-code';se.textContent=d.code;
+      var sl=document.createElement('span');sl.className='dg-line';sl.textContent='行 '+d.line;
+      var sm=document.createElement('span');sm.style.flex='1';
+      sm.textContent=d.msg+(sn?('　「'+sn+'」'):'');
+      it.appendChild(se);it.appendChild(sl);it.appendChild(sm);
+      it.addEventListener('click',function(){ dgJump(d.line); });
+      list.appendChild(it);
+    });
+  }
+  function dgJump(line){
+    var off=dgLineOff(getText(),line);
+    setSel(off,off);
+    try{
+      var r=window.getSelection().getRangeAt(0).getBoundingClientRect();
+      var er=editor.getBoundingClientRect();
+      editor.scrollTop+=r.top-er.top-editor.clientHeight*0.35;
+    }catch(e){}
+    dgPanelToggle(false);
+    editor.focus();
+  }
+  function dgPanelToggle(on){
+    dgPanelOn=(on===undefined)?!dgPanelOn:!!on;
+    var p=document.getElementById('dgPanel');
+    if(p)p.classList.toggle('on',dgPanelOn);
+    if(dgPanelOn)dgRender();
+  }
+  var _dgBadge=document.getElementById('dgBadge');
+  if(_dgBadge)_dgBadge.addEventListener('click',function(){dgPanelToggle();});
+  var _dgClose=document.getElementById('dgClose');
+  if(_dgClose)_dgClose.addEventListener('click',function(){dgPanelToggle(false);});
+
+  var dgHint=document.getElementById('dgHint');
+  /* 语法提示开关：lsSet 双通道持久化（同查找开关先例），默认开；
+     关掉的只是「速查浮层」，lint 角标与问题面板不受影响 */
+  var DG_HINT_KEY='md-editor-hints';
+  var dgHintOn=true;
+  try{ dgHintOn=localStorage.getItem(DG_HINT_KEY)!=='0'; }catch(e){}
+  var btnHint=document.getElementById('btnHint');
+  function dgHintBtnSync(){ if(btnHint)btnHint.classList.toggle('hint-on',dgHintOn); }
+  dgHintBtnSync();
+  if(btnHint)btnHint.addEventListener('click',function(){
+    dgHintOn=!dgHintOn;
+    lsSet(DG_HINT_KEY,dgHintOn?'1':'0');
+    dgHintBtnSync();
+    if(!dgHintOn&&dgHint)dgHint.classList.remove('on');
+  });
+  var DG_HINTS=[
+    [/^[ ]{0,3}@@\s*begin\s+fill/i,[['@@ begin fill{50|50}','分栏：各栏比例相加 =100；不带参数 = 2~4 栏等分'],['空行分栏','连续非空行属同一栏，末行写 @@ end fill 收尾']]],
+    [/^[ ]{0,3}@@\s*begin\s+full/i,[['@@ begin full{t|m|b}','独占一页：t=居上 m=居中 b=居下（分页导出生效）']]],
+    [/^[ ]{0,3}@@\s*begin\s+page/i,[['@@ begin page{noll|1|i|I}','页区页码：noll 不印页码／1 重编／i、I 罗马数字（分页导出生效）']]],
+    [/^[ ]{0,3}@@\s*begin\s+color/i,[['@@ begin color{#c0392b}','整块着色：颜色名或 #rgb／#rrggbb，末行写 @@ end color 收尾']]],
+    [/^[ ]{0,3}@@\s*begin\b/i,[['@@ begin fill{a|b}','分栏'],['@@ begin full{t|m|b}','独占一页'],['@@ begin page{noll|1|i|I}','页区页码'],['@@ begin color{X}','整块着色'],['@@ begin page full color …','并写时按 page→full→color 的顺序排列']]],
+    [/^[ ]{0,3}@@\s*end\b/i,[['@@ end fill','关 fill'],['@@ end color','只关 color，外层 page/full 继续收内容'],['@@ end page color','集合语义：一行同时关多个']]],
+    [/^[ ]{0,3}@@\s*caption/i,[['@@ caption{…} 表注文字','题注：作用于紧随其后的那一个表格']]],
+    [/^[ ]{0,3}@@\s*blank/i,[['@@ blank{2}','硬控段间空白：n=正文行数，取 0.1~50，单独占一行']]],
+    [/@@\s*color/,[['@@ color r{这段是红的}','行内着色：色值 = 11 个字母简写（r红 g绿 b蓝 y黄 o橙 p紫 c青 m品红 k黑 w白 a灰）或 3/6/8 位十六进制（不带 #）'],['花括号按层配对','内容可与加粗、~~删除线~~、x^{2} 上标混排，如 @@ color r{价 x^{2}}']]],
+    [/^[ ]{0,3}@@\s*MDE/i,[['@@ MDE_{k == v}','执行点数据（low runner）'],['@@ MDE__{…}','隐性公共池（不渲染）'],['@@ MDE import 名 [is 别名] [{global p}]','导入 run，正文原位替换执行结果'],['@@ MDE from 名 import 函数 [is 别名]','从 run 选择性导入']]],
+    [/^[ ]{0,3}@@/,[['@@ begin …','块：fill 分栏／full 独占页／page 页区／color 着色'],['@@ caption{…}','表格题注'],['@@ blank{n}','段间空白'],['@@ MDE_{k == v}','执行点数据（low runner）'],['@@ MDE__{…}','隐性公共池（不渲染）']]],
+    [/^[ ]{0,3}<<</,[['<<<','缩进包围块：开行 <<< → 中间放内容 → 闭行 <<<，开闭各自独占一行']]]
+  ];
+  function dgHintUpdate(){
+    if(!dgHint||!dgHintOn){ if(dgHint)dgHint.classList.remove('on'); return; }
+    var t=getText(),pos=getSel().s;
+    var ls=t.lastIndexOf('\n',Math.max(0,pos-1))+1;
+    var le=t.indexOf('\n',pos);if(le<0)le=t.length;
+    var ln=t.slice(ls,le);
+    var hit=null;
+    for(var k=0;k<DG_HINTS.length;k++){ if(DG_HINTS[k][0].test(ln)){hit=DG_HINTS[k][1];break;} }
+    if(!hit){dgHint.classList.remove('on');return;}
+    var h='';
+    for(var j=0;j<hit.length;j++){
+      h+='<div><span class="dh-t">'+escapeHtml(hit[j][0])+'</span><span class="dh-d">'+escapeHtml(hit[j][1])+'</span></div>';
+    }
+    dgHint.innerHTML=h;
+    var rect=null;
+    try{ rect=window.getSelection().getRangeAt(0).getBoundingClientRect(); }catch(e){}
+    if(!rect||(!rect.top&&!rect.left)){dgHint.classList.remove('on');return;}
+    dgHint.classList.add('on');
+    var top=rect.bottom+6,left=rect.left;
+    if(top+dgHint.offsetHeight>window.innerHeight-40)top=rect.top-dgHint.offsetHeight-6;
+    dgHint.style.top=Math.max(8,top)+'px';
+    dgHint.style.left=Math.max(8,Math.min(left,window.innerWidth-dgHint.offsetWidth-12))+'px';
+  }
+  editor.addEventListener('input',function(){dgHintUpdate();});
+  editor.addEventListener('keyup',function(){dgHintUpdate();});
+  editor.addEventListener('click',function(){dgHintUpdate();});
+  editor.addEventListener('scroll',function(){if(dgHint)dgHint.classList.remove('on');});
+  editor.addEventListener('blur',function(){setTimeout(function(){if(dgHint)dgHint.classList.remove('on');},150);});
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape'&&dgHint&&dgHint.classList.contains('on'))dgHint.classList.remove('on');
+  });
+
+  /* lint 触发：盯预览变化（覆盖输入/开文件/执行点回填全部渲染路径） */
+  var dgMo=new MutationObserver(function(){
+    if(dgTimer)clearTimeout(dgTimer);
+    dgTimer=setTimeout(dgUpdate,700);
+  });
+  dgMo.observe(document.getElementById('preview'),{childList:true,subtree:true});
+  scheduleLint0();
+  function scheduleLint0(){
+    if(dgTimer)clearTimeout(dgTimer);
+    dgTimer=setTimeout(dgUpdate,400);
+  }
 })();
 /*UI_END*/
 </script>
