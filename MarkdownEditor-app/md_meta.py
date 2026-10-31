@@ -184,17 +184,35 @@ def read(assets_dir):
     return {"zero": zero, "up": up_list, "fields": _apply_up(base, up_list)}
 
 
-def ensure(assets_dir, fields=None):
+def relax(assets_dir):
+    """清掉档案的只读/隐藏属性（只给「解包目录里的临时副本」和删除路径用）。
+
+    原件应当保持只读；但删临时目录、覆盖解包副本之前必须先解位，否则
+    Windows 直接 PermissionError —— 2026-10-31 那次 500 就是这么炸的。
+    """
+    md = meta_dir(assets_dir)
+    _set_attrs(os.path.join(md, ZERO_NAME), hidden=False, readonly=False)
+    _set_attrs(md, hidden=False)
+
+
+def ensure(assets_dir, fields=None, lock=True):
     """建档：zero.json + up.md。已存在则原样返回（**绝不覆盖创建者快照**）。
+
+    lock=False 专供 `.smd` 的解包目录：那里的档案只是临时副本，原件在包内。
+    副本一旦被设成只读+隐藏，临时目录就删不干净（rmtree 静默留残骸），
+    下次解包撞上只读同名文件直接 PermissionError。只读只给磁盘上的真档案。
 
     返回 (档案 dict, 是否本次新建)。
     """
     cur = read(assets_dir)
     if cur is not None:
+        if not lock:
+            relax(assets_dir)            # 老副本可能已被锁过，这里顺带解开
         return cur, False
     md = meta_dir(assets_dir)
     os.makedirs(md, exist_ok=True)
-    _set_attrs(md, hidden=True)          # 目录隐藏
+    if lock:
+        _set_attrs(md, hidden=True)      # 目录隐藏
     zero = {
         "format": FORMAT,
         "created": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
@@ -206,7 +224,8 @@ def ensure(assets_dir, fields=None):
     with io.open(zp, "w", encoding="utf-8", newline="\n") as f:
         json.dump(zero, f, ensure_ascii=False, indent=2)
         f.write("\n")
-    _set_attrs(zp, hidden=True, readonly=True)   # 建完即锁：隐藏 + 只读
+    if lock:
+        _set_attrs(zp, hidden=True, readonly=True)   # 建完即锁：隐藏 + 只读
     up = os.path.join(md, UP_NAME)
     if not os.path.isfile(up):
         with io.open(up, "w", encoding="utf-8", newline="\n") as f:
@@ -214,14 +233,16 @@ def ensure(assets_dir, fields=None):
     return read(assets_dir) or {"zero": zero, "up": [], "fields": _clean(fields)}, True
 
 
-def update(assets_dir, fields):
+def update(assets_dir, fields, lock=True):
     """改档案：逐字段 diff，变更追加进 up.md。**永不改 zero.json**。
+
+    lock 透传给 ensure：`.smd` 的解包副本一律不锁（见 ensure 的说明）。
 
     返回 (档案 dict, 本次变更条数)。没变就一条都不写（幂等：重复点应用不刷履历）。
     """
     cur = read(assets_dir)
     if cur is None:
-        cur, _ = ensure(assets_dir, fields)
+        cur, _ = ensure(assets_dir, fields, lock)
         return cur, 0
     old = cur.get("fields") or {}
     new = _clean(fields)

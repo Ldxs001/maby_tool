@@ -65,7 +65,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 118  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 119  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 # MSIX 商城版判定（微软商店政策 11.16 的"报告 AI 生成内容"入口用）：
 # 商城包与侧载包恒落在 WindowsApps 之下，Release 安装包/便携形态不会。
@@ -1972,11 +1972,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                                ensure_ascii=False))
                     return
                 adir = _meta_assets_dir(p)
+                # .smd 的 adir 是解包临时目录，里面只是副本：绝不能设只读——
+                # 否则临时目录删不干净，下次解包撞只读文件直接 500。
+                keep_lock = not (_smd is not None and _smd.is_smd(p))
                 changed = 0
                 if action == "ensure":
-                    rec, _new = _meta.ensure(adir, fields)
+                    rec, _new = _meta.ensure(adir, fields, lock=keep_lock)
                 elif action == "update":
-                    rec, changed = _meta.update(adir, fields)
+                    rec, changed = _meta.update(adir, fields, lock=keep_lock)
                 else:
                     rec = _meta.read(adir)
                 if action in ("ensure", "update") and _smd is not None and _smd.is_smd(p):

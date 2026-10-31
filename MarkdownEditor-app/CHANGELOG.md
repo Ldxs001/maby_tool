@@ -11,6 +11,30 @@
 
 ---
 
+## v2.24.1（2026-10-31）
+
+**本次修复：带元数据档案的 `.smd` 打不开（HTTP 500）**
+
+**修复**
+- **现象**：打开已填过元数据的 `.smd`，界面报「读取文件失败：HTTP 500」；服务端 traceback 末行是
+  `PermissionError [Errno 13] ... runtime\tmp\<hash>\assets\.mde\zero.json`。一旦出现即永久失败，只能手工删掉缓存目录才恢复。
+- **根因**：`.smd` 的档案目录就是解包临时目录（`_meta_assets_dir`），而 `md_meta.ensure()` 的「建档即锁」不区分真档案与副本，把临时目录里的 `zero.json` 也设成只读+隐藏。会话结束 `clear_tmp()` 走 `rmtree(ignore_errors=True)`：只读文件删不掉、错误被静默吞掉，留下残骸；下次打开 `.source.json` 已随残骸丢失 → 判定重解包 → `extractall` 往只读同名文件写 → `PermissionError`。
+- **只读只给真档案**：`md_meta.ensure()` / `update()` 增加 `lock` 参数，`.smd` 的解包副本一律 `lock=False`（既不设只读也不设隐藏）；`<stem>.assets/.mde/zero.json` 这类磁盘真档案仍锁只读+隐藏。已被锁过的老副本在下次 `ensure` 时顺带解开（新增 `md_meta.relax()`）。
+- **删除不再静默失败**：新增 `_clear_attrs()` 递归解位与 `_force_rmtree()`（解位后删除并断言目录真的消失）；`clear_tmp()`、`_base_dir_for()` 的两处清理全部改走它。
+- **解包不再依赖 `extractall`**：新增 `_extract_all()` 逐条目写入、写前给目标解位。`extractall` 碰到只读同名文件直接抛错且不重试，正是 500 的直接触发点。
+- **包内条目权限压平为 `0644`**：`z.write` 会把源文件的只读位写进 `external_attr`，档案 0444 会让任何解包工具解出只读副本。新增 `_put_file()` 固定 `0o644`。
+
+**测试**
+- 新增 `_test_zero_perm.py` 19 条：副本不锁、真档案仍锁、老副本再 `ensure` 自动解开、`_clear_attrs`/`_force_rmtree` 生效、重解包遇只读文件不抛、建档→保存→清缓存→重开全链路、包内条目 `0644`。
+- 实机 13 条：把一份 9311 字、带档案的真实 `.smd` 人为造成「旧版残骸」（副本锁只读+隐藏、删掉指纹）后仍能打开；写元数据后包内条目为 `0644`；`clear_tmp` 后目录确实消失；清缓存后重开正常且元数据正确。
+- 回归：`_test_smd` 69/69、`_test_smd_history` 32/32、`_test_metadata` 31/31、`_test_parser_sync` 逐字节一致。
+
+**说明**
+- 「不可删除」不做：Windows 的删除权限看父目录，且文件所有者总能改回 ACL——实测对文件设 DENY DELETE 无效、对目录设 DENY DELETE_CHILD 同样被绕过。现状保持只读+隐藏（防手滑），不引入 ACL。
+- 老包内 `zero.json` 条目的 `0444` 无需迁移：`extractall` 本就不还原只读，新解包路径也已不用它；下次整包重建时自然压平为 `0644`。
+
+---
+
 ## v2.24.0（2026-10-31）
 
 **本次改动：文件面板改为两列并新增 `.smd` 历史版本（可配保留份数、预览后确认恢复）；打开文档时按引用并集清理未引用资产**

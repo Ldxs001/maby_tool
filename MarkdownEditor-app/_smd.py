@@ -266,6 +266,79 @@ def _dir_writable(d):
         return False
 
 
+def _clear_attrs(path):
+    """递归清掉只读/隐藏位（Windows）。失败静默——删不掉由调用方断言。
+
+    只读文件删不掉，而 `rmtree(ignore_errors=True)` 把这个失败**静默吞掉**，
+    留下半个目录；下次解包撞上同名只读文件就 PermissionError，前端只看到
+    「读取文件失败：HTTP 500」。所以删除与覆盖之前必须逐层解位。
+    """
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+    except Exception:
+        return
+    RO, HI = 0x01, 0x02                      # FILE_ATTRIBUTE_READONLY / HIDDEN
+
+    def _one(p):
+        try:
+            a = k32.GetFileAttributesW(str(p))
+            if a == 0xFFFFFFFF:
+                return
+            if a & (RO | HI):
+                k32.SetFileAttributesW(str(p), a & ~(RO | HI))
+        except Exception:
+            pass
+
+    if not os.path.exists(path):
+        return
+    _one(path)
+    for dp, dns, fns in os.walk(path):
+        for nm in fns:
+            _one(os.path.join(dp, nm))
+        for nm in dns:
+            _one(os.path.join(dp, nm))
+
+
+def _force_rmtree(path, tries=2):
+    """删目录：解位 → 删；没删掉再解位重试。返回目录是否真的消失。
+
+    不能只靠 rmtree(ignore_errors=True)：它遇到只读文件静默跳过，调用方
+    以为清干净了，实际留残骸——那正是 2026-10-31 那次 500 的成因。
+    """
+    if not os.path.exists(path):
+        return True
+    for _ in range(max(1, tries)):
+        _clear_attrs(path)
+        shutil.rmtree(path, ignore_errors=True)
+        if not os.path.exists(path):
+            return True
+    return False
+
+
+def _extract_all(smd_path, dest):
+    """逐条目解包，写之前先解位。
+
+    `zipfile.extractall` 碰到目标位置的只读文件直接 PermissionError 且不重试；
+    而只读档案是我们自己设的，所以这里绕开 extractall 自己写——顺带保证
+    解出来的副本一律普通属性（副本本来就不该是只读）。
+    """
+    with zipfile.ZipFile(smd_path, "r") as z:
+        for info in z.infolist():
+            target = os.path.join(dest, info.filename.replace("/", os.sep))
+            if info.filename.endswith("/"):
+                os.makedirs(target, exist_ok=True)
+                continue
+            parent = os.path.dirname(target)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            _clear_attrs(target)
+            with z.open(info) as src, io.open(target, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+
+
 def _tmp_root():
     # 探针缓存：同一进程只判一次
     global _TMP_RESOLVED
@@ -307,13 +380,16 @@ def _base_dir_for(smd_path):
         except Exception:
             pass
         # 包被外部修改：丢弃旧目录重解
-        shutil.rmtree(d, ignore_errors=True)
+        _force_rmtree(d)
+    if os.path.exists(d):
+        # 上一次没删干净（残留只读文件 / 被占用）：再解位清一次。
+        # 仍清不掉也不阻断 —— 下面的逐条目解包会先给目标解位再写。
+        _force_rmtree(d)
     os.makedirs(d, exist_ok=True)
     _check_all_entries(smd_path)
-    with zipfile.ZipFile(smd_path, "r") as z:
-        z.extractall(d)
+    _extract_all(smd_path, d)
     if not os.path.isfile(doc):
-        shutil.rmtree(d, ignore_errors=True)
+        _force_rmtree(d)
         raise ValueError("not a valid .smd (missing %s): %s" % (DOC_NAME, smd_path))
     _write_sig(smd_path, sig_file)
     return d
@@ -325,6 +401,21 @@ def _write_sig(smd_path, sig_file):
             json.dump(_sig(smd_path), f)
     except Exception:
         pass
+
+
+def _put_file(z, fp, arcname):
+    """把磁盘文件写入包，条目权限固定 0644，**不继承源文件的只读位**。
+
+    z.write 会把源文件的 st_mode 一起写进 external_attr；元数据档案是 0444，
+    于是包里也记成只读，任何解包工具解出来都是只读副本 —— 副本只读正是
+    「临时目录删不干净 -> 重开 500」的源头，所以这里一律压平。
+    """
+    st = os.stat(fp)
+    zi = zipfile.ZipInfo(arcname, time.localtime(st.st_mtime)[:6])
+    zi.compress_type = zipfile.ZIP_DEFLATED
+    zi.external_attr = 0o644 << 16
+    with z.open(zi, "w") as dst, open(fp, "rb") as src:
+        shutil.copyfileobj(src, dst)
 
 
 def _pack_from_dir(smd_path, doc_src, assets_src=None, hist_dir=None):
@@ -363,11 +454,11 @@ def _pack_from_dir(smd_path, doc_src, assets_src=None, hist_dir=None):
             z.writestr(zi, t)
         for rel, fp in _scan_assets(assets_src):
             if is_protected(rel):
-                z.write(fp, ASSETS_DIR + "/" + rel)
+                _put_file(z, fp, ASSETS_DIR + "/" + rel)
                 continue
             if not is_asset_used(rel, texts):
                 continue
-            z.write(fp, ASSETS_DIR + "/" + rel)
+            _put_file(z, fp, ASSETS_DIR + "/" + rel)
         z.writestr(META_NAME, json.dumps({"format": FORMAT_VERSION}, ensure_ascii=False))
     _replace_retry(tmp, smd_path)
 
@@ -621,7 +712,7 @@ def _append_entries(pkg_path, entries):
         warnings.simplefilter("ignore", UserWarning)
         with zipfile.ZipFile(pkg_path, "a", zipfile.ZIP_DEFLATED) as z:
             for nm, fp in entries:
-                z.write(fp, nm)
+                _put_file(z, fp, nm)
     _fsync_file(pkg_path)
 
 
@@ -873,8 +964,12 @@ def _restore_history(smd_path, base_dir, seq):
 
 
 def clear_tmp():
-    """服务启动/退出时清理解包缓存目录（会话级数据，正文与资源以 .smd 为准）。"""
-    shutil.rmtree(_tmp_root(), ignore_errors=True)
+    """服务启动/退出时清理解包缓存目录（会话级数据，正文与资源以 .smd 为准）。
+
+    必须解位再删：只读档案（zero.json）会让 rmtree 静默失败，留下残骸 ->
+    下次解包撞只读文件 PermissionError -> 文档打不开。
+    """
+    _force_rmtree(_tmp_root())
 
 
 # ---------------------------------------------------------------------------
