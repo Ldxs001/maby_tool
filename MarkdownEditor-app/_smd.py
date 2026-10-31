@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
-"""_smd.py -- .smd 自包含文档格式（v1.2.0）
+"""_smd.py -- .smd 自包含文档格式（v1.3.0）
 
 .smd = ZIP 容器，内部结构：
     doc.md       正文（UTF-8）
+    history/NNNNNN.md  历史版本（v1.3.0 新增；序号单调递增，最新一条是上一版正文）
     assets/...   图片资源（对应普通文档的 <stem>.assets/）
     assets/.mde/ 元数据档案：zero.json（创建者快照）、up.md（修改履历）
     meta.json    {"format": 1}
@@ -20,9 +21,14 @@
     (字节数, CRC32) 判变化，`.mde/*` 同属这一类，一并按内容 diff）。
     meta.json 是常量，按设计不比；**将来新增第三类 entry 必须同时进比对逻辑**，
     否则会跟 meta.json 一样被静默冻住——文件在包里，值停在打包那天，且不报错。
+    （history/* 走的是"每次追加新名字"的路径，没有比对问题。）
   - 不被正文引用的资产有两类豁免（见 is_protected）：annotations.json 与
     `.mde/*`。二者都靠"正文里搜 assets/<名字>"这个判据永远搜不到，不豁免就
     会在保存时被当孤儿删掉。
+  - v1.3.0 起「保留谁」的判据是**并集**：当前正文 + 全部历史版本。
+    只被某个历史版本引用的图必须留着，否则回滚到那个版本会破图。
+    回收动作只在**打开文档时**做（maintain），保存过程不删任何资产——
+    保存时删会与并集判据自相矛盾：历史独占的图第一次保存就没了。
 """
 import os
 import io
@@ -42,6 +48,46 @@ DOC_NAME = "doc.md"
 ASSETS_DIR = "assets"
 META_NAME = "meta.json"
 META_DIR = ".mde"          # 元数据档案目录（assets/.mde/zero.json、up.md）
+HIST_DIR = "history"       # 历史版本目录：history/NNNNNN.md（v1.3.0）
+
+# 历史保留份数（用户可配，2026-10-31 口径：默认 30，允许 1~200）。
+# 包内容忍上限按同比例放大 4/3，见 hist_cap()。设成 0 或负数一律按 1 处理。
+HIST_KEEP = 30
+HIST_KEEP_MIN = 1
+HIST_KEEP_MAX = 200
+_HIST_KEEP = HIST_KEEP
+
+
+def set_hist_keep(n):
+    """设置进程内的保留份数（md_server 每次入口按 ui-settings 调用）。
+
+    非数字/越界一律夹到合法区间，返回实际生效值——静默吞掉非法值等于让人以为
+    设置生效了，实际还是旧值。
+    """
+    global _HIST_KEEP
+    try:
+        v = int(n)
+    except (TypeError, ValueError):
+        return _HIST_KEEP
+    v = max(HIST_KEEP_MIN, min(HIST_KEEP_MAX, v))
+    _HIST_KEEP = v
+    return v
+
+
+def hist_keep():
+    return _HIST_KEEP
+
+
+def hist_cap(keep=None):
+    """包内容忍上限 = round(keep / 0.75)。
+
+    keep=30 → 40，keep=5 → 7，keep=10 → 13（整数四舍五入，用
+    (k*4+1)//3 精确复现，不引入浮点误差）。留在包里的份数超过 cap 才触发
+    一次整理并裁回 keep——追加式 zip 删不掉单条，只能整包重建，加这点缓冲
+    是为了不变成"每次保存都重建"。
+    """
+    k = hist_keep() if keep is None else max(1, int(keep))
+    return max(1, (k * 4 + 1) // 3)
 
 
 def is_protected(rel):
@@ -63,18 +109,35 @@ def is_protected(rel):
 # 把正在使用的图判成孤儿并删掉。宁可多留（多留只是占空间），绝不多删。
 
 def _ref_texts(doc_text):
-    """正文的等价形态集合：原样 + URL 解码后。
+    """正文的等价形态集合：原样 + URL 解码后 + 反斜杠归一。
 
     链接目标里的空格与中文可能被写成 %20 / %E5%9B%BE，纯子串匹配会认不出，
     正在使用的图就被判成孤儿删掉。解码只参与「是否被引用」这一个判断，
     绝不回写正文（回写会改动用户内容）。
+
+    反斜杠归一（v1.3.0）：手写的 Windows 绝对路径 `...\\<stem>.assets\\a.png`
+    里没有 "assets/a.png" 这个正斜杠子串，不归一就会在打开时被当孤儿删掉。
+    归一只是多加一种形态参与匹配，方向仍然是「宁可多留」。
     """
     raw = doc_text or ""
     try:
         dec = urllib.parse.unquote(raw)
     except Exception:
         dec = raw
-    return (raw,) if dec == raw else (raw, dec)
+    out = [raw]
+    if dec != raw:
+        out.append(dec)
+    for t in list(out):
+        if "\\" in t:
+            out.append(t.replace("\\", "/"))
+    # 去重保序：三种形态常常完全一样
+    seen = set()
+    uniq = []
+    for t in out:
+        if t not in seen:
+            seen.add(t)
+            uniq.append(t)
+    return tuple(uniq)
 
 
 def is_asset_referenced(doc_text, filename, texts=None):
@@ -88,6 +151,18 @@ def is_asset_referenced(doc_text, filename, texts=None):
     """
     ref = ASSETS_DIR + "/" + str(filename).replace("\\", "/")
     for t in (texts if texts is not None else _ref_texts(doc_text)):
+        if ref in t:
+            return True
+    return False
+
+
+def is_asset_used(rel, texts):
+    """并集判定：rel 是否被 texts（多份正文的 _ref_texts 拼接）中任意一份引用。
+
+    v1.3.0 的回收口径就是这一条——当前版本 + 全部历史版本，谁提到都算数。
+    """
+    ref = ASSETS_DIR + "/" + str(rel).replace("\\", "/")
+    for t in texts:
         if ref in t:
             return True
     return False
@@ -252,21 +327,45 @@ def _write_sig(smd_path, sig_file):
         pass
 
 
-def _pack_from_dir(smd_path, doc_src, assets_src=None):
-    """全量打包（新建/另存为/整理用）。临时文件 + os.replace 原子替换。
+def _pack_from_dir(smd_path, doc_src, assets_src=None, hist_dir=None):
+    """全量打包（新建/另存为/整理/回滚用）。临时文件 + os.replace 原子替换。
 
-    打包过滤：assets_src 中未被 doc.md 引用的文件不入包（保存清理纪律——
-    包内资产与引用严格对齐；历史旧包的孤儿资产借此在全量重建时移除）。
+    资产过滤（v1.3.0 改为并集）：doc_src 正文 **以及 hist_dir 里每一份历史正文**
+    都没提到的文件不入包。方向仍是「宁可多留」——只被某个旧版本引用的图必须
+    留着，否则回滚过去就是破图；谁都不提到的才是真孤儿，正好借这次重建出包。
+
+    hist_dir：解包目录下的 history/。历史条目的时间戳从**现有包**里取回
+    （extractall 不还原 mtime，只用磁盘 mtime 会让每次整理都把历史时间刷成
+    整理那一刻），包里没有的才用当前时间。
     """
     tmp = "%s.tmp%d" % (smd_path, int(time.time() * 1000))
+    try:
+        times = {s: dt for s, dt in _hist_times(smd_path).items()}
+    except Exception:
+        times = {}
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
         # newline=""：按原始字节读，不做 CRLF→LF 翻译（否则“整理”会顺手改正文）
         with io.open(doc_src, "r", encoding="utf-8", newline="") as f:
             doc_text = f.read()
-        texts = _ref_texts(doc_text)
+        texts = list(_ref_texts(doc_text))
         z.writestr(DOC_NAME, doc_text)
+        for seq, fp in _hist_files(hist_dir):
+            try:
+                with io.open(fp, "r", encoding="utf-8", newline="") as f:
+                    t = f.read()
+            except Exception:
+                continue
+            texts.extend(_ref_texts(t))
+            nm = "%s/%06d.md" % (HIST_DIR, seq)
+            dt = times.get(seq) or tuple(time.localtime()[:6])
+            zi = zipfile.ZipInfo(nm, dt)
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(zi, t)
         for rel, fp in _scan_assets(assets_src):
-            if not is_protected(rel) and not is_asset_referenced(doc_text, rel, texts):
+            if is_protected(rel):
+                z.write(fp, ASSETS_DIR + "/" + rel)
+                continue
+            if not is_asset_used(rel, texts):
                 continue
             z.write(fp, ASSETS_DIR + "/" + rel)
         z.writestr(META_NAME, json.dumps({"format": FORMAT_VERSION}, ensure_ascii=False))
@@ -293,6 +392,134 @@ def _scan_assets(assets_src):
             out.append((os.path.relpath(fp, assets_src).replace("\\", "/"), fp))
     out.sort()
     return out
+
+
+# ---------------------------------------------------------------------------
+# 历史版本：history/NNNNNN.md
+#
+# 追加式结构下历史条目只能"新增"不能"删除"，所以序号单调递增、永不回退、
+# 永不重排；裁剪靠整包重建（compact），重建后序号保持原值，不重新编号。
+# ---------------------------------------------------------------------------
+
+def hist_dir_of(base_dir):
+    return os.path.join(base_dir, HIST_DIR)
+
+
+def _hist_seq(name):
+    """entry 名 → 序号；不是历史条目返回 None（history/x.md 之外一律不算）。"""
+    n = str(name).replace("\\", "/")
+    if not n.startswith(HIST_DIR + "/"):
+        return None
+    base = n[len(HIST_DIR) + 1:]
+    if "/" in base or not base.lower().endswith(".md"):
+        return None
+    num = base[:-3]
+    if not num.isdigit():
+        return None
+    return int(num)
+
+
+def _hist_files(hist_dir):
+    """解包目录里的历史文件 → [(序号, 磁盘路径)]，按序号升序。"""
+    out = []
+    if not hist_dir or not os.path.isdir(hist_dir):
+        return out
+    try:
+        names = os.listdir(hist_dir)
+    except OSError:
+        return out
+    for fn in names:
+        seq = _hist_seq(HIST_DIR + "/" + fn)
+        if seq is None:
+            continue
+        fp = os.path.join(hist_dir, fn)
+        if os.path.isfile(fp):
+            out.append((seq, fp))
+    out.sort()
+    return out
+
+
+def _hist_infos(smd_path):
+    """包内历史条目 → {序号: ZipInfo}（同名多条以后者为准）。"""
+    ent = {}
+    with zipfile.ZipFile(smd_path, "r") as z:
+        for info in z.infolist():
+            seq = _hist_seq(info.filename)
+            if seq is not None:
+                ent[seq] = info
+    return ent
+
+
+def _hist_times(smd_path):
+    """包内历史条目 → {序号: date_time 六元组}，重建时用来保住原始时间。"""
+    return {s: i.date_time for s, i in _hist_infos(smd_path).items()}
+
+
+def _next_hist_seq(smd_path):
+    try:
+        seqs = list(_hist_infos(smd_path).keys())
+    except Exception:
+        seqs = []
+    return (max(seqs) + 1) if seqs else 1
+
+
+def _package_doc_text(smd_path):
+    """包内当前正文（末条 doc.md）；包不存在/损坏返回 None。"""
+    try:
+        with zipfile.ZipFile(smd_path, "r") as z:
+            return z.read(DOC_NAME).decode("utf-8")
+    except Exception:
+        return None
+
+
+def _write_text(path, text):
+    """通用原子写（tmp → fsync → replace），供历史文件使用。"""
+    tmp = "%s.tmp%d" % (path, next(_DOC_SEQ))
+    with io.open(tmp, "w", encoding="utf-8", newline="") as f:
+        f.write(text)
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except OSError:
+            pass
+    _replace_retry(tmp, path)
+
+
+def _first_line(text):
+    """历史列表用的标题：首个非空行，去掉前导 # 与空白，截 60 字。"""
+    for ln in (text or "").splitlines():
+        s = ln.strip().lstrip("#").strip()
+        if s:
+            return s[:60]
+    return ""
+
+
+def _trim_hist_dir(hist_dir, keep=None):
+    """按保留份数裁掉最老的条目，返回删除条数（只在目录里删，包里靠重建）。"""
+    k = hist_keep() if keep is None else max(1, int(keep))
+    files = _hist_files(hist_dir)
+    n = 0
+    for _seq, fp in files[:max(0, len(files) - k)]:
+        try:
+            os.remove(fp)
+            n += 1
+        except OSError:
+            pass
+    return n
+
+
+def _prune_empty_dirs(root):
+    """删掉资产目录里被清空的子目录（不碰 root 本身）。"""
+    if not root or not os.path.isdir(root):
+        return
+    for dp, dns, fns in os.walk(root, topdown=False):
+        if os.path.normpath(dp) == os.path.normpath(root):
+            continue
+        try:
+            if not os.listdir(dp):
+                os.rmdir(dp)
+        except OSError:
+            pass
 
 
 def _file_sig(fp):
@@ -341,22 +568,36 @@ def needs_compact(smd_path, base_dir):
     里，结果既可能虚高也可能为负。实测后果是双向的：内容改一次就误判成
     大面积死空间、每次保存全量重建；内容没改时重复副本又永远不被回收。
     异常时返回 False（保守不整理）。
+
+    v1.3.0 追加两条闸门（历史版本）：
+      · 历史条目数 > hist_cap()（= round(keep/0.75)）→ 必须重建，重建时裁回 keep。
+        追加式 zip 删不掉单条，只能整包重建，所以留这个缓冲把重建摊成
+        「每 cap-keep 次保存一次」，而不是从第 keep 次起每次保存都重建。
+      · 历史条目**不计入死空间**以外的判断——它们本来就是有效数据。
     """
     try:
         total = os.path.getsize(smd_path)
-        live = _live_entries(smd_path)
+        with zipfile.ZipFile(smd_path, "r") as _z:
+            infos = _z.infolist()
+        live = {i.filename: (i.file_size, i.CRC & 0xFFFFFFFF, i.compress_size)
+                for i in infos}
+        hist_seqs = set()
+        doc_copies = 0
+        for i in infos:
+            if i.filename == DOC_NAME:
+                doc_copies += 1
+            seq = _hist_seq(i.filename)
+            if seq is not None:
+                hist_seqs.add(seq)
+        if len(hist_seqs) > hist_cap():
+            return True                        # 历史超缓冲，重建并裁剪
         if total < COMPACT_MIN_BYTES:
             # 小包（纯文本文档）的死空间占比永远到不了 30%，5MB 闸门等于永
             # 不整理——可 doc.md 每次保存都追加一份，实测 20 次保存积了 21 份
             # 副本、包从 403 字节涨到 3693。小包重建成本可以忽略，所以给一条
             # 副本数闸门：超过 COMPACT_MAX_DOC_COPIES 份就重建。
             # 注意不能数 live：那是 dict，同名 entry 已被合并成一条，恒为 1。
-            try:
-                with zipfile.ZipFile(smd_path) as _z:
-                    _doc = sum(1 for _n in _z.namelist() if _n == DOC_NAME)
-            except Exception:
-                return False
-            return _doc > COMPACT_MAX_DOC_COPIES
+            return doc_copies > COMPACT_MAX_DOC_COPIES
         valid = {}
         for nm in (DOC_NAME, META_NAME):
             fp = os.path.join(base_dir, nm)
@@ -397,10 +638,17 @@ def _save_from_dir(smd_path, base_dir):
 
     1. 顺序拷贝当前包到临时副本（字节级复制，旧 entry 不重新压缩，
        成本为顺序 IO，远低于全量重新 deflate）；
-    2. 在副本上追加变化 entry（doc.md 恒追加；assets 与包内按 (字节数, CRC32) diff，
-       只比大小会漏掉"换了图但字节数没变"）；
+    2. 在副本上追加变化 entry（doc.md 与 history/新条目；assets 与包内按
+       (字节数, CRC32) diff，只比大小会漏掉"换了图但字节数没变"）；
     3. fsync 后 os.replace 原子替换 —— 任意时刻断电：replace 前原包完好，
        replace 后新包完好，不存在半写状态。
+
+    历史（v1.3.0）：保存前把**包里当前那一版正文**写成 history/<新序号>.md，
+    即"被替换掉的那一版"。正文与包内一字不差则整次保存什么都不写——包括不
+    追加 doc.md，避免无改动保存也刷版本。
+
+    **保存不删任何资产**：保留判据是"当前 + 全部历史"的并集，保存时按当前
+    单版删，历史独占的图第一次保存就没了。回收只在打开文档时做（maintain）。
 
     达到整理阈值则改为全量重建。返回 (追加 entry 数, 是否发生整理)。
     """
@@ -413,29 +661,30 @@ def _save_from_dir(smd_path, base_dir):
         live = {}
     with io.open(doc, "r", encoding="utf-8", newline="") as f:
         doc_text = f.read()
-    texts = _ref_texts(doc_text)
-    to_add = [(DOC_NAME, doc)]
-    orphans = 0
+    to_add = []
+    prev = _package_doc_text(smd_path)
+    if prev is None or prev != doc_text:
+        if prev is not None:
+            hd = hist_dir_of(base_dir)
+            try:
+                os.makedirs(hd, exist_ok=True)
+                seq = _next_hist_seq(smd_path)
+                hp = os.path.join(hd, "%06d.md" % seq)
+                _write_text(hp, prev)
+                to_add.append((HIST_DIR + "/%06d.md" % seq, hp))
+            except OSError:
+                pass                      # 历史写不进去不该挡住正文保存
+        to_add.append((DOC_NAME, doc))
     adir = os.path.join(base_dir, ASSETS_DIR)
     for rel, fp in _scan_assets(adir):
-        if not is_protected(rel) and not is_asset_referenced(doc_text, rel, texts):
-            # 保存清理纪律：doc.md 未引用的资产从解包目录删除；
-            # 删除失败保守留存（不阻断保存）
-            try:
-                os.remove(fp)
-                orphans += 1
-            except OSError:
-                pass
-            continue
         nm = ASSETS_DIR + "/" + rel
         if nm not in live or _file_sig(fp) != live[nm]:
             to_add.append((nm, fp))
-    if orphans:
-        # 包内旧 entry 是追加式的，增量保存清不掉——孤儿已出目录，
-        # 全量重建才能把它们从包内移除
-        compact(smd_path, base_dir)
-        return len(to_add), True
+    if not to_add:
+        return 0, False
     if needs_compact(smd_path, base_dir):
+        # 重建按解包目录现状出包：本次的新正文与新历史已在目录里，一并进包，
+        # 顺带把历史裁回保留份数
         compact(smd_path, base_dir)
         return len(to_add), True
     tmp = "%s.tmp%d" % (smd_path, int(time.time() * 1000))
@@ -480,14 +729,147 @@ def _purge_stale_tmps(smd_path):
     return n
 
 
-def compact(smd_path, base_dir):
-    """整理：按解包目录现状重建全量包，原子替换，天然清掉死空间与已删除资源。"""
+def compact(smd_path, base_dir, keep=None):
+    """整理：按解包目录现状重建全量包，原子替换，天然清掉死空间与已删除资源。
+
+    v1.3.0：重建前先把历史裁到保留份数（目录里删最老的那几条，包里随之消失）。
+    裁剪只在这里做——追加式结构下这是唯一能真正删掉条目的时机。
+    """
+    _trim_hist_dir(hist_dir_of(base_dir), keep)
     pack_from_dir(smd_path,
                   os.path.join(base_dir, DOC_NAME),
-                  os.path.join(base_dir, ASSETS_DIR))
+                  os.path.join(base_dir, ASSETS_DIR),
+                  hist_dir_of(base_dir))
     sig_file = os.path.join(base_dir, ".source.json")
     _write_sig(smd_path, sig_file)
     _purge_stale_tmps(smd_path)
+
+
+def _maintain(smd_path, base_dir, keep=None):
+    """打开文档时的整理：回收没人引用的资产 + 按保留份数裁剪历史，一次重建。
+
+    资产判据是**并集**：当前正文 + 目录里每一份历史正文，谁提到都留着。
+    只被已裁掉的那版引用的图，本来就该跟着版本一起消失——这正是"30 份里
+    没人引用就删"的口径。
+
+    顺序必须是「先裁历史、再按剩下的算并集、最后删资产」：反过来的话，已被
+    裁掉的那版还参与判据，它独占的图会多活一轮，要等下次打开才删——同一次
+    打开里看不出来，测试也测不出来。
+
+    返回 {cleaned, bytes, trimmed}；什么都没做就返回全 0，且不写盘。
+    """
+    doc = os.path.join(base_dir, DOC_NAME)
+    if not os.path.isfile(doc):
+        raise ValueError("doc.md missing in unpacked dir: %s" % base_dir)
+    hd = hist_dir_of(base_dir)
+    trimmed = _trim_hist_dir(hd, keep)
+    texts = []
+    with io.open(doc, "r", encoding="utf-8", newline="") as f:
+        texts.extend(_ref_texts(f.read()))
+    for _seq, fp in _hist_files(hd):
+        try:
+            with io.open(fp, "r", encoding="utf-8", newline="") as f:
+                texts.extend(_ref_texts(f.read()))
+        except Exception:
+            continue                      # 读不出来就少一份判据，方向仍偏保守
+    adir = os.path.join(base_dir, ASSETS_DIR)
+    cleaned = 0
+    freed = 0
+    for rel, fp in _scan_assets(adir):
+        if is_protected(rel):
+            continue
+        if is_asset_used(rel, texts):
+            continue
+        try:
+            sz = os.path.getsize(fp)
+            os.remove(fp)
+            cleaned += 1
+            freed += sz
+        except OSError:
+            pass
+    if cleaned:
+        _prune_empty_dirs(adir)
+    if cleaned or trimmed:
+        compact(smd_path, base_dir, keep)
+    return {"cleaned": cleaned, "bytes": freed, "trimmed": trimmed}
+
+
+def _list_history(smd_path, keep=None):
+    """历史版本列表，最新在前，最多 keep 条（界面可见上限 = 保留份数）。
+
+    标题与字数从正文现算（不额外存清单：清单会跟正文不同步）。
+    """
+    k = hist_keep() if keep is None else max(1, int(keep))
+    out = []
+    with zipfile.ZipFile(smd_path, "r") as z:
+        infos = {}
+        for info in z.infolist():
+            s = _hist_seq(info.filename)
+            if s is not None:
+                infos[s] = info          # 同名多条以后者为准
+        for seq in sorted(infos)[-k:]:
+            info = infos[seq]
+            try:
+                t = z.read(info).decode("utf-8", "replace")
+            except Exception:
+                t = ""
+            out.append({
+                "seq": seq,
+                "time": "%04d-%02d-%02d %02d:%02d" % tuple(info.date_time[:5]),
+                "words": len(t),
+                "title": _first_line(t),
+            })
+    out.reverse()
+    return out
+
+
+def _read_history(smd_path, seq):
+    """取某一历史版本的正文。"""
+    n = int(seq)
+    with zipfile.ZipFile(smd_path, "r") as z:
+        infos = _hist_infos(smd_path)
+        info = infos.get(n)
+        if info is None:
+            raise ValueError("history version not found: %s" % seq)
+        return z.read(info).decode("utf-8", "replace")
+
+
+def _restore_history(smd_path, base_dir, seq):
+    """回滚到某一历史版本（确定性、原子）。
+
+    语义（用户定稿）：选中的历史变成当前，当前变成最新一条历史，该历史条目
+    从列表移除；总数不变。
+    """
+    n = int(seq)
+    cur = _package_doc_text(smd_path)
+    if cur is None:
+        raise ValueError("not a valid .smd (missing %s): %s" % (DOC_NAME, smd_path))
+    with zipfile.ZipFile(smd_path, "r") as z:
+        infos = _hist_infos(smd_path)
+        if n not in infos:
+            raise ValueError("history version not found: %s" % seq)
+        entries = []
+        for s in sorted(infos):
+            entries.append((s, z.read(infos[s]).decode("utf-8", "replace")))
+    target = dict(entries)[n]
+    rest = [(s, t) for s, t in entries if s != n]
+    newseq = (max([s for s, _ in entries] + [0])) + 1
+    rest.append((newseq, cur))
+    keep = hist_keep()
+    rest = rest[-keep:]
+    hd = hist_dir_of(base_dir)
+    os.makedirs(hd, exist_ok=True)
+    for fn in os.listdir(hd):
+        if _hist_seq(HIST_DIR + "/" + fn) is not None:
+            try:
+                os.remove(os.path.join(hd, fn))
+            except OSError:
+                pass
+    for s, t in rest:
+        _write_text(os.path.join(hd, "%06d.md" % s), t)
+    write_doc(base_dir, target)
+    compact(smd_path, base_dir)
+    return {"content": target, "seq": newseq, "removed": n, "kept": len(rest)}
 
 
 def clear_tmp():
@@ -512,13 +894,37 @@ def base_dir_for(smd_path):
         return _base_dir_for(smd_path)
 
 
-def pack_from_dir(smd_path, doc_src, assets_src=None):
+def pack_from_dir(smd_path, doc_src, assets_src=None, hist_dir=None):
     """全量打包（新建/另存为/整理用），原子替换。"""
     with locked(smd_path):
-        _pack_from_dir(smd_path, doc_src, assets_src)
+        _pack_from_dir(smd_path, doc_src, assets_src, hist_dir)
 
 
 def save_from_dir(smd_path, base_dir):
     """增量保存（两阶段提交），返回 (追加 entry 数, 是否发生整理)。"""
     with locked(smd_path):
         return _save_from_dir(smd_path, base_dir)
+
+
+def maintain(smd_path, base_dir, keep=None):
+    """打开文档时整理：回收未引用资产 + 裁剪历史。返回 {cleaned, bytes, trimmed}。"""
+    with locked(smd_path):
+        return _maintain(smd_path, base_dir, keep)
+
+
+def list_history(smd_path, keep=None):
+    """历史版本列表（最新在前，最多 keep 条）。"""
+    with locked(smd_path):
+        return _list_history(smd_path, keep)
+
+
+def read_history(smd_path, seq):
+    """取某一历史版本的正文。"""
+    with locked(smd_path):
+        return _read_history(smd_path, seq)
+
+
+def restore_history(smd_path, base_dir, seq):
+    """回滚到某一历史版本，返回 {content, seq, removed, kept}。"""
+    with locked(smd_path):
+        return _restore_history(smd_path, base_dir, seq)

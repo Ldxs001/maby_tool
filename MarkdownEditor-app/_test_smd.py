@@ -62,7 +62,7 @@ with open(os.path.join(d, "assets", "b.png"), "wb") as f:
     f.write(png_bytes(2))
 n, compacted = _smd.save_from_dir(smd, d)
 size1 = os.path.getsize(smd)
-check("T3 增量追加 2 entry 未整理", n == 2 and not compacted, "%d entry" % n)
+check("T3 增量追加 3 entry 未整理（doc+历史+新图）", n == 3 and not compacted, "%d entry" % n)
 check("T3 包大小增长合理(<32KB)", size1 - size0 < 32 * 1024, "%d -> %d" % (size0, size1))
 with zipfile.ZipFile(smd) as z:
     live = {}
@@ -201,7 +201,9 @@ check("T13 二次保存零重复（幂等）",
       saved13 == [] and mat_md2 == mat_md and len(os.listdir(mstage)) == 1)
 shutil.rmtree(mstage, ignore_errors=True)
 
-# --- T14/T15 保存清理无引用资产（孤儿出目录 + 强制全量重建出包）---
+# --- T14/T15 资产回收改到「打开时」，且按「当前 + 历史」并集判定（v2.24.0）---
+# 口径变更：保存过程不再删任何资产。理由是与并集判据自相矛盾——只被历史版本
+# 引用的图，按单版判据第一次保存就没了，回滚过去必然破图。
 orphan_smd = os.path.join(TD, "orphan.smd")
 orphan_stage = os.path.join(_smd._tmp_root(), "test_stage_orphan")
 shutil.rmtree(orphan_stage, ignore_errors=True)
@@ -213,7 +215,7 @@ with open(os.path.join(orphan_stage, "assets", "keep.png"), "wb") as f:
 _smd.pack_from_dir(orphan_smd, os.path.join(orphan_stage, "doc.md"),
                    os.path.join(orphan_stage, "assets"))
 # 模拟历史旧包：包内孤儿 entry 只能来自旧版本契约（过滤后须用底层追加直造），
-# 另在目录里留一个未引用新图——两种孤儿一次清掉
+# 另在目录里留一个未引用新图——两种孤儿都要等到「打开」才清
 junk_fp = os.path.join(TD, "junk.png")
 with open(junk_fp, "wb") as f:
     f.write(png_bytes(6, 4096))
@@ -223,18 +225,25 @@ with io.open(os.path.join(orphan_stage, "doc.md"), "w", encoding="utf-8") as f:
 with open(os.path.join(orphan_stage, "assets", "junk2.png"), "wb") as f:
     f.write(png_bytes(7, 4096))
 n14, compacted14 = _smd.save_from_dir(orphan_smd, orphan_stage)
-check("T14 孤儿触发强制整理", compacted14, "%d entry" % n14)
-check("T14 目录孤儿已删除",
+check("T14 保存不因孤儿强制整理", not compacted14, "%d entry" % n14)
+check("T14 保存后孤儿仍在目录",
+      os.path.exists(os.path.join(orphan_stage, "assets", "junk2.png")))
+with zipfile.ZipFile(orphan_smd) as z:
+    names14 = z.namelist()
+check("T14 历史版本已生成", "history/000001.md" in names14, ",".join(names14))
+m14 = _smd.maintain(orphan_smd, orphan_stage)
+check("T15 打开时回收孤儿", (m14["cleaned"], m14["trimmed"]) == (1, 0), str(m14))
+check("T15 目录孤儿已删除",
       not os.path.exists(os.path.join(orphan_stage, "assets", "junk.png"))
       and not os.path.exists(os.path.join(orphan_stage, "assets", "junk2.png"))
       and os.path.isfile(os.path.join(orphan_stage, "assets", "keep.png")))
 with zipfile.ZipFile(orphan_smd) as z:
-    names14 = z.namelist()
-check("T14 包内孤儿清除",
-      "assets/junk.png" not in names14 and "assets/junk2.png" not in names14
-      and "assets/keep.png" in names14, ",".join(names14))
-check("T14 二次保存零孤儿（稳态增量）",
-      _smd.save_from_dir(orphan_smd, orphan_stage) == (1, False))
+    names15 = z.namelist()
+check("T15 包内孤儿清除",
+      "assets/junk.png" not in names15 and "assets/junk2.png" not in names15
+      and "assets/keep.png" in names15, ",".join(names15))
+check("T15 二次打开零回收（稳态）",
+      _smd.maintain(orphan_smd, orphan_stage) == {"cleaned": 0, "bytes": 0, "trimmed": 0})
 os.remove(junk_fp)
 
 # --- T16 打包过滤（另存为路径守门员）：未引用文件不入包 ---
@@ -375,10 +384,11 @@ check("T20 落盘正文完整（首尾齐全、无截断）",
 check("T20 落盘正文长度与整篇一致", len(cc_body) == len("# 并发 0-0\n\n%s\nEND-0-0-END\n" % _pad),
       "%d vs %d" % (len(cc_body), len("# 并发 0-0\n\n%s\nEND-0-0-END\n" % _pad)))
 
-# --- T21 死空间按压缩后字节算：重复保存同一内容要能回收 ---
-# 事故背景：旧实现「包大小 − 未压缩大小之和」，单位不对，且只减最后一份。
-# 正文 6MB、压缩后 3MB：存第二份后包里 50% 是重复副本，旧口径算成 -1.5%
-# （因为它把 6MB 未压缩从 6.1MB 里减光了），永远不整理——包只增不减。
+# --- T21 重复保存同一内容不再产生副本（v2.24.0） ---
+# 事故背景（旧实现）：正文 6MB、压缩后 3MB，存第二份后包里 50% 是重复副本；
+# 死空间口径单位错，算出负数永不整理，包只增不减。
+# v1.3.0 起更直接：正文与包内一字不差就整次保存什么都不写（不追加 doc.md，
+# 也不生成历史条目），重复保存不再制造任何副本。
 cmp_smd = os.path.join(TD, "cmp.smd")
 cstage2 = os.path.join(_smd._tmp_root(), "test_stage_cmp")
 shutil.rmtree(cstage2, ignore_errors=True)
@@ -390,13 +400,16 @@ _big_txt = "".join(_parts)
 with io.open(os.path.join(cstage2, "doc.md"), "w", encoding="utf-8") as f:
     f.write(_big_txt)
 _smd.pack_from_dir(cmp_smd, os.path.join(cstage2, "doc.md"), None)
-# 正文一个字都不改，连存两次：第二次时包里有两份全文，死空间 50%
-_n21a, _c21a = _smd.save_from_dir(cmp_smd, cstage2)   # 包未过 5MB 门槛，缓存增量
-_n21, _c21 = _smd.save_from_dir(cmp_smd, cstage2)     # 已过门槛，必须回收
+_size21 = os.path.getsize(cmp_smd)
+_n21a, _c21a = _smd.save_from_dir(cmp_smd, cstage2)   # 正文未改
+_n21, _c21 = _smd.save_from_dir(cmp_smd, cstage2)     # 再存一次仍未改
 _u = len(_big_txt.encode("utf-8"))
-check("T21 重复副本触发整理", _c21 and not _c21a,
-      "正文 %.1fMB（包已回收到 %.1fMB）；旧口径此处算出负数，永不整理"
-      % (_u / 1048576.0, os.path.getsize(cmp_smd) / 1048576.0))
+check("T21 未改动保存零追加", (_n21a, _n21) == (0, 0) and not _c21a and not _c21,
+      "n=%r,%r" % (_n21a, _n21))
+check("T21 重复保存包不增长", os.path.getsize(cmp_smd) == _size21,
+      "正文 %.1fMB（包 %.1fMB）" % (_u / 1048576.0,
+                                    os.path.getsize(cmp_smd) / 1048576.0))
+check("T21 重复保存不产生历史", _smd.list_history(cmp_smd) == [])
 
 # --- T22 URL 编码引用：%20 / %XX 写法不许被判孤儿 ---
 # 事故背景：子串只认原样写法，链接目标被编码后认不出，正在用的图被判

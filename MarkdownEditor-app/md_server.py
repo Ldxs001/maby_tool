@@ -65,7 +65,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 117  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 118  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 # MSIX 商城版判定（微软商店政策 11.16 的"报告 AI 生成内容"入口用）：
 # 商城包与侧载包恒落在 WindowsApps 之下，Release 安装包/便携形态不会。
@@ -410,6 +410,64 @@ def _meta_of(doc_path):
         return _meta.read(_meta_assets_dir(doc_path))
     except Exception:
         return None
+
+
+# 历史保留份数由前端 lsSet 落到 runtime/ui-settings.json（键名带 md-editor-
+# 前缀才参与上云同步）。每次进入相关接口前同步一次：不做缓存，避免"改了设置
+# 但进程里还是旧值"这种要重启才生效的假象。
+HIST_KEEP_KEY = "md-editor-hist-keep"
+
+
+def _apply_hist_keep():
+    if _smd is None:
+        return 30
+    try:
+        raw = _ui_settings_read().get(HIST_KEEP_KEY)
+    except Exception:
+        raw = None
+    return _smd.set_hist_keep(_smd.HIST_KEEP if raw is None else raw)
+
+
+def _cleanup_md_assets(doc_path, text):
+    """打开普通 .md 时回收 <stem>.assets 里正文已不再引用的文件（v2.24.0）。
+
+    判据与 .smd 同一套（`assets/<名>` 子串，含 URL 解码与反斜杠归一形态），
+    单纯 .md 只有当前正文一个版本，所以并集退化成单份。
+
+    返回 {cleaned, bytes}：前端据此在状态栏说一句"已清理 N 个未引用文件"。
+    删除不可恢复——.assets 里"备着但还没引用"的素材也会被清掉，这是
+    2026-10-31 定下的口径（清理只在打开时做，保存时一律不动）。
+    """
+    out = {"cleaned": 0, "bytes": 0}
+    if _smd is None or not doc_path or not os.path.isfile(doc_path):
+        return out
+    stem = os.path.splitext(os.path.basename(doc_path))[0]
+    adir = os.path.join(os.path.dirname(os.path.abspath(doc_path)), stem + ".assets")
+    if not os.path.isdir(adir):
+        return out
+    texts = _smd._ref_texts(text or "")
+    n = 0
+    freed = 0
+    for dp, _dns, fns in os.walk(adir):
+        for fn in fns:
+            fp = os.path.join(dp, fn)
+            rel = os.path.relpath(fp, adir).replace("\\", "/")
+            if _smd.is_protected(rel):
+                continue
+            if _smd.is_asset_used(rel, texts):
+                continue
+            try:
+                sz = os.path.getsize(fp)
+                os.remove(fp)
+                n += 1
+                freed += sz
+            except OSError:
+                pass
+    if n:
+        _smd._prune_empty_dirs(adir)
+    out["cleaned"] = n
+    out["bytes"] = freed
+    return out
 
 
 def _smd_tmp_backups(smd_path):
@@ -1514,12 +1572,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # .smd 自包含文档：解包（幂等）后返回 doc.md 内容 + 工作目录，
                 # 前端以 base 为图片基址（assets/ 引用经 /img 代理指向解包目录）
                 try:
+                    _apply_hist_keep()
                     base = _smd.base_dir_for(p)
+                    # 打开即整理：按「当前 + 全部历史」并集回收未引用资产、
+                    # 按保留份数裁剪历史。没有可回收/可裁剪的条目时零写入。
+                    try:
+                        _mt = _smd.maintain(p, base)
+                    except Exception:
+                        _mt = {"cleaned": 0, "bytes": 0, "trimmed": 0}
                     with open(os.path.join(base, _smd.DOC_NAME), "r", encoding="utf-8") as f:
                         content = f.read()
                     _LAST_DOC_DIR[0] = base
                     self._send(200, json.dumps({"ok": True, "smd": True, "base": base,
-                                                "content": content}, ensure_ascii=False),
+                                                "content": content,
+                                                "cleanup": _mt,
+                                                "meta": _meta_of(p)},
+                                               ensure_ascii=False),
                                "application/json; charset=utf-8")
                 except Exception as e:
                     self._send(500, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
@@ -1531,7 +1599,64 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self._send(500, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
                 return
-            self._send(200, data, "text/plain; charset=utf-8")
+            # 普通 .md：打开即回收 .assets 里正文不再引用的文件；清理结果走响应头
+            # （正文按纯文本回，前端已经在用 text 分支，不改成 JSON 包一层）
+            try:
+                _cl = _cleanup_md_assets(p, data)
+            except Exception:
+                _cl = {"cleaned": 0, "bytes": 0}
+            self._send(200, data, "text/plain; charset=utf-8",
+                       {"X-MDE-Cleanup": "%d,%d" % (_cl["cleaned"], _cl["bytes"])})
+            return
+        if u.path == "/api/history":
+            # 历史版本列表。.md 不支持（覆盖写，没有可回溯的副本），如实返回
+            # kind="md" 让前端显示一句说明，而不是报错。
+            q = urllib.parse.parse_qs(u.query)
+            p = q.get("path", [""])[0]
+            if not p:
+                self._send(400, json.dumps({"ok": False, "error": "missing path"}, ensure_ascii=False))
+                return
+            keep = _apply_hist_keep()
+            if _smd is None:
+                kind = "none"
+            elif _smd.is_smd(p):
+                kind = "smd"
+            elif os.path.isfile(p):
+                kind = "md"
+            else:
+                kind = "none"
+            items = []
+            if kind == "smd" and os.path.isfile(p):
+                try:
+                    items = _smd.list_history(p)
+                except Exception as e:
+                    self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                               ensure_ascii=False))
+                    return
+            self._send(200, json.dumps({"ok": True, "kind": kind, "keep": keep,
+                                        "items": items}, ensure_ascii=False),
+                       "application/json; charset=utf-8")
+            return
+        if u.path == "/api/history-item":
+            q = urllib.parse.parse_qs(u.query)
+            p = q.get("path", [""])[0]
+            try:
+                seq = int(q.get("seq", [""])[0])
+            except (TypeError, ValueError):
+                seq = None
+            if not p or seq is None:
+                self._send(400, json.dumps({"ok": False, "error": "missing path/seq"},
+                                           ensure_ascii=False))
+                return
+            try:
+                text = _smd.read_history(p, seq)
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
+                return
+            self._send(200, json.dumps({"ok": True, "seq": seq, "text": text},
+                                       ensure_ascii=False),
+                       "application/json; charset=utf-8")
             return
         if u.path == "/img":
             q = urllib.parse.parse_qs(u.query)
@@ -1882,6 +2007,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     # 整段持锁：写正文与进包必须是一个整体。分开做的话，
                     # 另一个并发保存可以在两者之间插入，把旧正文打进包。
                     with _smd.locked(p):
+                        _apply_hist_keep()
                         base = _smd.base_dir_for(p)
                         if materialize_into:
                             content, _mi = materialize_into(
@@ -1905,6 +2031,37 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                             "images": added}, ensure_ascii=False))
             except Exception as e:
                 self._send(500, json.dumps({"ok": False, "error": _friendly_save_error(e, p)},
+                                           ensure_ascii=False))
+            return
+        if u.path == "/api/history-restore":
+            # 回滚到某一历史版本（确定性、原子）。语义：选中的历史变成当前，
+            # 当前变成最新一条历史，该条目从列表移除——不是"复制一份覆盖"。
+            # 前端必须已做预览 + 二次确认才发这里。
+            try:
+                obj = json.loads(self.rfile.read(
+                    int(self.headers.get("Content-Length", 0))).decode("utf-8"))
+                p = (obj.get("path") or "").strip()
+                seq = obj.get("seq")
+                if not p or seq is None:
+                    self._send(400, json.dumps({"ok": False, "error": "missing path/seq"},
+                                               ensure_ascii=False))
+                    return
+                if _smd is None or not _smd.is_smd(p) or not os.path.isfile(p):
+                    self._send(400, json.dumps({"ok": False,
+                                                "error": "not a .smd document"},
+                                               ensure_ascii=False))
+                    return
+                with _smd.locked(p):
+                    _apply_hist_keep()
+                    base = _smd.base_dir_for(p)
+                    r = _smd.restore_history(p, base, int(seq))
+                _LAST_DOC_DIR[0] = base
+                self._send(200, json.dumps({"ok": True, "content": r["content"],
+                                            "seq": r["seq"], "removed": r["removed"],
+                                            "base": base, "meta": _meta_of(p)},
+                                           ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
                                            ensure_ascii=False))
             return
         if u.path == "/api/save-as":

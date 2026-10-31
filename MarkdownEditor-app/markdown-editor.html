@@ -469,8 +469,28 @@
     #tsClose{font-size:20px;line-height:1;padding:0 2px;}
     #fmOverlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:98;display:flex;align-items:center;justify-content:center;}
     #fmOverlay[hidden]{display:none !important;}
-    #fmPanel{width:530px;max-height:80vh;overflow:auto;background:#23272f;color:#e8eaed;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.5);}
+    /* 文件面板：两列。左＝内置文档 + 最近文件（原样），右＝历史版本。
+       面板本身 flex 纵向、定宽 900，两列各自滚动——整块面板滚动的话，
+       右列历史一长就把左列顶出可视区。 */
+    #fmPanel{width:900px;max-width:calc(100vw - 40px);max-height:80vh;background:#23272f;color:#e8eaed;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.5);display:flex;flex-direction:column;overflow:hidden;}
     body.light #fmPanel{background:#ffffff;color:#222;}
+    .fm-cols{display:flex;gap:12px;padding:10px 12px 14px;flex:1 1 auto;min-height:0;}
+    .fm-col{flex:1 1 0;min-width:0;overflow:auto;}
+    #fmHistCol{display:flex;flex-direction:column;overflow:hidden;border-left:1px solid rgba(128,128,128,.22);padding-left:12px;}
+    .fm-hist-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:2px 4px 8px;font-weight:600;flex:0 0 auto;}
+    .fm-keep{font-weight:400;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;white-space:nowrap;}
+    .fm-keep input{width:54px;background:transparent;color:inherit;border:1px solid rgba(128,128,128,.4);border-radius:5px;padding:1px 4px;font-size:12px;}
+    .fm-hist-body{flex:1 1 auto;min-height:0;overflow:auto;}
+    .fm-hitem{padding:8px 10px;border-radius:8px;cursor:pointer;border:1px solid transparent;margin:4px 0;}
+    .fm-hitem:hover{background:rgba(128,128,128,.15);}
+    .fm-hitem b{display:block;font-size:13px;font-weight:600;}
+    .fm-hsub{font-size:11px;color:var(--muted);margin-top:2px;word-break:break-all;}
+    #histOverlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99;display:flex;align-items:center;justify-content:center;}
+    #histOverlay[hidden]{display:none !important;}
+    #histPanel{width:min(760px,calc(100vw - 40px));max-height:82vh;background:#23272f;color:#e8eaed;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.5);display:flex;flex-direction:column;overflow:hidden;}
+    body.light #histPanel{background:#fff;color:#222;}
+    #histBody{flex:1 1 auto;min-height:0;overflow:auto;margin:0;padding:12px 16px;font:12.5px/1.6 ui-monospace,Consolas,"Courier New",monospace;white-space:pre-wrap;word-break:break-word;}
+    #histOverlay .ts-foot{display:flex;align-items:center;gap:8px;}
     .fm-item{padding:10px 12px;border-radius:8px;cursor:pointer;border:1px solid transparent;margin:4px 0;}
     .fm-item:hover{background:rgba(128,128,128,.15);}
     .fm-item.cur{border-color:#4a6cf7;background:rgba(74,108,247,.12);}
@@ -799,7 +819,29 @@
 <div id="fmOverlay" hidden>
   <div id="fmPanel">
     <div class="ts-head"><span>文件</span><button id="fmClose" title="关闭">×</button></div>
-    <div class="ts-body" id="fmList"></div>
+    <div class="fm-cols">
+      <div class="fm-col ts-body" id="fmList"></div>
+      <div class="fm-col" id="fmHistCol">
+        <div class="fm-hist-head">
+          <span>历史版本</span>
+          <label class="fm-keep"><span>保留</span>
+            <input id="fmKeep" type="number" min="1" max="200" step="1"
+                   title="历史版本最多保留几份（1~200）：超出时最旧的自动删除；包内允许临时多存约 1/3 以便合并整理，界面只显示保留份数">
+            <span>份</span></label>
+        </div>
+        <div class="fm-hist-body" id="fmHist"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="histOverlay" hidden>
+  <div id="histPanel">
+    <div class="ts-head"><span id="histTitle">历史版本</span><button id="histClose" title="关闭">×</button></div>
+    <pre id="histBody"></pre>
+    <div class="ts-foot"><span id="histMeta" class="fm-sub" style="margin:0;"></span>
+      <span style="flex:1 1 auto;"></span>
+      <button id="histCancel" class="lr-btn">取消</button>
+      <button id="histRestore" class="lr-btn primary">恢复到此版本</button></div>
   </div>
 </div>
 <div id="llmOverlay" hidden>
@@ -2492,7 +2534,8 @@ function _i18nEl(el){
 }
 /* 只翻这些 UI 根；#editor、#preview、#outline（用户内容/文档标题）不在列 */
 var I18N_ROOTS=['#toolbar','#status','#findBar','#svOverlay','#tsOverlay','#lrOverlay',
-                '#fmOverlay','#llmOverlay','#annOverlay','#rwOverlay','#rpOverlay'];
+                '#fmOverlay','#llmOverlay','#annOverlay','#rwOverlay','#rpOverlay',
+                '#histOverlay'];
 function _i18nRoots(){
   var out=[];
   for(var i=0;i<I18N_ROOTS.length;i++){
@@ -2567,6 +2610,25 @@ function applyLang(l){
      输入框**——框里可能是刚敲、还没应用的设置值。 */
   try{ if(typeof window.__mdeMetaHint==='function') window.__mdeMetaHint(); }catch(e){}
 }
+/* v2.24.0 历史版本面板与打开时清理：新增文案一律走词表，动态带参走 TF()。
+   直接补键而不是改那一整行字面量——那行太长了，改动等于重排全部词条。 */
+I18N_EN["历史版本"]="Versions";
+I18N_EN["保留"]="Keep";
+I18N_EN["份"]="copies";
+I18N_EN["第 {0} 版"]="Version {0}";
+I18N_EN["历史版本预览"]="Version preview";
+I18N_EN["恢复到此版本"]="Restore this version";
+I18N_EN["确认恢复？"]="Confirm restore?";
+I18N_EN["恢复到该版本后，当前内容会变成最新一条历史"]="After restoring, the current text becomes the newest version in the list";
+I18N_EN["历史版本最多保留几份（1~200）：超出时最旧的自动删除；包内允许临时多存约 1/3 以便合并整理，界面只显示保留份数"]="How many versions to keep (1-200). The oldest is dropped beyond that. The package may temporarily hold about a third more so compaction stays rare; only the kept count is listed.";
+I18N_EN["`.md` 不支持历史版本（保存是覆盖写，磁盘上只有当前这一份）"]="`.md` files have no version history (saving overwrites the single file on disk)";
+I18N_EN["未保存的文档还没有历史版本"]="An unsaved document has no versions yet";
+I18N_EN["历史版本列表读取失败："]="Could not list versions: ";
+I18N_EN["读取历史版本失败："]="Could not read the version: ";
+I18N_EN["恢复失败："]="Restore failed: ";
+I18N_EN["已恢复到第 {0} 版"]="Restored version {0}";
+I18N_EN["已清理 {0} 个未引用文件（{1}）"]="Cleaned up {0} unreferenced file(s) ({1})";
+I18N_EN["本版保留份数已改为 {0}，下次保存或打开时生效"]="Versions to keep set to {0}; it applies on the next save or open";
 /*I18N_END*/
 
 
@@ -4654,13 +4716,21 @@ function applyLang(l){
       .then(function(r){
         if(!r.ok) throw new Error('HTTP '+r.status);
         var ct=(r.headers.get('Content-Type')||'');
+        /* 打开时的资产回收结果：.smd 在 JSON 里，.md 在响应头里
+           （正文仍按纯文本回，不为一行统计把整篇改成 JSON 包一层） */
+        var cl=null;
+        var hd=r.headers.get('X-MDE-Cleanup');
+        if(hd){
+          var ab=hd.split(',');
+          cl={cleaned:parseInt(ab[0],10)||0, bytes:parseInt(ab[1],10)||0};
+        }
         if(ct.indexOf('json')>=0){
           return r.json().then(function(j){
             if(!(j&&j.ok)) throw new Error((j&&j.error)||'读取失败');
-            return {txt:j.content, base:j.base};
+            return {txt:j.content, base:j.base, cleanup:j.cleanup||cl};
           });
         }
-        return r.text().then(function(t){ return {txt:t, base:null}; });
+        return r.text().then(function(t){ return {txt:t, base:null, cleanup:cl}; });
       })
       .then(function(d){
         return loadMetaFor(p).then(function(){ return d; });   /* 元数据先就绪，再交给渲染 */
@@ -4676,6 +4746,7 @@ function applyLang(l){
         applyDocWithDraft(currentFile, d.txt, '已载入原文件');
         addRecent(currentFile);
         updateFileIndicator(currentFile);
+        showCleanupNotice(d.cleanup);
       })
       .catch(function(e){ showToast('读取文件失败：'+e.message); });
   }
@@ -4696,6 +4767,10 @@ function applyLang(l){
       annReanchorLocal();
       scheduleRender();
     }
+    /* 面板开着时保存完要刷历史列：这次保存刚追加了一条，不刷就是旧列表 */
+    try{
+      if(!document.getElementById('fmOverlay').hidden) renderHist();
+    }catch(e){}
   }
   /* ── 落盘唯一出口 ─────────────────────────────────────────────────
      手动「保存」、Ctrl+S、自动落盘三条路以前各写一遍 fetch，写法已经开始分叉：
@@ -4705,11 +4780,26 @@ function applyLang(l){
      没有路径就跳过（不弹窗），失败写状态栏而不是弹窗打扰。
      .md 与 .smd 的差别只在服务端 —— /api/file 内部按扩展名分流，前端不判断。 */
   var _saving=false;
+  /* 未命名文档的自动落盘口径（主人 2026-10-31 定，恢复 v1.0.1 的「内存文档到点
+     弹一次保存框」）：第一次到点弹「另存为」，逼人落一次盘；人点了取消，本会话
+     不再弹，改为每个周期在状态栏说明为什么没落盘——那句话本身就是常驻提示。
+     v2.23.1 曾把这条弹框当缺陷删成静默跳过，属未授权变更，此处恢复。
+     不存本地草稿：没有文件名，草稿没有调用入口，存了也是静默无用。 */
+  var _autoAskDeclined=false;   /* 自动弹过「另存为」且被取消：本会话不再弹 */
+  var _autoAskOpen=false;       /* 弹框正开着（原生框或页面模态框），防周期叠加 */
+  var _svAuto=false;            /* 当前这次另存为是自动落盘弹起的，不是人点的 */
+  function autoAskDeclined(){
+    _autoAskDeclined=true;
+    var ss=document.getElementById('statSave');
+    ss.textContent=TF('自动落盘已跳过：文档还没有保存路径'); ss.className='';
+  }
   function saveToDisk(silent){
     var ss=document.getElementById('statSave');
     if(!currentFile){
       if(!silent){ openSaveAs(); return Promise.resolve(false); }
-      ss.textContent=TF('自动落盘已跳过：文档还没有保存路径'); ss.className='';
+      /* 框开着就什么都不做：不叠第二个框，也不跟对话框抢状态栏 */
+      if(!_autoAskDeclined && !_autoAskOpen){ openSaveAs(true); return Promise.resolve(false); }
+      if(_autoAskDeclined){ ss.textContent=TF('自动落盘已跳过：文档还没有保存路径'); ss.className=''; }
       return Promise.resolve(false);
     }
     if(_saving)return Promise.resolve(false);   /* 手动与自动撞车时只跑一次 */
@@ -5634,12 +5724,15 @@ function applyLang(l){
     sb.title = has ? '保存到 ' + currentFile : '尚无文件路径，请先「另存为」';
     if (!has) {
       var ss = document.getElementById('statSave');
-      ss.textContent = '未另存为';
+      /* 已经放弃过自动弹框的文档：这句话要常驻，不能被「未另存为」刷回去 */
+      ss.textContent = _autoAskDeclined ? TF('自动落盘已跳过：文档还没有保存路径') : '未另存为';
       ss.className = '';
     }
   }
   function newDoc(){
     currentFile = null; currentBuiltin = -1; currentBase = null;
+    /* 新文档是新的生命周期：自动落盘要重新有一次「弹另存为」的机会 */
+    _autoAskDeclined=false; _autoAskOpen=false; _svAuto=false;
     /* v2.23.0 新建即插入元数据锚点（老文件不管）：@@ meta 本身不渲染任何东西，
        等人在「排版 → 元数据」里填了第一个字段、首次保存建档之后，区域才出现。
        光标落在第二行——末尾就是空行，直接开写正文。 */
@@ -5702,16 +5795,21 @@ function applyLang(l){
     } catch(e) {}
     return '未命名.md';
   }
-  function openSaveAs(){
+  function openSaveAs(auto){
+    if(_autoAskOpen) return;      /* 已经开着一个：手动与自动都不许叠第二个 */
+    _autoAskOpen=true; _svAuto=!!auto;
     var cur = docTitleForSave();
     if (currentFile) {
       var parts = currentFile.split(/[\\/]/);
       cur = parts[parts.length - 1] || cur;
     }
-    doSaveAs(cur || docTitleForSave(), getText());
+    doSaveAs(cur || docTitleForSave(), getText(), !!auto);
   }
   document.getElementById('svCancel').addEventListener('click',function(){
     document.getElementById('svOverlay').hidden = true;
+    _autoAskOpen=false;
+    if(_svAuto) autoAskDeclined();   /* 自动弹起的框被取消 → 本会话不再弹 */
+    _svAuto=false;
   });
   function doBrowseDir(){
     var a = pyApi();
@@ -5734,6 +5832,8 @@ function applyLang(l){
       .then(function(r){return r.json();})
       .then(function(j){
         if (!(j && j.ok)) { showToast('保存失败：'+((j&&j.error)||'未知错误')); return; }
+        /* 成功即复位：有路径了，标记失去意义；下次新建文档要能重新弹一次 */
+        _autoAskOpen=false; _svAuto=false; _autoAskDeclined=false;
         applySavedContent(j);
         currentFile = j.path;
         currentBase = j.smd ? j.base : null;
@@ -5748,15 +5848,16 @@ function applyLang(l){
         updateSaveBtn();
       }).catch(function(e){ showToast('保存失败：'+e.message); });
   }
-  function doSaveAs(defaultName, content){
+  function doSaveAs(defaultName, content, auto){
     var a = pyApi();
     if (pyReady() && a.pick_save_path) {
       a.pick_save_path(defaultName || '未命名.md', lastDir).then(function(p){
-        if (!p) return;   /* 用户取消 */
+        _autoAskOpen=false;                    /* 原生框已收，无论取消还是选完路径 */
+        if (!p) { if(auto) autoAskDeclined(); return; }   /* 用户取消 */
         var dir = p.replace(/[\\/][^\\/]*$/, '');
         var name = p.split(/[\\/]/).pop();
         saveAsTo(dir, name, content);
-      }).catch(function(e){ showToast('保存失败：' + e); });
+      }).catch(function(e){ _autoAskOpen=false; showToast('保存失败：' + e); });
       return;
     }
     // 浏览器模式：打开保存模态框（文件名不带后缀，格式由下拉决定）
@@ -6011,6 +6112,7 @@ function applyLang(l){
         applyDocWithDraft(p, d.txt, '已载入');
         addRecent(p);
         updateFileIndicator(p);
+        showCleanupNotice(d.cleanup);
       })
       .catch(function(e){ showToast('读取文件失败：'+e.message); });
   }
@@ -6079,6 +6181,7 @@ function applyLang(l){
   }
   document.getElementById('btnFiles').addEventListener('click',function(){
     renderFileList();
+    renderHist();                                  /* 右列：历史版本 */
     document.getElementById('fmOverlay').hidden=false;
   });
   document.getElementById('fmClose').addEventListener('click',function(){
@@ -6087,6 +6190,190 @@ function applyLang(l){
   document.getElementById('fmOverlay').addEventListener('click',function(e){
     if(e.target===this)this.hidden=true;
   });
+
+  /* ══════════════ 历史版本（v2.24.0，仅 .smd）══════════════
+     语义：每次保存把「被替换掉的上一版」追加成一条历史；保留份数可配（默认 30），
+     超出时最旧的删掉。点条目＝只读预览，预览里的「恢复到此版本」再点一次确认，
+     恢复是**交换**：选中的变当前、当前的变最新历史、该条目从列表移除。 */
+  var HIST_KEEP_KEY='md-editor-hist-keep';
+  var _histSeqTok=0, _histCurSeq=null, _histArmed=0, _histArmTimer=null;
+
+  function histKeepGet(){
+    var v=parseInt(localStorage.getItem(HIST_KEEP_KEY)||'',10);
+    if(!(v>=1))v=30;
+    if(v>200)v=200;
+    return v;
+  }
+  function histKeepSet(v){
+    var old=histKeepGet();
+    v=parseInt(v,10);
+    if(!(v>=1))v=1;
+    if(v>200)v=200;
+    document.getElementById('fmKeep').value=String(v);
+    if(v===old)return v;
+    lsSet(HIST_KEEP_KEY,String(v));
+    showToast(TF('本版保留份数已改为 {0}，下次保存或打开时生效', v));
+    return v;
+  }
+  function fmtBytes(n){
+    n=Number(n)||0;
+    if(n<1024)return n+' B';
+    if(n<1048576)return (n/1024).toFixed(1)+' KB';
+    return (n/1048576).toFixed(1)+' MB';
+  }
+  function renderHist(){
+    var box=document.getElementById('fmHist');
+    if(!box)return;
+    document.getElementById('fmKeep').value=String(histKeepGet());
+    var tok=++_histSeqTok;
+    if(!currentFile){
+      box.innerHTML='<div class="fm-sub" style="padding:6px 4px;line-height:1.6;">'
+        +escapeHtml(TF('未保存的文档还没有历史版本'))+'</div>';
+      return;
+    }
+    box.innerHTML='<div class="fm-sub" style="padding:6px 4px;">…</div>';
+    fetch('/api/history?path='+encodeURIComponent(currentFile))
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if(tok!==_histSeqTok)return;          /* 快速切换文件：只认最后一次 */
+        if(!j||!j.ok){
+          box.innerHTML='<div class="fm-sub" style="padding:6px 4px;">'
+            +escapeHtml(TF('历史版本列表读取失败：')+((j&&j.error)||''))+'</div>';
+          return;
+        }
+        if(j.kind!=='smd'){
+          box.innerHTML='<div class="fm-sub" style="padding:6px 4px;line-height:1.6;">'
+            +escapeHtml(TF('`.md` 不支持历史版本（保存是覆盖写，磁盘上只有当前这一份）'))+'</div>';
+          return;
+        }
+        var it=j.items||[];
+        if(!it.length){
+          box.innerHTML='<div class="fm-sub" style="padding:6px 4px;line-height:1.6;">'
+            +escapeHtml(TF('未保存的文档还没有历史版本'))+'</div>';
+          return;
+        }
+        var h='';
+        for(var i=0;i<it.length;i++){
+          var v=it[i];
+          var head=TF('第 {0} 版', v.seq)+(v.title?(' · '+v.title):'');
+          h+='<div class="fm-hitem" data-seq="'+v.seq+'"><b>'+escapeHtml(head)+'</b>'
+            +'<div class="fm-hsub">'+escapeHtml(v.time+' · '+v.words+' '+TF('字'))+'</div></div>';
+        }
+        box.innerHTML=h;
+        var ns=box.querySelectorAll('.fm-hitem');
+        for(var k=0;k<ns.length;k++){
+          ns[k].addEventListener('click',function(){
+            openHistPreview(parseInt(this.getAttribute('data-seq'),10));
+          });
+        }
+      })
+      .catch(function(e){
+        if(tok!==_histSeqTok)return;
+        box.innerHTML='<div class="fm-sub" style="padding:6px 4px;">'
+          +escapeHtml(TF('历史版本列表读取失败：')+e.message)+'</div>';
+      });
+  }
+  function openHistPreview(seq){
+    if(!currentFile)return;
+    _histCurSeq=seq;
+    _histArmed=0;
+    clearTimeout(_histArmTimer);
+    var ov=document.getElementById('histOverlay');
+    var btn=document.getElementById('histRestore');
+    btn.textContent=TF('恢复到此版本'); btn.disabled=true;
+    document.getElementById('histTitle').textContent=TF('历史版本预览')+' · '+TF('第 {0} 版', seq);
+    document.getElementById('histMeta').textContent='';
+    var body=document.getElementById('histBody');
+    body.textContent='…';
+    ov.hidden=false;
+    fetch('/api/history-item?path='+encodeURIComponent(currentFile)+'&seq='+seq)
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if(!j||!j.ok){
+          ov.hidden=true;
+          showToast(TF('读取历史版本失败：')+((j&&j.error)||''));
+          return;
+        }
+        body.textContent=j.text||'';
+        body.scrollTop=0;
+        btn.disabled=false;
+      })
+      .catch(function(e){
+        ov.hidden=true;
+        showToast(TF('读取历史版本失败：')+e.message);
+      });
+  }
+  function closeHist(){
+    document.getElementById('histOverlay').hidden=true;
+    _histArmed=0;
+    clearTimeout(_histArmTimer);
+  }
+  document.getElementById('histClose').addEventListener('click',closeHist);
+  document.getElementById('histCancel').addEventListener('click',closeHist);
+  document.getElementById('histOverlay').addEventListener('click',function(e){
+    if(e.target===this)closeHist();
+  });
+  document.getElementById('histRestore').addEventListener('click',function(){
+    var btn=this;
+    if(_histCurSeq===null)return;
+    if(_histArmed!==_histCurSeq){
+      _histArmed=_histCurSeq;
+      btn.textContent=TF('确认恢复？');
+      btn.title=TF('恢复到该版本后，当前内容会变成最新一条历史');
+      clearTimeout(_histArmTimer);
+      _histArmTimer=setTimeout(function(){
+        if(_histArmed){ _histArmed=0; btn.textContent=TF('恢复到此版本'); }
+      },3200);
+      return;
+    }
+    _histArmed=0;
+    clearTimeout(_histArmTimer);
+    var seq=_histCurSeq;
+    btn.disabled=true;
+    fetch('/api/history-restore',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({path:currentFile,seq:seq})})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        btn.disabled=false;
+        btn.textContent=TF('恢复到此版本');
+        if(!j||!j.ok){
+          showToast(TF('恢复失败：')+((j&&j.error)||''));
+          return;
+        }
+        closeHist();
+        if(j.base)currentBase=j.base;
+        setText(j.content||'');
+        render(); dirty=false; updateStats();
+        setDraft(currentFile,undefined);   /* 磁盘=编辑区，旧草稿必须清掉 */
+        annotationsLoad(currentFile);
+        var ss=document.getElementById('statSave');
+        var msg=TF('已恢复到第 {0} 版', seq);
+        ss.textContent=msg; ss.className='saved';
+        showToast(msg);
+        renderHist();
+      })
+      .catch(function(e){
+        btn.disabled=false;
+        btn.textContent=TF('恢复到此版本');
+        showToast(TF('恢复失败：')+e.message);
+      });
+  });
+  document.getElementById('fmKeep').addEventListener('change',function(){
+    histKeepSet(this.value);
+  });
+  /* 打开文件后说一句清理结果：只报有清理的情况，0 个不吭声；
+     8 秒后把状态栏恢复原样（这期间别的地方可能又写了状态，比对再恢复）。 */
+  function showCleanupNotice(cl){
+    if(!cl||!cl.cleaned)return;
+    var ss=document.getElementById('statSave');
+    var prev=ss.textContent, prevCls=ss.className;
+    var msg=TF('已清理 {0} 个未引用文件（{1}）', cl.cleaned, fmtBytes(cl.bytes));
+    ss.textContent=msg; ss.className='saved';
+    setTimeout(function(){
+      if(ss.textContent===msg){ ss.textContent=prev; ss.className=prevCls; }
+    },8000);
+  }
   /* 初始文件指示：无 URL 时缓存内容对应最近一条记录 */
   (function(){
     var rec=recentList();
