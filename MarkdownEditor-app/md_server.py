@@ -64,7 +64,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 124  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 125  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 # MSIX 商城版判定（微软商店政策 11.16 的"报告 AI 生成内容"入口用）：
 # 商城包与侧载包恒落在 WindowsApps 之下，Release 安装包/便携形态不会。
@@ -3141,6 +3141,14 @@ FIGCAP_BASE_CSS = """
 .markdown-body figcaption.mde-figcap{width:100%;max-width:100%;overflow:hidden;font-size:.92em;line-height:1.5;}
 .markdown-body figure.mde-fig[data-fig-side="b"]>figcaption{margin-top:calc(1em * var(--figgap,.3));}
 .markdown-body figure.mde-fig[data-fig-side="t"]>figcaption{margin-bottom:calc(1em * var(--figgap,.3));}
+/* v2.26.4 长图切片 figure 改走普通块级流（side="ts"，由 _deflex_sliced_figures
+   改写）：side="t" 的 flex column-reverse 是给**单图**题注翻面用的，切片后
+   figure 里有整串条带 img——column-reverse 会把条带视觉顺序整串倒过来，且
+   flex 容器在 Paged.js 里不可跨页分裂（塞不进一页就溢出渗漏：大空白+叠印）。
+   ts = 块级流 + 题注 DOM 前置（改写时 figcaption 移到第一条条带之前）+
+   break-inside:auto（figure 本体可断页，断点落在条带之间，条带自身仍 avoid）。 */
+.markdown-body figure.mde-fig[data-fig-side="ts"]{display:block;break-inside:auto;}
+.markdown-body figure.mde-fig[data-fig-side="ts"]>figcaption{margin-bottom:calc(1em * var(--figgap,.3));}
 .markdown-body figure.mde-fig[data-fig-mode="w"]>figcaption{white-space:nowrap;text-overflow:ellipsis;}
 .markdown-body .mde-tblwrap{margin:.9em 0;}
 .markdown-body .mde-tabcap{font-size:.92em;line-height:1.5;overflow:hidden;}
@@ -3514,7 +3522,40 @@ def _slice_tall_images(body_html, icb_w_mm, img_maxh_mm, dpi=0):
                         % (digest, i + 1, alt, style))
         return "".join(tags)
 
-    return img_re.sub(_repl, body_html)
+    return _deflex_sliced_figures(img_re.sub(_repl, body_html))
+
+
+# ---------- v2.26.4 切片 figure 防翻面 ----------
+# side="t" 的 flex column-reverse 只适配**单图**题注翻面；切片后 figure 里有
+# 整串条带 img，column-reverse 会把条带视觉顺序整串倒过来（判例 2026-11-02
+# 食品检验检测机构现状分析：页面上从下往上读原图、注脚两现、图表叠进表格），
+# 且 flex 容器在 Paged.js 里不可跨页分裂——447mm 的 figure 塞不进 260mm 页心
+# 就溢出渗漏（大空白 + 跨页叠印）。修法 = 改走普通块级流：side 改写为 "ts"
+# （CSS：display:block;break-inside:auto），题注从 DOM 尾部移到头部（题注仍在
+# 图上方，与 t 的视觉一致）。side="b" 本就是块级流，不碰；未切片的单图 figure
+# 也不碰（flex 行为零变化）。
+_FIG_RE = re.compile(r"<figure\b[^>]*>[\s\S]*?</figure>", re.I)
+_FIGCAP_RE = re.compile(r"<figcaption\b[^>]*>[\s\S]*?</figcaption>", re.I)
+
+
+def _deflex_sliced_figures(html):
+    """含 ≥2 条切片条带且 side="t" 的 figure → side="ts" + figcaption 前置。"""
+    def _fix(m):
+        seg = m.group(0)
+        if seg.count("/static/_slice/") < 2:
+            return seg
+        if 'data-fig-side="t"' not in seg:
+            return seg                      # b 等本就是块级流；ts 不重复处理
+        seg = seg.replace('data-fig-side="t"', 'data-fig-side="ts"', 1)
+        cm = _FIGCAP_RE.search(seg)
+        if cm:
+            cap = cm.group(0)
+            seg = seg[:cm.start()] + seg[cm.end():]
+            open_end = seg.index(">") + 1   # 插到 <figure …> 开标签之后
+            seg = seg[:open_end] + cap + seg[open_end:]
+        return seg
+
+    return _FIG_RE.sub(_fix, html)
 
 PAGED_FILLER_TMPL = """
 (function(){
