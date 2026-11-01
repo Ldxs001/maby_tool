@@ -88,88 +88,154 @@ HTML_INLINE = [
 
 MAPPING_TABLE = [
     {
-        "group": "列表",
+        "group": "列表", "group_en": "List",
         "items": [
             {"key": "unordered.src", "kind": "set", "label": "一级标记",
+             "label_en": "Top-level markers",
              "src": ["-", "+", "*"], "write": "+", "draw": "· 实心圆",
-             "dst": "+  →  实心 ·",
-             "note": "别人的 Markdown 写 - + * 都算列表，这里都能认。星号 * 建议留着——删了以后，以 * 开头的行会被当斜体。"},
+             "draw_en": "· filled dot",
+             "dst": "+  →  实心 ·", "dst_en": "+  →  filled ·",
+             "note": "别人的 Markdown 写 - + * 都算列表，这里都能认。星号 * 建议留着——删了以后，以 * 开头的行会被当斜体。",
+             "note_en": "In other Markdown, -, + and * all start a list; all three are accepted here. Keep *: once it is removed, a line starting with * is read as italics."},
             {"key": "unordered.deeper", "kind": "set", "label": "二级起的标记",
+             "label_en": "Nested markers",
              "src": ["-", "+"], "write": "- ／ +", "draw": "○ ／ ·",
              "dst": "- → 空心 ○ ； + → 实心 ·",
-             "note": "二级及以下按层级交替取用：一级实心、二级空心、三级实心……层深由 <<< 的个数表示，这里只管用哪个符号。"},
+             "dst_en": "- → hollow ○ ; + → filled ·",
+             "note": "二级及以下按层级交替取用：一级实心、二级空心、三级实心……层深由 <<< 的个数表示，这里只管用哪个符号。",
+             "note_en": "From level 2 down the markers alternate: filled at level 1, hollow at level 2, filled at level 3… Depth comes from the number of <<<; this only picks the glyph."},
             {"key": "ordered.src", "kind": "set", "label": "编号后缀",
+             "label_en": "Number suffix",
              "src": [".", ")"], "write": ".", "draw": "1. 编号",
+             "draw_en": "1. numbering",
              "dst": ".  →  1.",
-             "note": "源里写 1) 的转成 1.。源数字本身不参与编号——本编辑器一律从 1 显示。"},
+             "note": "源里写 1) 的转成 1.。源数字本身不参与编号——本编辑器一律从 1 显示。",
+             "note_en": "A source 1) becomes 1. — the source number itself is ignored: this editor always counts from 1."},
         ],
     },
     {
-        "group": "代码",
+        "group": "代码", "group_en": "Code",
         "items": [
             {"key": "fence.tilde", "kind": "switch", "label": "波浪围栏",
+             "label_en": "Tilde fences",
              "src": ["~~~"], "write": "```", "draw": "代码块",
-             "dst": "```  →  代码块",
-             "note": "本编辑器不认 ~~~（会渲染成删除线），必须转成反引号围栏。"},
+             "draw_en": "code block",
+             "dst": "```  →  代码块", "dst_en": "```  →  code block",
+             "note": "本编辑器不认 ~~~（会渲染成删除线），必须转成反引号围栏。",
+             "note_en": "This editor does not read ~~~ (it renders as strikethrough), so it must become a backtick fence."},
             {"key": "fence.indented", "kind": "switch", "label": "缩进代码块",
-             "src": ["4 空格起首"], "write": "```", "draw": "代码块",
-             "dst": "```  →  代码块",
-             "note": "行首四个空格起的一段，转成围栏后不再受缩进影响。"},
+             "label_en": "Indented code blocks",
+             "src": ["4 空格起首"], "src_en": ["4-space indent"],
+             "write": "```", "draw": "代码块", "draw_en": "code block",
+             "dst": "```  →  代码块", "dst_en": "```  →  code block",
+             "note": "行首四个空格起的一段，转成围栏后不再受缩进影响。",
+             "note_en": "A block indented by four spaces becomes a fence and stops depending on indentation."},
             {"key": "fence.backtick", "kind": "fixed", "label": "反引号围栏",
-             "src": ["```…````"], "write": "原样", "draw": "代码块",
-             "dst": "原样  →  代码块",
-             "note": "本编辑器开 N 收 N，4 包 3、3 包 4、5 包 4 包 3 都成立，一个字节都不动。"},
+             "label_en": "Backtick fences",
+             "src": ["```…````"], "write": "原样", "write_en": "as-is",
+             "draw": "代码块", "draw_en": "code block",
+             "dst": "原样  →  代码块", "dst_en": "as-is  →  code block",
+             "note": "本编辑器开 N 收 N，4 包 3、3 包 4、5 包 4 包 3 都成立，一个字节都不动。",
+             "note_en": "This editor closes with as many as it opened: 4 around 3, 3 around 4 and 5 around 4 around 3 all work, and not one byte changes."},
         ],
     },
     {
-        "group": "标题",
+        "group": "标题", "group_en": "Heading",
         "items": [
             {"key": "heading.setext", "kind": "switch", "label": "下划线式标题",
+             "label_en": "Setext headings",
              "src": ["===", "---"], "write": "# ／ ##", "draw": "两级标题",
+             "draw_en": "two heading levels",
              "dst": "#  →  一级标题 ； ##  →  二级标题",
-             "note": "紧跟在文字下一行的 === 或 ---。本编辑器不认这种写法，会原样显示成两行字。"},
+             "dst_en": "#  →  H1 ; ##  →  H2",
+             "note": "紧跟在文字下一行的 === 或 ---。本编辑器不认这种写法，会原样显示成两行字。",
+             "note_en": "A === or --- line right under the text. This editor does not read it and shows those two lines verbatim."},
         ],
     },
     {
-        "group": "行内",
+        "group": "行内", "group_en": "Inline",
         "items": [
             {"key": "footnote", "kind": "select", "label": "脚注",
+             "label_en": "Footnotes",
              "src": ["[^1]"], "write": "^{[1]}", "draw": "[1] 上标",
-             "dst": "^{[1]}  →  [1] 上标", "options": ["text", "keep"],
-             "note": "text＝引用标记转上标角标、定义行转普通段落；keep＝两处原样。内容一个字都不删。"},
+             "draw_en": "[1] superscript",
+             "dst": "^{[1]}  →  [1] 上标", "dst_en": "^{[1]}  →  [1] superscript",
+             "options": ["text", "keep"],
+             "note": "text＝引用标记转上标角标、定义行转普通段落；keep＝两处原样。内容一个字都不删。",
+             "note_en": "text = turn the marker into a superscript and the definition line into a paragraph; keep = leave both as they are. Not a character is dropped."},
             {"key": "inline.entity", "kind": "switch", "label": "HTML 实体",
+             "label_en": "HTML entities",
              "src": ["&copy;"], "write": "©", "draw": "©",
              "dst": "©  →  ©",
-             "note": "本编辑器不解析实体，不转的话屏幕上就是 &amp;copy; 这串字。"},
+             "note": "本编辑器不解析实体，不转的话屏幕上就是 &amp;copy; 这串字。",
+             "note_en": "This editor does not resolve entities; unconverted, &copy; shows on screen as those literal characters."},
             {"key": "inline.refLink", "kind": "switch", "label": "引用式链接",
-             "src": ["[文字][id]"], "write": "[文字](url)", "draw": "可点链接",
-             "dst": "[文字](url)  →  链接",
-             "note": "没人引用的孤儿定义原样留成文字——删了那行 URL 就没了。"},
+             "label_en": "Reference links",
+             "src": ["[文字][id]"], "src_en": ["[text][id]"],
+             "write": "[文字](url)", "write_en": "[text](url)",
+             "draw": "可点链接", "draw_en": "clickable link",
+             "dst": "[文字](url)  →  链接", "dst_en": "[text](url)  →  link",
+             "note": "没人引用的孤儿定义原样留成文字——删了那行 URL 就没了。",
+             "note_en": "Definitions nobody references stay as plain text: deleting that line would lose the URL."},
             {"key": "inline.autoLink", "kind": "switch", "label": "自动链接",
+             "label_en": "Autolinks",
              "src": ["<https://x>"], "write": "[x](x)", "draw": "可点链接",
-             "dst": "[x](x)  →  链接",
-             "note": "尖括号包住的裸地址。"},
+             "draw_en": "clickable link",
+             "dst": "[x](x)  →  链接", "dst_en": "[x](x)  →  link",
+             "note": "尖括号包住的裸地址。",
+             "note_en": "A bare address wrapped in angle brackets."},
             {"key": "inline.html", "kind": "switch", "label": "HTML 标签",
-             "src": ["<b>", "<sup>", "<br>"], "write": "** ／ ^{} ／ 换行", "draw": "粗体 · 上标 · 换行",
+             "label_en": "HTML tags",
+             "src": ["<b>", "<sup>", "<br>"],
+             "write": "** ／ ^{} ／ 换行", "write_en": "** ／ ^{} ／ line break",
+             "draw": "粗体 · 上标 · 换行", "draw_en": "bold · superscript · line break",
              "dst": "**  →  粗体 ； ^{}  →  上标",
-             "note": "本编辑器把 HTML 全部转义成字面文本，不转就会把标签露在正文里。对不上语法的标签剥掉留文字。"},
+             "dst_en": "**  →  bold ; ^{}  →  superscript",
+             "note": "本编辑器把 HTML 全部转义成字面文本，不转就会把标签露在正文里。对不上语法的标签剥掉留文字。",
+             "note_en": "This editor escapes all HTML to literal text; unconverted, the tags show up in the body. Tags that do not parse are stripped and their text kept."},
         ],
     },
     {
-        "group": "结构",
+        "group": "结构", "group_en": "Structure",
         "items": [
             {"key": "list.dropBlank", "kind": "switch", "label": "松散列表空行",
-             "src": ["项与项之间的空行"], "write": "删掉空行", "draw": "编号不断",
+             "label_en": "Blank lines in loose lists",
+             "src": ["项与项之间的空行"], "src_en": ["blank line between items"],
+             "write": "删掉空行", "write_en": "drop blank lines",
+             "draw": "编号不断", "draw_en": "numbering intact",
              "dst": "删空行  →  编号不断",
-             "note": "本编辑器里空行会打断列表并重置编号，所以项与项之间的空行要删掉。"},
+             "dst_en": "drop blank lines  →  numbering intact",
+             "note": "本编辑器里空行会打断列表并重置编号，所以项与项之间的空行要删掉。",
+             "note_en": "Here a blank line breaks the list and resets numbering, so blank lines between items are removed."},
         ],
     },
 ]
 
 
-def mapping_table():
-    """给界面用的映射表（带当前取值，便于渲染成可编辑控件）。"""
-    return json.loads(json.dumps(MAPPING_TABLE))
+# 这些字段是「给眼睛看的」文案，英文界面下换成 *_en 副本。
+# src / write / kind / options 是控件实际读写的东西：只有该条目带 *_en 时才替换，
+# 像 unordered.src 的 ["-", "+", "*"] 这类纯符号必须原样保留。
+_DISPLAY_FIELDS = ("label", "note", "dst", "draw", "src", "write")
+
+
+def mapping_table(lang="zh"):
+    """给界面用的映射表（带当前取值，便于渲染成可编辑控件）。
+
+    lang 以 en 开头时展示类字段换成 `*_en` 副本；两种语言下控件取值
+    （src / write / kind / options）的结构与含义完全一致，只有文案变。
+    """
+    out = json.loads(json.dumps(MAPPING_TABLE))
+    en = str(lang or "").strip().lower().startswith("en")
+    for g in out:
+        g_en = g.pop("group_en", None)
+        if en and g_en is not None:
+            g["group"] = g_en
+        for it in g.get("items", []):
+            for f in _DISPLAY_FIELDS:
+                v = it.pop(f + "_en", None)
+                if en and v is not None:
+                    it[f] = v
+    return out
 
 
 # ---------------------------------------------------------------- 工具

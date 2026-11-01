@@ -11,6 +11,22 @@
 
 ---
 
+## v2.26.2（2026-11-01）
+
+**本次变更：导入面板补齐英文界面；映射表文案改由后端按界面语言返回**
+
+**修复**
+- **导入面板在英文界面下整块仍是中文**：v2.26.0 新增该面板时，文案一条都没进英文词表，`#importOverlay` 与 `#openMoreMenu` 也没进 `I18N_ROOTS`，因此既不会被翻译，也不在动态节点的观察范围内。
+- **映射表的说明文字翻不了**：映射表来自 `/api/convert-mapping`，其中 `group` / `label` / `note` / `dst` / `draw` / `src` / `write` 是接口数据而非 DOM 文案，前端词表按精确匹配，覆盖不到。
+- **修法**：① `I18N_ROOTS` 补入 `#importOverlay`、`#openMoreMenu`；② 导入面板 59 条文案进词表，其中带参数的改为 `TF('已转换 {0} → {1} 字符', …)` 模板；③ `MAPPING_TABLE` 每条增加 `*_en` 副本，`mapping_table(lang)` 按语言替换展示字段——`src` / `write` / `kind` / `options` 的结构与取值两语言一致，`unordered.src` 的 `["-", "+", "*"]` 这类纯符号原样保留；④ `/api/convert-mapping` 接受 `lang` 参数，前端按 `_lang` 请求；⑤ 面板开着时切语言，由 `applyLang` 经 `window.__mdeImportReload` 触发重取。
+- **验证**：Playwright 端到端——切 EN 后打开导入面板，`#importPanel` 内中文残留 **0 行**，映射表 5 组全部渲染，`① Mapping` / `Convert into the editor` / `Convert this file` 抽查通过；`_test_v2150_lang.py` 27 项全 PASS；`mapping_table()` 中文态无 `_en` 残留键，英文态 `unordered.src.src` 仍为 `["-", "+", "*"]`、`write` 仍为 `+`。
+
+**说明**
+- `MD_SERVER_VERSION` 120 → 121：`/api/convert-mapping` 新增 `lang` 参数属于服务端能力变更，不换代则升级用户的常驻服务继续返回中文映射表。
+- `md-parser.js` 与解析器段一字未动，`_test_parser_sync.py` 仍逐字节全等（1608 行）。
+
+---
+
 ## v2.26.1（2026-11-01）
 
 **本次变更：修复商店版 `.md` 文件图标只占画布中间一块；为 `.md` / `.smd` 指定专属文件图标**

@@ -2761,7 +2761,7 @@ function _i18nEl(el){
 /* 只翻这些 UI 根；#editor、#preview、#outline（用户内容/文档标题）不在列 */
 var I18N_ROOTS=['#toolbar','#status','#findBar','#svOverlay','#tsOverlay','#lrOverlay',
                 '#fmOverlay','#llmOverlay','#annOverlay','#rwOverlay','#rpOverlay',
-                '#histOverlay'];
+                '#histOverlay','#importOverlay','#openMoreMenu'];
 function _i18nRoots(){
   var out=[];
   for(var i=0;i<I18N_ROOTS.length;i++){
@@ -2835,6 +2835,8 @@ function applyLang(l){
      所以由它自己挂到 window 上，这里只负责有空就调；**只重画那句说明，不动
      输入框**——框里可能是刚敲、还没应用的设置值。 */
   try{ if(typeof window.__mdeMetaHint==='function') window.__mdeMetaHint(); }catch(e){}
+  /* 导入面板的映射表是接口数据，DOM 词表翻不到；面板开着就按新语言重取一遍。 */
+  try{ if(typeof window.__mdeImportReload==='function') window.__mdeImportReload(); }catch(e){}
 }
 /* v2.24.0 历史版本面板与打开时清理：新增文案一律走词表，动态带参走 TF()。
    直接补键而不是改那一整行字面量——那行太长了，改动等于重排全部词条。 */
@@ -2855,6 +2857,67 @@ I18N_EN["恢复失败："]="Restore failed: ";
 I18N_EN["已恢复到第 {0} 版"]="Restored version {0}";
 I18N_EN["已清理 {0} 个未引用文件（{1}）"]="Cleaned up {0} unreferenced file(s) ({1})";
 I18N_EN["本版保留份数已改为 {0}，下次保存或打开时生效"]="Versions to keep set to {0}; it applies on the next save or open";
+/* v2.26.2 导入面板（外部 Markdown 转换）：v2.26.0 加功能时整块没进词表、
+   #importOverlay 也没进 I18N_ROOTS，英文界面下这块整个是中文。 */
+I18N_EN["导入…"]="Import…";
+I18N_EN["导入 · 外部 Markdown 转换"]="Import · convert external Markdown";
+I18N_EN["① 映射表"]="① Mapping";
+I18N_EN["中间那列是「别人文档里怎么写」：默认已覆盖常见写法。别的方言用别的符号、效果却一样时，点 × 删掉不用的，在虚线框里敲一个符号回车就能加上，转换时它会被当成右边的样子。右边是本编辑器「写成什么 · 画成什么」，锁死不可改。带 chip 的行是标记集合（可增删），带开关的行是结构规则（转 / 不转）。"]="The middle column is how other documents write it; the common forms are already covered. When another dialect uses a different symbol to the same effect, click × to drop the ones you do not need and type a symbol into the dashed box, then press Enter: conversion treats it as the right-hand form. The right column shows what this editor writes and draws; it is locked. Rows with chips are marker sets (add or remove); rows with a switch are structural rules (convert or not).";
+I18N_EN["别人文档里的写法"]="Their syntax";
+I18N_EN["本编辑器"]="This editor";
+I18N_EN["② 粘贴文本"]="② Paste text";
+I18N_EN["从网页、AI 回答、别的编辑器复制来的 Markdown 直接放这里。"]="Drop in Markdown copied from a web page, an AI answer or another editor.";
+I18N_EN["在这里粘贴外部 Markdown…"]="Paste external Markdown here…";
+I18N_EN["转换并放进编辑器"]="Convert into the editor";
+I18N_EN["③ 从文件导入"]="③ Import from a file";
+I18N_EN["与「打开」同一套选文件方式，只多过一遍映射；转换结果不覆盖原文件。"]="Same file picker as Open, with one extra mapping pass; the original file is never overwritten.";
+I18N_EN["可直接粘贴路径"]="Paste a path directly";
+I18N_EN["转换这个文件"]="Convert this file";
+I18N_EN["删掉这个标记"]="Remove this marker";
+I18N_EN["＋ 标记"]="+ marker";
+I18N_EN["（本编辑器固定，不可改）"]=" (fixed here, not editable)";
+I18N_EN["不可改"]="Locked";
+I18N_EN["关掉就不转这一项"]="Turn off to skip this rule";
+I18N_EN["映射表不可用"]="Mapping table unavailable";
+I18N_EN["读取映射表失败："]="Could not load the mapping table: ";
+I18N_EN["行内"]="Inline";
+I18N_EN["结构"]="Structure";
+I18N_EN["一级标记"]="Top-level markers";
+I18N_EN["二级起的标记"]="Nested markers";
+I18N_EN["编号后缀"]="Number suffix";
+I18N_EN["波浪围栏"]="Tilde fences";
+I18N_EN["缩进代码块"]="Indented code blocks";
+I18N_EN["反引号围栏"]="Backtick fences";
+I18N_EN["下划线式标题"]="Setext headings";
+I18N_EN["脚注"]="Footnotes";
+I18N_EN["HTML 实体"]="HTML entities";
+I18N_EN["引用式链接"]="Reference links";
+I18N_EN["自动链接"]="Autolinks";
+I18N_EN["HTML 标签"]="HTML tags";
+I18N_EN["松散列表空行"]="Blank lines in loose lists";
+I18N_EN["别人的 Markdown 写 - + * 都算列表，这里都能认。星号 * 建议留着——删了以后，以 * 开头的行会被当斜体。"]="In other Markdown, -, + and * all start a list; all three are accepted here. Keep *: once it is removed, a line starting with * is read as italics.";
+I18N_EN["二级及以下按层级交替取用：一级实心、二级空心、三级实心……层深由 <<< 的个数表示，这里只管用哪个符号。"]="From level 2 down the markers alternate: filled at level 1, hollow at level 2, filled at level 3… Depth comes from the number of <<<; this only picks the glyph.";
+I18N_EN["源里写 1) 的转成 1.。源数字本身不参与编号——本编辑器一律从 1 显示。"]="A source 1) becomes 1.. Source numbers are not used: this editor always counts from 1.";
+I18N_EN["本编辑器不认 ~~~（会渲染成删除线），必须转成反引号围栏。"]="This editor does not read ~~~ (it renders as strikethrough), so it must become a backtick fence.";
+I18N_EN["行首四个空格起的一段，转成围栏后不再受缩进影响。"]="A block indented by four spaces becomes a fence and stops depending on indentation.";
+I18N_EN["本编辑器开 N 收 N，4 包 3、3 包 4、5 包 4 包 3 都成立，一个字节都不动。"]="This editor closes with as many as it opened: 4 around 3, 3 around 4 and 5 around 4 around 3 all work, and not one byte changes.";
+I18N_EN["紧跟在文字下一行的 === 或 ---。本编辑器不认这种写法，会原样显示成两行字。"]="A === or --- line right under the text. This editor does not read it and shows those two lines verbatim.";
+I18N_EN["text＝引用标记转上标角标、定义行转普通段落；keep＝两处原样。内容一个字都不删。"]="text = turn the marker into a superscript and the definition line into a paragraph; keep = leave both as they are. Not a character is dropped.";
+I18N_EN["本编辑器不解析实体，不转的话屏幕上就是 &copy; 这串字。"]="This editor does not resolve entities; unconverted, &copy; shows on screen as those literal characters.";
+I18N_EN["没人引用的孤儿定义原样留成文字——删了那行 URL 就没了。"]="Definitions nobody references stay as plain text: deleting that line would lose the URL.";
+I18N_EN["尖括号包住的裸地址。"]="A bare address wrapped in angle brackets.";
+I18N_EN["本编辑器把 HTML 全部转义成字面文本，不转就会把标签露在正文里。对不上语法的标签剥掉留文字。"]="This editor escapes all HTML to literal text; unconverted, the tags show up in the body. Tags that do not parse are stripped and their text kept.";
+I18N_EN["本编辑器里空行会打断列表并重置编号，所以项与项之间的空行要删掉。"]="Here a blank line breaks the list and resets numbering, so blank lines between items are removed.";
+I18N_EN["先粘一段外部 Markdown"]="Paste some Markdown first";
+I18N_EN["转换中…"]="Converting…";
+I18N_EN["失败："]="Failed: ";
+I18N_EN["已转换 {0} → {1} 字符"]="Converted {0} → {1} characters";
+I18N_EN["已转换 {0}（{1} → {2} 字符）"]="Converted {0} ({1} → {2} characters)";
+I18N_EN["已选：{0}"]="Selected: {0}";
+I18N_EN["选文件失败："]="Could not pick a file: ";
+I18N_EN["先选一个文件，或把路径粘进来"]="Pick a file, or paste a path";
+I18N_EN["已转换，确认无误后用「另存为」保存"]="Converted. Check it, then use Save as to keep it";
+I18N_EN["导入"]="Import";
 /*I18N_END*/
 
 
@@ -6368,22 +6431,32 @@ I18N_EN["本版保留份数已改为 {0}，下次保存或打开时生效"]="Ver
      转完的缩进合不合意是作者自己在编辑器里调的事；也不覆盖源文件——
      转换结果只进编辑区，存不存、存哪，由作者用「另存为」决定。 */
   var IM_GROUPS = null;          /* /api/convert-mapping 拿到的默认映射表 */
+  var IM_LANG = null;            /* IM_GROUPS 是哪套语言取的；语言变了要重取 */
   var IM_KEYMAP = {};            /* key -> {kind, el} 便于回读配置 */
 
   function imOpen(){
     var ov = document.getElementById('importOverlay');
     ov.hidden = false;
-    if (!IM_GROUPS) imLoadMap();
+    /* 映射表的 group/label/dst/draw 由后端按语言返回，所以语言变了必须重取；
+       否则英文界面打开导入面板，整块映射表仍是中文。 */
+    if (!IM_GROUPS || IM_LANG !== _lang) imLoadMap();
     document.getElementById('imIn').focus();
   }
   function imClose(){ document.getElementById('importOverlay').hidden = true; }
+  /* 面板开着时切语言：applyLang 只翻 DOM 文案，翻不了接口数据，这里重取一遍。
+     由 I18N 段的 applyLang 通过 window 挂钩调用（两段不在同一作用域）。 */
+  window.__mdeImportReload = function(){
+    var ov = document.getElementById('importOverlay');
+    if (ov && !ov.hidden) { IM_GROUPS = null; imLoadMap(); }
+  };
 
   function imLoadMap(){
-    fetch('/api/convert-mapping').then(function(r){ return r.json(); }).then(function(j){
-      if (!j || !j.ok || !j.groups) { imStat('imStatText', j && j.error ? j.error : '映射表不可用'); return; }
+    fetch('/api/convert-mapping?lang=' + _lang).then(function(r){ return r.json(); }).then(function(j){
+      if (!j || !j.ok || !j.groups) { imStat('imStatText', j && j.error ? j.error : T('映射表不可用')); return; }
       IM_GROUPS = j.groups;
+      IM_LANG = _lang;
       imRenderMap();
-    }).catch(function(e){ imStat('imStatText', '读取映射表失败：' + e.message); });
+    }).catch(function(e){ imStat('imStatText', T('读取映射表失败：') + e.message); });
   }
 
   function imEsc(s){
@@ -6398,19 +6471,19 @@ I18N_EN["本版保留份数已改为 {0}，下次保存或打开时生效"]="Ver
     (it.src || []).forEach(function(s){
       if (it.kind === 'set') {
         h += '<span class="im-chip"><b>' + imEsc(s) + '</b>'
-           + '<button type="button" class="im-chip-x" title="删掉这个标记">×</button></span>';
+           + '<button type="button" class="im-chip-x" title="' + imEsc(T('删掉这个标记')) + '">×</button></span>';
       } else {
         h += '<span class="im-chip ro"><b>' + imEsc(s) + '</b></span>';
       }
     });
     if (it.kind === 'set') {
-      h += '<input class="im-add" type="text" spellcheck="false" placeholder="＋ 标记">';
+      h += '<input class="im-add" type="text" spellcheck="false" placeholder="' + imEsc(T('＋ 标记')) + '">';
     }
     return h + '</span>';
   }
   /* 右列：本编辑器写成什么、画成什么。只读。 */
   function imDst(it){
-    return '<span class="im-dst" title="' + imEsc(it.dst || '') + '（本编辑器固定，不可改）">'
+    return '<span class="im-dst" title="' + imEsc(it.dst || '') + imEsc(T('（本编辑器固定，不可改）')) + '">'
          + '<code>' + imEsc(it.write || it.dst || '') + '</code>'
          + (it.draw ? '<span class="im-draw">' + imEsc(it.draw) + '</span>' : '')
          + '<span class="im-lock">不可改</span></span>';
@@ -6425,7 +6498,7 @@ I18N_EN["本版保留份数已改为 {0}，下次保存或打开时生效"]="Ver
       g.items.forEach(function(it){
         var left = imChips(it);
         if (it.kind === 'switch') {
-          left += '<label class="im-switch" title="关掉就不转这一项">'
+          left += '<label class="im-switch" title="' + imEsc(T('关掉就不转这一项')) + '">'
                 + '<input type="checkbox" data-imkey="' + imEsc(it.key) + '" checked><i></i></label>';
         } else if (it.kind === 'select') {
           left += '<select class="im-sel" data-imkey="' + imEsc(it.key) + '">'
@@ -6468,7 +6541,7 @@ I18N_EN["本版保留份数已改为 {0}，下次保存或打开时生效"]="Ver
       b.textContent = v;
       var x = document.createElement('button');
       x.type = 'button'; x.className = 'im-chip-x';
-      x.title = '删掉这个标记'; x.textContent = '×';
+      x.title = T('删掉这个标记'); x.textContent = '×';
       chip.appendChild(b); chip.appendChild(x);
       t.parentNode.insertBefore(chip, t);
       t.value = '';
@@ -6527,22 +6600,22 @@ I18N_EN["本版保留份数已改为 {0}，下次保存或打开时生效"]="Ver
     scheduleSave();
     updateFileIndicator(label || '导入');
     if (typeof updateSaveBtn === 'function') updateSaveBtn();
-    showToast('已转换，确认无误后用「另存为」保存');
+    showToast(T('已转换，确认无误后用「另存为」保存'));
     imClose();
   }
 
   function imDoText(){
     var txt = document.getElementById('imIn').value;
-    if (!txt.trim()) { imStat('imStatText', '先粘一段外部 Markdown'); return; }
-    imStat('imStatText', '转换中…');
+    if (!txt.trim()) { imStat('imStatText', T('先粘一段外部 Markdown')); return; }
+    imStat('imStatText', T('转换中…'));
     fetch('/api/convert', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({text: txt, config: imCollectCfg()})
     }).then(function(r){ return r.json(); }).then(function(j){
-      if (!j || !j.ok) { imStat('imStatText', '失败：' + (j && j.error ? j.error : '未知错误')); return; }
-      imStat('imStatText', '已转换 ' + j.srcBytes + ' → ' + j.outBytes + ' 字符');
-      imApply(j.text, '导入');
+      if (!j || !j.ok) { imStat('imStatText', T('失败：') + (j && j.error ? j.error : T('未知错误'))); return; }
+      imStat('imStatText', TF('已转换 {0} → {1} 字符', j.srcBytes, j.outBytes));
+      imApply(j.text, T('导入'));
     }).catch(function(e){ imStat('imStatText', '失败：' + e.message); });
   }
 
@@ -6552,26 +6625,26 @@ I18N_EN["本版保留份数已改为 {0}，下次保存或打开时生效"]="Ver
       .then(function(j){
         if (j && j.ok && j.path) {
           document.getElementById('imPath').value = j.path;
-          imStat('imStatFile', '已选：' + j.path.replace(/^.*[\\/]/, ''));
+          imStat('imStatFile', TF('已选：{0}', j.path.replace(/^.*[\\/]/, '')));
         }
       })
-      .catch(function(e){ imStat('imStatFile', '选文件失败：' + e.message); });
+      .catch(function(e){ imStat('imStatFile', T('选文件失败：') + e.message); });
   }
 
   function imDoFile(){
     var p = document.getElementById('imPath').value.trim();
-    if (!p) { imStat('imStatFile', '先选一个文件，或把路径粘进来'); return; }
-    imStat('imStatFile', '转换中…');
+    if (!p) { imStat('imStatFile', T('先选一个文件，或把路径粘进来')); return; }
+    imStat('imStatFile', T('转换中…'));
     fetch('/api/convert-file', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({path: p, config: imCollectCfg()})
     }).then(function(r){ return r.json(); }).then(function(j){
-      if (!j || !j.ok) { imStat('imStatFile', '失败：' + (j && j.error ? j.error : '未知错误')); return; }
+      if (!j || !j.ok) { imStat('imStatFile', T('失败：') + (j && j.error ? j.error : T('未知错误'))); return; }
       lastDir = p.replace(/[\\/][^\\/]*$/, '');
       try { lsSet('md-lastdir', lastDir); } catch (e) {}
-      imStat('imStatFile', '已转换 ' + j.name + '（' + j.srcBytes + ' → ' + j.outBytes + ' 字符）');
-      imApply(j.text, '导入·' + j.name);
+      imStat('imStatFile', TF('已转换 {0}（{1} → {2} 字符）', j.name, j.srcBytes, j.outBytes));
+      imApply(j.text, T('导入') + '·' + j.name);
     }).catch(function(e){ imStat('imStatFile', '失败：' + e.message); });
   }
 

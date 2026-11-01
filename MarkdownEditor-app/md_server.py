@@ -65,7 +65,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 120  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 121  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 # MSIX 商城版判定（微软商店政策 11.16 的"报告 AI 生成内容"入口用）：
 # 商城包与侧载包恒落在 WindowsApps 之下，Release 安装包/便携形态不会。
@@ -1396,13 +1396,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if u.path == "/api/convert-mapping":
             # 「导入」界面的默认映射表。左边可改、右边只读——右边是方言标记
             # 和它的呈现形式，属于方言本体，不许用户动。
+            # lang：界面语言（zh / en）。英文界面取 *_en 文案，控件取值不变。
             try:
                 if _conv is None:
                     self._send(200, json.dumps({"ok": False, "groups": [],
                                                 "error": "转换模块不可用"},
                                                ensure_ascii=False))
                     return
-                self._send(200, json.dumps({"ok": True, "groups": _conv.mapping_table()},
+                q = urllib.parse.parse_qs(u.query or "")
+                lang = (q.get("lang") or ["zh"])[0]
+                self._send(200, json.dumps({"ok": True,
+                                            "groups": _conv.mapping_table(lang)},
                                            ensure_ascii=False))
             except Exception as e:
                 self._send(500, json.dumps({"ok": False, "error": str(e)},

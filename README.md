@@ -1,6 +1,6 @@
 # Maby Tool
 
-> 本地优先的 Windows 桌面写作工具。当前版本 **v2.26.1**（2026-11-01）。
+> 本地优先的 Windows 桌面写作工具。当前版本 **v2.26.2**（2026-11-01）。
 > 最后更新：2026-11-01
 
 编辑器界面、本地后端、便携 Python 运行时与全部渲染引擎都在仓库内，解压双击即用。除 AI 润色需接本机 LLM 服务外，其余功能全部离线。
@@ -11,7 +11,7 @@
 
 | 目录 | 版本 | 状态 | 说明 |
 |---|---|---|---|
-| `MarkdownEditor-app/` | **v2.26.1** | 当前开发版 | 主项目。左侧写作、右侧实时渲染，内置语法检查、导入外部 Markdown 与 low runner 文档内计算 |
+| `MarkdownEditor-app/` | **v2.26.2** | 当前开发版 | 主项目。左侧写作、右侧实时渲染，内置语法检查、导入外部 Markdown 与 low runner 文档内计算 |
 | `MarkdownEditor/` | v1.5.0（最后更新 2026-10-17） | 归档 | 停止更新，仅保留供追溯；功能与下载以 `MarkdownEditor-app/` 为准 |
 
 ## 核心能力
@@ -65,17 +65,17 @@
 | [`使用指南`](MarkdownEditor-app/docs/MDEditor%20使用指南.md) | 20 章语法与操作手册：基础语法、列表方言、表格、公式、四种图表、图片、low runner（数据点 / 外部文件 / 执行点 / 代码协议 / 数据写作 / 完整示例 / 管理界面）、排版与文档档案、缩进块 `<<<`、导入外部 Markdown、保存导出、滚动联动、查找替换、批注、AI 润色、语法速查、离线可用 |
 | [`low runner 数据形式规范`](MarkdownEditor-app/docs/low%20runner%20数据形式规范.md) | 六种数据形式、类型契约、fail-closed 清单、全局执行、返回值渲染、外部文件引用的设计定稿 |
 | [`v2.8 发布说明与 low runner 规范`](MarkdownEditor-app/docs/MDEditor-2.8%20发布说明与%20low%20runner%20规范.md) | v2.8 更新说明 + 输入输出规范（四通道、`vals` 四形状、输出四形状、图片落点与文件名一致性边界） |
-| [`更新日志`](MarkdownEditor-app/CHANGELOG.md) | v1.0.0 至 v2.26.1 逐版现象 / 根因 / 修法 / 验证 |
+| [`更新日志`](MarkdownEditor-app/CHANGELOG.md) | v1.0.0 至 v2.26.2 逐版现象 / 根因 / 修法 / 验证 |
 | [`版权与开源组件声明`](MarkdownEditor-app/docs/版权与开源组件声明.md) | 第三方组件版本与许可 |
 
 ## 下载与安装
 
 两条分发通道，共用同一份代码：
 
-- **安装包（Release）**：GitHub <https://github.com/Ldxs001/maby_tool/releases/tag/v2.26.1> ｜ Gitee <https://gitee.com/wUwproject/maby_tool/releases/tag/v2.26.1>
+- **安装包（Release）**：GitHub <https://github.com/Ldxs001/maby_tool/releases/tag/v2.26.2> ｜ Gitee <https://gitee.com/wUwproject/maby_tool/releases/tag/v2.26.2>
 - **微软商店（MSIX）**：商店安装的形态由微软签名与托管安装卸载，不带安装器与卸载脚本；`.md`／`.smd` 关联由应用清单声明。商城包不进 Release 附件，更新走合作伙伴中心。
 
-`MDEditor-Setup-v2.26.1.exe`，32.33 MB，1218 个文件，双击安装。安装后：双击 `.md` 文件、右键 `.md` 选「Open with Markdown Editor」、或双击桌面快捷方式，三种入口任选。
+`MDEditor-Setup-v2.26.2.exe`，32.33 MB，1218 个文件，双击安装。安装后：双击 `.md` 文件、右键 `.md` 选「Open with Markdown Editor」、或双击桌面快捷方式，三种入口任选。
 
 > 不要直接双击 `markdown-editor.html`——`file://` 方式没有后端，页面会引导到正确入口。
 
@@ -83,7 +83,7 @@
 
 ```
 maby_tool/
-├── MarkdownEditor-app/          # 当前版本（v2.26.1）
+├── MarkdownEditor-app/          # 当前版本（v2.26.2）
 │   ├── markdown-editor.html     # 编辑器单页（HTML/CSS/JS 全内联）
 │   ├── md-parser.js             # 方言解析器（由 html 内 PARSER 段抽取，字节级同步）
 │   ├── md_server.py             # 本地后端：文件读写、图片代理、run 调度、导出、批注、LLM 路由
