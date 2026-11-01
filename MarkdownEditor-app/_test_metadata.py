@@ -162,7 +162,7 @@ def main():
     ck("T07 @@ meta 无数据 → 不占位、不报错",
        none(rb[0]["html"], "mde-fm") and has(rb[0]["html"], "<p>正文</p>"), rb[0]["html"][:200])
     ck("T08 @@ meta 有数据 → 出区（zone=b）+ 最近修改",
-       has(rb[1]["html"], 'data-mde-zone="b"', ">标题</span>", "我写故我播", "最近修改", "2026-10-30 23:24"),
+       has(rb[1]["html"], 'data-mde-zone="b"', ">代称</span>", "我写故我播", "最近修改", "2026-10-30 23:24"),
        rb[1]["html"][:300])
     ck("T09 总开关关闭 → 两条通道都不出区",
        none(rb[2]["html"], "mde-fm") and has(rb[2]["html"], "<p>正文</p>"), rb[2]["html"][:200])
@@ -178,8 +178,9 @@ def main():
     ck("T12 @@ meta 带参 → 按原文露出 + D406",
        has(rb[5]["html"], "@@ meta 说明")
        and any(d["code"] == "D406" for d in rb[5]["diag"]), str(rb[5]["diag"]))
-    ck("T12b 字段全空 → 不出区",
-       none(rb[6]["html"], "mde-fm"), rb[6]["html"][:200])
+    ck("T12b 字段全空 → 仍出区，至少给作者 default + 创建（v2.26.3）",
+       has(rb[6]["html"], 'data-mde-zone="b"', ">作者</span>", "default", ">创建</span>")
+       and none(rb[6]["html"], ">代称</span>"), rb[6]["html"][:300])
 
     # ---- C 组 · 指令边界（家族惯例：@@ 与指令名之间的空白可有可无） ----
     rc = run(PARSER_NEW, [
@@ -194,6 +195,254 @@ def main():
     ck("T14b @@meta说明（带尾巴）不被认，报 D406",
        none(rc[2]["html"], "mde-fm")
        and any(d["code"] == "D406" for d in rc[2]["diag"]), str(rc[2]["diag"]))
+
+    # ---- F 组 · v2.26.3 作者链 / 创建 / 最近修改（渲染层） ----
+    META_FULL = {"__MDE_META__": {
+        "zero": {"created": "2026-10-31T01:47:36+0800",
+                 "fields": {"author": "wUwproject", "title": "我写故我播",
+                            "date": "2026-10-31"}},
+        "up": [{"at": "2026-11-01 20:33", "who": "Ldxs", "key": "title",
+                "from": "a", "to": "b"}],
+        "fields": {"author": "Ldxs", "title": "b", "date": "2026-10-31"},
+        "authors": ["wUwproject", "Ldxs"],
+        "created": "2026-10-31T01:47:36+0800",
+        "last": "2026-11-01 20:33"}}
+    META_NONE = {"__MDE_META__": {
+        "zero": {"created": "none", "fields": {"author": "default"}},
+        "up": [{"at": "2026-11-01 21:40", "who": "Ldxs", "key": None,
+                "from": "", "to": "", "note": "建档"}],
+        "fields": {"author": "default"},
+        "authors": ["default", "Ldxs"], "created": "none",
+        "last": "2026-11-01 21:40"}}
+    # 老结构：后端还没升级时前端必须自己兜底（authors/created/last 全缺）
+    META_OLD = {"__MDE_META__": {
+        "zero": {"created": "2026-10-31T01:47:36+0800",
+                 "fields": {"author": "wUwproject", "title": "旧文档"}},
+        "up": [{"at": "2026-10-30 23:24", "key": "title"}],
+        "fields": {"author": "wUwproject", "title": "旧文档"}}}
+
+    rf = run(PARSER_NEW, [
+        {"src": "@@ meta\n\n正文", "window": META_FULL},
+        {"src": "@@ meta\n\n正文", "window": META_NONE},
+        {"src": "@@ meta\n\n正文", "window": META_OLD},
+    ])
+    hf, hn, ho = rf[0]["html"], rf[1]["html"], rf[2]["html"]
+    ck("F01 作者链 = 创建者 + 修改者，全角逗号分隔",
+       has(hf, '>作者</span><span class="mde-fm-v">wUwproject，Ldxs</span>'), hf[:400])
+    ck("F02 创建时间 ISO → YYYY-MM-DD HH:MM",
+       has(hf, '>创建</span><span class="mde-fm-v">2026-10-31 01:47</span>'), hf[:400])
+    ck("F03 最近修改只给时间，不带字段名",
+       has(hf, '>最近修改</span><span class="mde-fm-v">2026-11-01 20:33</span>')
+       and " · " not in hf, hf[:400])
+    ck("F04 作者只出一行（fields.author 不在字段行里重复）",
+       hf.count(">作者</span>") == 1 and ">Ldxs</span>" not in hf, hf[:400])
+    ck("F05 date 只读不写：老档案的值照常显示",
+       has(hf, '>日期</span><span class="mde-fm-v">2026-10-31</span>'), hf[:400])
+    ck("F06 接手别人的文件：创建显示 none，作者链含 default",
+       has(hn, '>创建</span><span class="mde-fm-v">none</span>',
+           '>作者</span><span class="mde-fm-v">default，Ldxs</span>'), hn[:400])
+    ck("F07 老结构（无 authors/created/last）前端兜底不炸",
+       has(ho, '>作者</span><span class="mde-fm-v">wUwproject</span>',
+           '>创建</span><span class="mde-fm-v">2026-10-31 01:47</span>',
+           '>最近修改</span><span class="mde-fm-v">2026-10-30 23:24</span>'), ho[:400])
+
+    # ---- G 组 · v2.26.3 建档语义（md_meta 纯 Python，不碰文档） ----
+    import shutil
+    import tempfile
+    sys.path.insert(0, HERE)
+    import md_meta as MM
+
+    def _adir():
+        d = tempfile.mkdtemp(prefix="mde_meta_")
+        return d, os.path.join(d, "doc.assets")
+
+    u = MM.parse_up("# 记录\n\n"
+                    "- 2026-11-01 20:33 @Ldxs · title：`a` → `b`\n"
+                    "- 2026-11-01 21:40 @Ldxs · 建档\n"
+                    "- 2026-10-30 23:24 · author：`x` → `y`\n")
+    ck("G01 带字段行解析出 @who",
+       len(u) == 3 and u[0]["who"] == "Ldxs" and u[0]["key"] == "title", str(u))
+    ck("G02 无字段行（建档）解析成 key=None + note",
+       u[1]["key"] is None and u[1]["note"] == "建档" and u[1]["who"] == "Ldxs", str(u[1]))
+    ck("G03 老格式无 @ → who 为空，不报错",
+       u[2]["who"] == "" and u[2]["key"] == "author", str(u[2]))
+    ck("G04 无字段行不被当成字段变更（_apply_up 只认白名单键）",
+       MM._apply_up({"author": "z"}, u)["author"] == "y", "合成结果应只受 author 行影响")
+
+    _d, _a = _adir()
+    r1, c1, b1 = MM.sync(_a, {"title": "T", "author": "wUwproject"},
+                         who="wUwproject", created=None)
+    ck("G05 本次新建：created 写现在、作者取面板、up 不刷",
+       b1 is True and c1 == 0 and r1["authors"] == ["wUwproject"]
+       and r1["created"] != "none" and r1["last"] == "", str(r1))
+    shutil.rmtree(_d, ignore_errors=True)
+
+    _d, _a = _adir()
+    r2, c2, b2 = MM.sync(_a, {"author": "Ldxs"}, who="Ldxs", created="none")
+    ck("G06 接手别人的文件：created=none，作者链 default+Ldxs",
+       b2 is True and r2["created"] == "none"
+       and r2["authors"] == ["default", "Ldxs"], str(r2))
+    ck("G07 接手时 up 第一条就是「建档」，写明是谁开始留痕",
+       r2["up"] and r2["up"][0]["note"] == "建档" and r2["up"][0]["who"] == "Ldxs",
+       str(r2["up"]))
+    shutil.rmtree(_d, ignore_errors=True)
+
+    _d, _a = _adir()
+    r3, c3, _b3 = MM.sync(_a, {}, who="Ldxs", created="none",
+                          baseline={"title": "本机的标题", "tags": "本机的标签"})
+    ck("G08 接手时不拿本机面板值污染别人文档（baseline 被忽略）",
+       r3["fields"].get("title") is None and r3["fields"].get("tags") is None,
+       str(r3["fields"]))
+    ck("G09 接手且什么都没填：作者链 = default（创建者）+ 本人，档案照样建",
+       r3["authors"] == ["default", "Ldxs"] and r3["created"] == "none", str(r3))
+    shutil.rmtree(_d, ignore_errors=True)
+
+    _d, _a = _adir()
+    MM.sync(_a, {"author": "wUwproject"}, who="wUwproject", created=None)
+    r4, c4, b4 = MM.sync(_a, {"author": "wUwproject"}, who="wUwproject")
+    r5, c5, _b5 = MM.sync(_a, {"title": "改个标题"}, who="Ldxs")
+    ck("G10 重复保存不刷履历（幂等）",
+       c4 == 0 and r4["last"] == "" and b4 is False, str(r4))
+    ck("G11 换人改字段 → 作者链追加，履历带 @who",
+       c5 == 1 and r5["authors"] == ["wUwproject", "Ldxs"]
+       and "@Ldxs" in MM._fmt_up(r5["up"][-1]), str(r5["up"][-1]))
+    shutil.rmtree(_d, ignore_errors=True)
+
+    _d, _a = _adir()
+    os.makedirs(MM.meta_dir(_a))
+    io.open(os.path.join(MM.meta_dir(_a), "zero.json"), "w", encoding="utf-8").write(
+        '{"format":1,"created":"2026-10-31T01:47:36+0800","creator":{"by":"MDEditor"},'
+        '"fields":{"author":"wUwproject","date":"2026-10-31"}}')
+    r6 = MM.read(_a)
+    ck("G12 老档案 date 仍可读（白名单不删，面板不提供输入而已）",
+       r6["fields"].get("date") == "2026-10-31", str(r6["fields"]))
+    shutil.rmtree(_d, ignore_errors=True)
+
+    # ---- H 组 · up 是忠实追加的流水账：每次 save 一行（v2.26.3 定）----
+    # 主人原话：「up 就是记录每一次 save 时候的元信息和时间的，不管是不是相同。
+    # 去重排序那是渲染时候的事情！」所以写不写由 touch 决定，不由 diff 决定。
+    _d, _a = _adir()
+    MM.sync(_a, {"author": "wUwproject"}, who="wUwproject", created=None)
+    n0 = len(MM.read(_a)["up"])
+    r7, c7, _b7 = MM.sync(_a, {"author": "wUwproject"}, who="wUwproject", touch=True)
+    ck("H01 touch=True：字段没变也记一条「保存」，字段变更数仍是 0",
+       c7 == 0 and len(r7["up"]) == n0 + 1
+       and r7["up"][-1]["note"] == "保存" and r7["up"][-1]["who"] == "wUwproject",
+       str(r7["up"]))
+    ck("H02 记了「保存」→ 最近修改不再为空（改正文也会走动）", r7["last"] != "", str(r7))
+    shutil.rmtree(_d, ignore_errors=True)
+
+    _d, _a = _adir()
+    r8, c8, b8 = MM.sync(_a, {"author": "Ldxs"}, who="Ldxs", created=None, touch=True)
+    ck("H03 touch 且本次建档：照样留一条「保存」，last 与建档同一时刻",
+       b8 is True and c8 == 0 and len(r8["up"]) == 1
+       and r8["up"][0]["note"] == "保存" and r8["last"] != "",
+       str([r8["up"], r8["last"], r8["created"]]))
+    shutil.rmtree(_d, ignore_errors=True)
+
+    _d, _a = _adir()
+    r9, _c9, _b9 = MM.sync(_a, {}, who="Ldxs", created="none", touch=True)
+    ck("H04 touch 且接手建档：只有「建档」一条，不叠同秒的「保存」",
+       [e["note"] for e in r9["up"]] == ["建档"], str(r9["up"]))
+    shutil.rmtree(_d, ignore_errors=True)
+
+    _d, _a = _adir()
+    MM.sync(_a, {"author": "wUwproject"}, who="wUwproject", created=None)
+    r10, c10, _b10 = MM.sync(_a, {"title": "新标题"}, who="Ldxs", touch=True)
+    ck("H05 touch 且有字段变更：只记字段行（from→to），不重复记「保存」",
+       c10 == 1 and len(r10["up"]) == 1 and r10["up"][0]["key"] == "title",
+       str(r10["up"]))
+    shutil.rmtree(_d, ignore_errors=True)
+
+    _d, _a = _adir()
+    MM.sync(_a, {"author": "Ldxs"}, who="Ldxs", created=None)
+    for _ in range(2):
+        MM.sync(_a, {"author": "Ldxs"}, who="Ldxs", touch=True)
+    r11 = MM.read(_a)
+    ck("H06 同一人连存两次：up 两条忠实追加，作者链仍只有一个（去重在渲染）",
+       len(r11["up"]) == 2 and r11["authors"] == ["Ldxs"],
+       str([r11["up"], r11["authors"]]))
+    shutil.rmtree(_d, ignore_errors=True)
+
+    _d, _a = _adir()
+    MM.sync(_a, {"author": "wUwproject"}, who="wUwproject", created=None)
+    r12, _c12, _b12 = MM.sync(_a, {"author": "wUwproject"}, who="wUwproject")
+    ck("H07 touch 缺省（老的 update 语义）：没变就一条不写，旧调用方不受影响",
+       len(r12["up"]) == 0 and r12["last"] == "", str(r12["up"]))
+    shutil.rmtree(_d, ignore_errors=True)
+
+    # ---- I 组 · 内容指纹（v2.26.3，溯源主角）---------------------
+    # up 不只是"谁改了什么字段"，更是"这个时间点内容长这个样子"。
+    # 指纹一变说明内容真变了；没变说明这次保存没产生任何变化。
+    _d, _a = _adir()
+    body1 = "# 标题\n\n第一版正文\n"
+    body2 = "# 标题\n\n第二版正文\n"
+    r13, _c13, _b13 = MM.sync(_a, {"author": "Ldxs"}, who="Ldxs",
+                              created=None, touch=True, content=body1)
+    h1 = MM._last_hash(r13["up"])
+    ck("I01 首次保存：履历行带 64 位 SM3 指纹", len(h1) == 64, h1)
+    ck("I02 read 返回的 hash 与 up 末条一致", r13["hash"] == h1, r13["hash"])
+    ck("I03 指纹写进 up.md 原文（不是只在内存里）",
+       ("sm3:" + h1) in io.open(os.path.join(_a, ".mde", "up.md"),
+                                encoding="utf-8").read(), h1[:16])
+
+    n_before = len(r13["up"])
+    r14 = MM.read(_a, content=body1)
+    MM.sync(_a, {"author": "Ldxs"}, who="Ldxs", touch=True, content=body1)
+    r15 = MM.read(_a, content=body1)
+    ck("I04 同内容再存一次：up 不追加（内容没变，最近修改不该往前走）",
+       len(r15["up"]) == n_before, "%d → %d" % (n_before, len(r15["up"])))
+    ck("I05 同内容保存后 stale 仍为 False（本来就没差）",
+       r14["stale"] is False and r15["stale"] is False,
+       (r14["stale"], r15["stale"]))
+
+    MM.sync(_a, {"author": "Ldxs"}, who="Ldxs", touch=True, content=body2)
+    r16 = MM.read(_a, content=body2)
+    ck("I06 内容变了：up 追加一条，指纹换新",
+       len(r16["up"]) == n_before + 1 and r16["hash"] != h1,
+       (len(r16["up"]), r16["hash"][:8]))
+    ck("I07 改完内容后 stale=False（盘上与末条一致）", r16["stale"] is False,
+       r16["stale"])
+
+    r17 = MM.read(_a, content=body1)      # 假装文件被外部改回了第一版
+    ck("I08 盘上内容与末条不符：stale=True（这就是『未记录改动』）",
+       r17["stale"] is True, r17["stale"])
+
+    r18 = MM.read(_a)                      # 没传 content：无从判断
+    ck("I09 不传正文时 stale=None，不冒充『正常』", r18["stale"] is None,
+       r18["stale"])
+
+    # 字段变、内容没变：只记字段行，不再叠一条「保存」
+    _n = len(MM.read(_a)["up"])
+    MM.sync(_a, {"author": "Ldxs", "note": "只改备注"}, who="Ldxs",
+            touch=True, content=body2)
+    _u = MM.read(_a)["up"]
+    ck("I10 字段变更 + 内容未变：只多一条字段行，不重复记「保存」",
+       len(_u) == _n + 1 and _u[-1]["key"] == "note", str(_u[-1]))
+
+    # 老档案（没有指纹行）：解析成空串，stale 恒为 None，绝不误报
+    _d2, _a2 = _adir()
+    MM.ensure(_a2, {"author": "old"})
+    with io.open(os.path.join(_a2, ".mde", "up.md"), "a",
+                 encoding="utf-8", newline="\n") as _f:
+        _f.write("- 2026-10-30 23:24 @old · 保存\n")
+    r19 = MM.read(_a2, content="随便什么内容")
+    ck("I11 老档案无指纹：hash 空、stale=None（不误报未记录改动）",
+       r19["hash"] == "" and r19["stale"] is None,
+       (r19["hash"], r19["stale"]))
+
+    # 接手别人文件建档：那条「建档」也要带指纹，链从第一笔就完整
+    _d3, _a3 = _adir()
+    r20, _c20, b20 = MM.sync(_a3, {}, who="Ldxs", created="none",
+                             touch=True, content=body1)
+    ck("I12 接手建档：「建档」行带指纹，链从第一笔就完整",
+       b20 is True and len(r20["hash"]) == 64 and
+       "建档 sm3:" in io.open(os.path.join(_a3, ".mde", "up.md"),
+                              encoding="utf-8").read(),
+       r20["hash"][:16])
+
+    for _x in (_d, _d2, _d3):
+        shutil.rmtree(_x, ignore_errors=True)
 
     # ---- D 组 · 回归：逐字节不变 ----
     reg = []

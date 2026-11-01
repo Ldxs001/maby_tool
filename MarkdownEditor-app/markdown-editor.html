@@ -234,6 +234,8 @@
   .markdown-body .mde-fm-last .mde-fm-v{opacity:.72;font-size:.95em;}
   .markdown-body .mde-fm-conflict{border-left-color:#d9534f;background:rgba(217,83,79,.09);}
   .markdown-body .mde-fm-conflict code{font-size:.95em;padding:0 .2em;}
+  .markdown-body .mde-fm-fp .mde-fm-v{font-family:ui-monospace,Consolas,monospace;font-size:.92em;opacity:.72;}
+  .markdown-body .mde-fm-warn{color:#d9534f;font-weight:600;}
   /* @@ fill 图片分栏：flex 行、各栏比例宽；栏内 {N} 失效——栏内图一律
      相对栏 100%（撑满栏），与不分栏 {N} 相对版心同一语义：分栏的栏比例
      就是宽度参数（版心百分比已经"付过费"），栏内不再二次百分比，小图
@@ -540,8 +542,14 @@
     body.light .ts-sepbtn{background:#eef0f4;color:#222;}
     #tsPanel>.ts-head{flex:0 0 auto;background:#23272f;border-radius:10px 10px 0 0;}
     body.light #tsPanel>.ts-head{background:#fff;}
-    #tsPanel>.ts-foot{flex:0 0 auto;padding:7px 16px;text-align:right;border-top:1px solid rgba(128,128,128,.22);background:#23272f;border-radius:0 0 10px 10px;}
+    #tsPanel>.ts-foot{flex:0 0 auto;padding:7px 16px;text-align:right;border-top:1px solid rgba(128,128,128,.22);background:#23272f;border-radius:0 0 10px 10px;display:flex;align-items:center;gap:12px;}
     .ts-foot{padding:7px 16px;text-align:right;flex:0 0 auto;border-top:1px solid rgba(128,128,128,.22);}
+    /* 面板改了却没点「应用」= 只改在框里，一个字都没持久化，关掉面板即丢。
+       贴在应用按钮左边，用点+文字说明，不用弹窗（不打断正在调参数的人）。 */
+    #tsDirty{margin-right:auto;display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:1;color:#e0a030;}
+    #tsDirty::before{content:'';width:6px;height:6px;border-radius:50%;background:#e0a030;flex:0 0 auto;}
+    body.light #tsDirty{color:#a86400;}
+    body.light #tsDirty::before{background:#a86400;}
     #tsApply{background:#4a6cf7;color:#fff;border:none;border-radius:6px;padding:7px 22px;cursor:pointer;}
     .ts-head-r{display:flex;align-items:center;gap:10px;}
     #tsClose{font-size:20px;line-height:1;padding:0 2px;}
@@ -834,11 +842,10 @@
      <div class="ts-card-h">元数据</div>
      <div class="ts-row"><label title="关闭后 front matter 与 @@ meta 都不出元数据区（元数据区只在预览显示，不打印、不进 Word / HTML 导出）">显示元数据区</label><span class="ts-ctl"><input id="tsMetaOn" class="ts-sw" type="checkbox" checked></span></div>
      <div class="ts-grid2">
-     <div class="ts-row"><label>文档标题</label><span class="ts-ctl"><input id="tsMetaTitle" class="ts-txt" type="text" name="mde-m-f1" autocomplete="off" placeholder="留空则不写"></span></div>
-     <div class="ts-row"><label>作者</label><span class="ts-ctl"><input id="tsMetaAuthor" class="ts-txt" type="text" name="mde-m-f2" autocomplete="off"></span></div>
-     <div class="ts-row"><label>日期</label><span class="ts-ctl"><input id="tsMetaDate" class="ts-txt" type="text" name="mde-m-f3" autocomplete="off" placeholder="如 2026-10-30"></span></div>
-     <div class="ts-row"><label>标签</label><span class="ts-ctl"><input id="tsMetaTags" class="ts-txt" type="text" name="mde-m-f4" autocomplete="off" placeholder="逗号分隔"></span></div>
+     <div class="ts-row"><label>作者</label><span class="ts-ctl"><input id="tsMetaAuthor" class="ts-txt" type="text" name="mde-m-f2" autocomplete="off" placeholder="留空则记为 default"></span></div>
      <div class="ts-row"><label>备注</label><span class="ts-ctl"><input id="tsMetaNote" class="ts-txt" type="text" name="mde-m-f5" autocomplete="off"></span></div>
+     <div class="ts-row"><label>标签</label><span class="ts-ctl"><input id="tsMetaTags" class="ts-txt" type="text" name="mde-m-f3" autocomplete="off" title="轻分类，多个用逗号隔开；保存时随履历记录，预览显示履历里最后一次记录的值"></span></div>
+     <div class="ts-row"><label title="文档的归属/项目标注（即原来的文章标题）：保存时随履历记录，预览显示履历里最后一次记录的值，从没人记过就留空">代称</label><span class="ts-ctl"><input id="tsMetaTitle" class="ts-txt" type="text" name="mde-m-f4" autocomplete="off" placeholder="如：某内部项目"></span></div>
      </div>
      <div class="ts-meta-stat" id="tsMetaStat"></div>
      </div>
@@ -901,7 +908,7 @@
      <div class="ts-row"><label title="按每张图的实际显示宽度换算目标像素再降采样：只缩不放、压完不变小就回滚用原图；源文件与磁盘上的图一个字节都不动。150dpi 下含小字的截图会发糊，慎用。">说明</label><span class="ts-ctl"><span class="ts-hint">按显示宽度换算像素再降采样：只缩不放，压完没变小就回滚用原图。源文件一个字节都不动。</span></span></div>
      </div>
    </div>
-     <div class="ts-foot"><button id="tsApply">应用</button></div>
+     <div class="ts-foot"><span id="tsDirty" hidden>排版设置尚未应用（改动只在面板里，未持久化）</span><button id="tsApply">应用</button></div>
    </div>
  </div>
 <div id="lrOverlay" hidden>
@@ -1922,13 +1929,55 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
      两条同时成立＝冲突：都不渲染，只出一条提示条（不替人挑）。
      元数据区一律带 data-mde-zone，三个导出出口按此属性整块剔除——
      元数据只在预览区看得见。 */
-  var MDE_META_KEYS=[['title','标题'],['author','作者'],['date','日期'],['tags','标签'],['note','备注']];
+  var MDE_META_KEYS=[['title','代称'],['author','作者'],['date','日期'],['tags','标签'],['note','备注']];
   function _fmEsc(s){return escapeHtml(String(s==null?'':s));}
   function _mdeMetaOn(){
     try{return !(typeof window!=='undefined'&&window.__MDE_META_ON__===false);}catch(e){return true;}
   }
-  function _fmZone(rows,zone,last){
-    var h='<div class="mde-fm" data-mde-zone="'+zone+'"><div class="mde-fm-h">元数据</div>';
+  /* 元数据区的行标签要跟界面语言走。解析器跑在独立作用域里，看不到 UI 段的
+     I18N_EN；md-parser.js 又是独立发行版，本就不该反过来依赖宿主界面——
+     所以这里自带一份最小的元数据标签表。语言开关由 UI 段写到 window.__MDE_LANG__。 */
+  var _FM_LBL_EN={'元数据':'Metadata','作者':'Author','创建':'Created',
+                  '最近修改':'Last edited','代称':'Alias','标题':'Title','日期':'Date',
+                  '标签':'Tags','备注':'Note','指纹':'Fingerprint',
+                  '注意':'Alert','未记录改动：正文与最后一次记录不符':
+                  'Unrecorded change: the text no longer matches the last entry'};
+  function _fmTxt(s){
+    try{
+      if(typeof window!=='undefined'&&window.__MDE_LANG__==='en'){
+        var v=_FM_LBL_EN[s];
+        if(v)return v;
+      }
+    }catch(e){}
+    return s;
+  }
+  /* v2.26.3：作者 / 创建 / 最近修改这三行是**档案的元信息**，由后端合成好送过来
+     （read() 的 authors / created / last），前端不再自己拼——两边各算一套必然分叉。
+     head 是可选的置顶行数组（通道 a 不传，通道 b 传作者与创建）。 */
+  function _fmZone(rows,zone,last,head,fp,warn){
+    var h='<div class="mde-fm" data-mde-zone="'+zone+'"><div class="mde-fm-h">'+_fmEsc(_fmTxt('元数据'))+'</div>';
+    if(head){
+      for(var q=0;q<head.length;q++){
+        h+='<div class="mde-fm-row"><span class="mde-fm-k">'+_fmEsc(head[q].k)+'</span>'
+          +'<span class="mde-fm-v">'+_fmEsc(head[q].v)+'</span></div>';
+      }
+    }
+    if(last){
+      h+='<div class="mde-fm-row mde-fm-last"><span class="mde-fm-k">'+_fmEsc(_fmTxt('最近修改'))+'</span>'
+        +'<span class="mde-fm-v">'+_fmEsc(last)+'</span></div>';
+    }
+    if(fp&&fp.short){
+      /* SM3 指纹：只显示前 8 位（人看），悬停看全长（可核对）。存进 up.md 的
+         永远是全长——截断存档等于自动把校验降级成 64 位哈希，不值。 */
+      h+='<div class="mde-fm-row mde-fm-fp" title="'+_fmEsc(fp.full||'')+'"><span class="mde-fm-k">'
+        +_fmEsc(_fmTxt('指纹'))+'</span><span class="mde-fm-v">sm3 '+_fmEsc(fp.short)+'</span></div>';
+    }
+    if(warn){
+      /* stale=true：磁盘正文与 up 末条指纹对不上 → 有一次没被记录的改动
+         （外部工具改过，或者改完没保存就关了）。红字，不静默。 */
+      h+='<div class="mde-fm-row mde-fm-warn"><span class="mde-fm-k">'+_fmEsc(_fmTxt('注意'))+'</span>'
+        +'<span class="mde-fm-v">'+_fmEsc(_fmTxt('未记录改动：正文与最后一次记录不符'))+'</span></div>';
+    }
     for(var k=0;k<rows.length;k++){
       if(rows[k].k===null){                 /* 不合 key: value 的行按原文行露出，零吞字 */
         h+='<div class="mde-fm-row mde-fm-raw"><span class="mde-fm-v">'+_fmEsc(rows[k].v)+'</span></div>';
@@ -1937,13 +1986,30 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
       h+='<div class="mde-fm-row"><span class="mde-fm-k">'+_fmEsc(rows[k].k)+'</span>'
         +'<span class="mde-fm-v">'+_fmEsc(rows[k].v)+'</span></div>';
     }
-    if(last){
-      h+='<div class="mde-fm-row mde-fm-last"><span class="mde-fm-k">最近修改</span>'
-        +'<span class="mde-fm-v">'+_fmEsc(last)+'</span></div>';
-    }
     return h+'</div>';
   }
-  /* 档案元数据 → 渲染行。无任何非空字段即返回 null（没数据就没区域，不占位） */
+  /* ISO 时间戳 → 人看的 `YYYY-MM-DD HH:MM`。`none` 原样保留：那是
+     「不知道建档时间」的显式标记，不能给它编一个日期。 */
+  function _fmStamp(s){
+    s=String(s==null?'':s).replace(/^\s+|\s+$/g,'');
+    if(!s)return '';
+    if(s==='none')return 'none';
+    var m=/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(s);
+    return m?(m[1]+' '+m[2]):s;
+  }
+  /* 档案元数据 → 渲染行。没有档案就返回 null（没数据就没区域，不占位）。
+     v2.26.3 起区块结构固定为：
+       作者（创建者 + 全部操作者，至少 default）
+       创建（zero.created；接手别人的文件是 none）
+       最近修改（up 最后一条的时间；up 空就不出）
+       代称 / 日期 / 标签 / 备注（有值才出）
+     继承的真相（主人 2026-11-02 定）：标签与代称的显示**只看履历**——
+     up（含 zero 建档）里最后一次被记录的值就是显示值（"覆盖显示"）；当前
+     作者保存时没记这两个字段，合成的 fields 自然保持前值（"继承之前"）；
+     从没人记过就留空。排版设置里那两个框只是**输入口**：save 之前绝不把
+     设置值显示出来，save 之后它进了履历，走的就是同一条履历规则。
+     同步只记非空值（metaCfgFields 丢空），所以履历里的值一旦写上就不会
+     被"改回空"抹掉——继承链天然成立，不需要额外的兜底逻辑。 */
   function _metaFromWindow(){
     try{
       var m=(typeof window!=='undefined')?window.__MDE_META__:null;
@@ -1951,20 +2017,33 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
       /* 渲染取的是**当前值**：服务端 read() 已经把 zero.fields 与 up 里的
          变更叠加成 fields。只读 zero 会把「改过的」值漏掉，等于回到建档那一刻
          ——这正是主人定的 zero+up 合成渲染（2026-10-31）。 */
-      var f=(m.fields&&typeof m.fields==='object')?m.fields:((m.zero&&m.zero.fields)||{}),rows=[];
+      var f=(m.fields&&typeof m.fields==='object')?m.fields:((m.zero&&m.zero.fields)||{});
+      var head=[];
+      var au=(m.authors&&m.authors.length)?m.authors:[(f.author||'').toString()||'default'];
+      head.push({k:_fmTxt('作者'),v:au.join('，')});
+      var cr=_fmStamp(m.created||(m.zero&&m.zero.created)||'');
+      head.push({k:_fmTxt('创建'),v:cr||'none'});
+      var rows=[];
       for(var q=0;q<MDE_META_KEYS.length;q++){
+        if(MDE_META_KEYS[q][0]==='author')continue;   /* 作者已在作者链里，不重复出 */
         var vv=f[MDE_META_KEYS[q][0]];
         if(vv===undefined||vv===null||String(vv).replace(/^\s+|\s+$/g,'')==='')continue;
-        rows.push({k:MDE_META_KEYS[q][1],v:String(vv)});
+        rows.push({k:_fmTxt(MDE_META_KEYS[q][1]),v:String(vv)});
       }
-      if(!rows.length)return null;
-      var up=m.up||[],last=null;
-      if(up.length){
-        var t=up[up.length-1];
-        last=(t&&t.at?String(t.at):'')+(t&&t.key?(' · '+t.key):'');
-        if(!last)last=null;
+      var last=(m.last!=null&&String(m.last)!=='')?String(m.last):'';
+      /* 兜底：老版本后端不返回 last，就从 up 最后一条自己取（只取时间，
+         不带字段名——「最近修改」只回答"什么时候"）。 */
+      if(!last&&m.up&&m.up.length){
+        var _t=m.up[m.up.length-1];
+        last=(_t&&_t.at)?String(_t.at):'';
       }
-      return {rows:rows,last:last};
+      /* 溯源三件套（v2.26.3）：SM3 指纹（老档案没有 → null，不出行）、
+         stale（true = 磁盘正文与末条对不上；null = 无从判断，不出告警）。
+         stale===false 和 ===null 都不画告警行——"正常"和"不知道"都不吵。 */
+      var _h=(m.hash!=null&&String(m.hash).length===64)?String(m.hash):'';
+      return {rows:rows,head:head,last:last||null,
+              fp:_h?{full:_h,short:_h.slice(0,8)}:null,
+              warn:(m.stale===true)};
     }catch(e){return null;}
   }
   /* 前置消费：四条判据全中才认
@@ -2068,7 +2147,7 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
         _metaSeen=true;
         if(!_fmConflict&&!_fmRows&&_mdeMetaOn()){
           var _mz=_metaFromWindow();
-          if(_mz)html+=_fmZone(_mz.rows,'b',_mz.last);
+          if(_mz)html+=_fmZone(_mz.rows,'b',_mz.last,_mz.head,_mz.fp,_mz.warn);
         }
       }
       i++;curInd=0;continue;
@@ -2700,7 +2779,7 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
    预览与编辑区（用户内容）永不触碰。动态节点由 applyLang 的观察器兜住。 */
 var LANG_KEY='md-editor-lang';
 var I18N_EN={"字体 · 正文类":"Fonts · Body","字体 · 块级类":"Fonts · Blocks","段落缩进":"Indent","段间距":"Gap","页面 · 纸张与边距":"Page · Paper","页面 · 页码":"Page · Numbers","编号":"Numbering","图片输出":"Image output","元数据":"Metadata","字":"chars","分":"min","H4~H6 标题（四级到六级标题共用一套字体设置）":"H4–H6 headings (levels 4 to 6 share one font setting)","关闭后 front matter 与 @@ meta 都不出元数据区（元数据区只在预览显示，不打印、不进 Word / HTML 导出）":"Turn off to hide the metadata block for both front matter and @@ meta (preview only: never printed, never in Word / HTML exports)","目录独占一页：其后第一个 ## 与正文强制另起新页，不侵入目录页":"Contents on its own page: the first following ## starts a new page, so the body never flows onto the contents page","三线表：去掉全部竖线，只留顶线、表头线、底线":"Booktabs: no vertical rules, only top, header and bottom rules","段间距（正文块之间的垂直间距，单位 em＝正文字号；@@ blank 逐处硬控可覆盖它）":"Paragraph gap (vertical space between body blocks, em = body size; @@ blank overrides it per spot)","字体 · 公式与题注":"Fonts · Math & captions","目录独占一页":"Contents on its own page","三线表":"Booktabs","列表标记外凸":"Hanging list markers","页边距":"Margins","自动落盘间隔":"Autosave interval","留空则不写":"Blank = not written","如 2026-10-30":"e.g. 2026-10-30","逗号分隔":"Comma-separated","按显示宽度换算像素再降采样：只缩不放，压完没变小就回滚用原图。源文件一个字节都不动。":"Downscaled to the pixels each image's real display width needs: never enlarged, and reverted to the original when the result is not smaller. The file on disk is never touched.","当前：未建档（首次填写并应用时建档）":"Current: no archive yet (created on the first apply)","当前：首行 YAML front matter（兼容模式），写入会改这段原文":"Current: YAML front matter on line 1 (compatible mode); applying rewrites that block","当前：本文档的元数据文件":"Current: this document's metadata file","当前：本文档的元数据文件 · 建档于 {0}":"Current: this document's metadata file, created {0}",
-"设置里的这份值；应用时写入本文档：没有档案就建档（创建快照只写一次、只读），已有档案只在履历里追加":"Applied to this document: a missing archive is created (snapshot written once, read-only); an existing one only gets an appended log","　⚠ 正文缺 @@ meta 行，填写后自动插入":"  ⚠ no @@ meta line in the text; one is added when you apply","正在读取元数据档案，稍后再点「应用」":"Reading the metadata archive, click Apply again in a moment","请先保存文档（Ctrl+S），元数据档案要跟着文件走":"Save the document first (Ctrl+S); the archive travels with the file","元数据写入失败":"Could not write the metadata","元数据无变化":"Metadata unchanged","保存失败：{0}":"Save failed: {0}","已自动落盘 {0}":"Autosaved {0}","自动落盘已跳过：文档还没有保存路径":"Autosave skipped: the document has no path yet","显示元数据区":"Show metadata","文档标题":"Title","作者":"Author","日期":"Date","标签":"Tags","位置":"Position","模板与字号":"Template & size","生成目录":"Contents","显示页码":"Show numbers","正文 · 字符数":"Body · chars","引用块 · 字符数":"Quote · chars","列表 · 字符数":"List · chars","不计入目录":"Excluded","标题自动序号":"Headings","自定义宽 × 高":"Custom W × H","页边距 上/右/下/左":"Margins T/R/B/L","公式 KaTeX":"Math KaTeX","新建": "New","分屏": "Split","跟随": "Follow","暗色": "Dark","亮色": "Light","文件": "Files","打开": "Open","打印": "Print","排版": "TS","保存": "Save","另存为": "As…","替换": "Replace","全部": "All","▶ 运行": "▶ Run","运行中…": "Running…","默认文档": "Default doc","已存入缓存": "Cached","编辑中...": "Editing…","本工具由 AI 生成": "AI-generated","本工具由 AI 辅助生成": "Made with AI assistance","本工具由 AI 辅助生成 (AI-assisted)": "Made with AI assistance","文档批注数": "Number of notes","仅编辑": "Editor","仅预览": "Preview","不跟随": "No follow","大纲": "Outline","查找…": "Find…","区分大小写": "Match case","正则表达式": "Regular expression","全字匹配": "Whole word","上一个（Shift+Enter）": "Previous (Shift+Enter)","下一个（Enter）": "Next (Enter)","展开/收起替换（Ctrl+H）": "Toggle replace (Ctrl+H)","关闭（Esc）": "Close (Esc)","替换为（\\n 换行、\\t 制表；正则模式支持 $1 引用）": "Replace with (\\n newline, \\t tab; $1 backreference in regex mode)","替换当前命中（Ctrl+Z 可撤销）": "Replace this match (Ctrl+Z to undo)","全部替换（整体一步，Ctrl+Z 一次撤销）": "Replace all (one step, undo once with Ctrl+Z)","运行全部 @@ MDE 执行点（手动模式）": "Run all @@ MDE exec points (manual mode)","视图切换": "Switch view","主题切换": "Switch theme","最近文件与切换": "Recent files","打开 .md 文件": "Open a .md file","新建文档 (Ctrl+N)": "New document (Ctrl+N)","保存（Ctrl+S）": "Save (Ctrl+S)","另存为…": "Save as…","导出 HTML": "Export HTML","导出 Word(.docx)：保留样式与可编辑公式": "Export Word (.docx): styles and editable formulas preserved","AI 设置：润色 / 智能备注的后端与模型": "AI settings: backend and model for polish / smart notes","排版设置：字体/表格/缩进/自动落盘": "Typesetting: fonts / tables / indent / autosave","low runner：写/生成 Python run，供 @@ MDE 数据点与执行点调用": "low runner: write/generate Python runs for @@ MDE data and exec points","预览跟随编辑区滚动（仅分屏模式生效），点击开/关": "Preview follows editor scroll (split view only). Click to toggle","打印：生成分页版 HTML（纸张/页码/目录）并在浏览器打开，Ctrl+P 即可打印或存为 PDF": "Print: build a paged HTML (paper, page numbers, contents) and open it; Ctrl+P to print or save as PDF","在这里写 Markdown...": "Write Markdown here…","Markdown 源码编辑区": "Markdown source editor","关闭": "Close","取消": "Cancel","应用": "Apply","保存文档": "Save document","文件名": "File name","格式": "Format","未命名": "Untitled","保存目录": "Folder","浏览…": "Browse…","Markdown 文档（.md，图片存同名 .assets 目录）": "Markdown (.md, images in a sibling .assets folder)","自包含文档（.smd，单文件含全部图片）": "Self-contained (.smd, all images in one file)","可直接粘贴路径，或点「浏览…」": "Paste a path, or click Browse…","排版设置": "Typesetting","自动落盘间隔（分钟，0=仅手动）": "Autosave interval (min, 0 = manual only)","字体 / 字号 / 对齐（字号留空 = 保持默认，单位磅；本机字体由后端自动枚举）": "Font / size / align (blank size keeps default, unit pt; local fonts listed by backend)","正文": "Body","H1 标题": "H1","H2 标题": "H2","H3 标题": "H3","H4~H6 标题": "H4–H6","引用块": "Quote","列表": "List","表格": "Table","代码": "Code","公式（KaTeX，字体固定）": "Math (KaTeX, fixed font)","图片": "Image","图题": "Figure caption","表题": "Table caption","本机字体": "Local fonts","(默认)": "(default)","默认": "Default","左对齐": "Left","居中": "Center","右对齐": "Right","两端对齐": "Justify","无": "None","首行缩进": "First line","悬挂缩进": "Hanging","整体缩进": "Block","磅": "pt","段落缩进（按元素独立，字符数 × 当前字号自动换算）": "Paragraph indent (per element; chars × current size)","列表标记外凸（续行悬挂）": "Hanging list markers","编号/圆点站到文字块外面，多行项的续行与首行文字左沿对齐；关闭则续行顶格（v2.13.5 及更早的口径）": "Markers sit outside the text block, wrapped lines align with the first line. Off = wrapped lines flush left (behaviour before v2.14)","段间距（正文块之间的垂直间距，单位 em＝正文字号；@@ blank{n} 逐处硬控可覆盖它）": "Paragraph gap (em = body size; @@ blank{n} overrides per spot)","统一段间距": "Uniform paragraph gap","表格样式": "Table style","三线表（去竖线，三条横线）": "Booktabs (no vertical rules, three rules)","表头底色": "Header shading","首列底色": "First column shading","页面（作用于「打印」导出）": "Page (used by the Print export)","纸张": "Paper","自定义": "Custom","自定义宽 × 高（mm）": "Custom width × height (mm)","宽": "W","高": "H","页边距 上/右/下/左（mm）": "Margins top/right/bottom/left (mm)","页码（打印导出时渲染）": "Page numbers (rendered on Print export)","页码": "Page number","显示": "Show","外侧（奇右偶左）": "Outside (right odd, left even)","底部居中": "Bottom center","底部右侧": "Bottom right","底部左侧": "Bottom left","顶部居中": "Top center","顶部右侧": "Top right","页码模板与字号（{p}=页码，{P}=全文总页数，{N}=本区总页数）": "Template and size ({p} = page, {P} = total pages, {N} = pages in this region)","目录（打印导出时自动生成，条目带页码）": "Contents (built on Print export, entries carry page numbers)","目录": "Contents","不生成": "None","生成": "Generate","置于文首": "At the start","第一个 # 之下": "After the first #","目录独占一页（后续 ## 与正文强制新页，不得侵入）": "Contents on its own page (following ## and body start a new page)","不计入目录（勾选的级别照常渲染、只是不进目录）": "Excluded from contents (checked levels still render, just not listed)","标题自动序号（只作用于预览与导出，不改源文；范围 ## ~ #####）": "Auto-number headings (preview and export only, source untouched; ## to #####)","自动序号": "Numbering","中文体　一、（一）1.（1）": "Chinese  一、 1.","层级体　1 / 1.1 / 1.1.1": "Decimal  1 / 1.1 / 1.1.1","图 / 表编号": "Fig. / table","全篇连续　图 1 / 表 1": "Whole doc  Fig. 1 / Tab. 1","按章重编　图 1-1 / 表 2-1": "Per chapter  Fig. 1-1","编号章级": "Chapter level","##　二级标题为章（默认）": "##  (default)","#　一级标题为章": "#","###　三级标题为章": "###","第 {p} 页 / 共 {P} 页": "Page {p} of {P}","low runner · run 库（编辑器级，全文档共用）": "low runner · run library (editor-wide, shared by all documents)","已保存": "Saved","运行": "Run","立即": "Immediately","等待": "Wait","秒": "s","手动": "Manual","名称": "Name","依赖目录": "Deps folder","AI 生成": "AI generate","报告 AI 生成内容": "Report AI content","保存入库": "Save to library","清空编辑区，另写一个新 run": "Clear the editor and start a new run","渲染完成后 0.4 秒自动运行（原行为）": "Run 0.4s after rendering (previous behaviour)","停止输入 N 秒后自动运行": "Run N seconds after typing stops","等待秒数": "Wait seconds","不自动运行：执行点旁 ▶ 单点运行，或左下角「▶ 运行」全部运行": "Never auto-run: use ▶ beside a point, or ▶ Run in the status bar","如 dark、统计（即文件名，@@ MDE import 用它）": "e.g. dark, stats (also the file name used by @@ MDE import)","打开 runtime/pylibs 目录，pip --target 装三方包": "Open runtime/pylibs to pip install --target third-party packages","对 AI 说出需求，如：求数据点里所有数字之和 / 统计某词出现次数 / 画折线图…（生成后需人工查阅）": "Describe what you need, e.g. sum all numbers in the data points / count a word / draw a line chart… (review the result)","向开发者报告不当的 AI 生成内容（微软商店政策 11.16）": "Report inappropriate AI-generated content (Microsoft Store policy 11.16)","先在下方输入框说出需求": "Describe what you need in the box below","AI 生成中（约 10~60 秒，取决于后端），完成后自动填入代码框…": "Generating (about 10–60 s depending on the backend); it will fill the code box…","AI 已生成——人工查阅后再「保存入库」": "Generated. Review it, then Save to library","（AI 未给名字，请手动命名）": " (no name from AI, please name it)","AI 生成失败：": "AI generation failed: ","\n可在工具栏「AI」里检查后端配置。": "\nCheck the backend in AI settings.","代码为空": "Code is empty","请先命名（@@ MDE import 的名字就是它）": "Name it first (this is the name used by @@ MDE import)","尚无文件路径，请先「另存为」": "No file path yet, use Save as first","未另存为": "Not saved yet","已覆盖 ": "Overwrote ","已保存 ": "Saved ","已覆盖": "Overwrote","（pip 名 ": " (pip name ","——运行将失败，请先安装：</div>": " — the run will fail, install it first:</div>","留空则按名称": "Blank uses the name","上一次生成": "Previous output","删": "Del","删除 ": "Delete ","（点两次确认）": " (click twice to confirm)","确定后删不掉": "Cannot be undone","确认删": "Confirm","只显示一次": "Shown only once","已载入 ": "Loaded ","——修改后「保存」即覆盖": " — Save overwrites it","读取失败：": "Read failed: ","run 库读取失败：": "Run library unreadable: ","待运行": "pending","▶ 待运行": "▶ Pending","全部运行": "Run all","打开就自动跑": "Runs on open","切手动不一定显示 ▶": "Manual mode may hide ▶","改别处 = 白跑一次": "Editing elsewhere wastes a run"," · 全局 ": " · global ","运行此执行点": "Run this point","文件改了但数没变": "File changed, data did not","有未完成": "Unfinished","外部改了文件 → 复位后仍命中旧结果": "File changed outside, reset still hits the old result","全局执行点须返回列表（得到 ": "Global points must return a list (got ","返回 ": "Returned "," 项 ≠ 标记 ": " items ≠ "," 个": " markers","执行失败": "Run failed","网络错误": "Network error","缺少包 ": "Missing package ","重试": "Retry","数据没变": "Data unchanged","数据变了": "Data changed","已替 data 运行": "Ran on data"," 个执行点未运行": " exec points not run"," 个执行点运行失败（红色错误信息就在执行点旁，▶ 可重试）": " exec points failed (the red message sits beside the point; ▶ retries)"," 个执行点已置为待运行": " exec points set back to pending","AI 设置（润色 / 智能备注）": "AI settings (polish / smart notes)","后端": "Backend","LM Studio（本地 :1234）": "LM Studio (local :1234)","Ollama（本地 :11434）": "Ollama (local :11434)","OpenAI 兼容（外部 API）": "OpenAI-compatible (external API)","服务地址（留空按后端默认端口）": "Endpoint (blank = backend default port)","API Key（OpenAI 兼容后端必填）": "API Key (required for OpenAI-compatible)","模型（下拉为后端实加载的模型）": "Model (list comes from the backend)","刷新": "Refresh","超时（秒）": "Timeout (s)","最大输出 tokens": "Max output tokens","温度 temperature（0~2）": "Temperature (0–2)","联网查询（润色 / AI 解释时检索网络资料）": "Web search (for polish / explain)","启用联网查询（关闭则 AI 仅凭自身润色/解释）": "Enable web search (off = model knowledge only)","搜索源": "Search provider","DuckDuckGo（免费，无需 Key）": "DuckDuckGo (free, no key)","Tavily（需 API Key）": "Tavily (needs an API key)","Google Custom Search（需 Key + CX）": "Google Custom Search (needs key + CX)","Bing Search（需 API Key）": "Bing Search (needs an API key)","自定义 API": "Custom API","API Key（Tavily / 自定义 API 用）": "API Key (Tavily / custom API)","自定义 API URL（{q} 与 {key} 占位）": "Custom API URL ({q} and {key} placeholders)","结果条数（1~10）": "Results (1–10)","RAG 知识库（检索增强润色 / 解释）": "RAG knowledge base (retrieval-augmented)","rag-assistant 路径（含 main.py 的目录）": "rag-assistant path (the folder holding main.py)","知识库（空 = 自动路由）": "Knowledge base (blank = auto)","RAG 服务（端口 8767）": "RAG service (port 8767)","探测中…": "Probing…","启动": "Start","停止": "Stop","测试连接": "Test connection","本地推理需先启动 LM Studio / Ollama 并加载模型；OpenAI 兼容后端填外部 API 地址与 Key（DeepSeek、硅基流动等均可用）；润色与「AI 解释」都走此配置。": "Local inference needs LM Studio / Ollama running with a model loaded; for OpenAI-compatible backends fill in the endpoint and key (DeepSeek, SiliconFlow and others work). Polish and Explain both use this config.","联网查询开启后，润色 / AI 解释先检索网络资料注入提示词，搜索失败自动降级为纯模型结果；与 RAG 相互独立。": "With web search on, polish / explain first pull web results into the prompt; failures fall back to the model alone. Independent of RAG.","「RAG润色 / RAG解释」在上述基础上检索 rag-assistant 知识库作为参考资料，需先在下方填写路径并启动 RAG 服务；启动/停止仅手动触发，退出编辑器不影响其运行。": "RAG polish / RAG explain also retrieve from the rag-assistant knowledge base. Set the path below and start the service first; start and stop are manual, and quitting the editor leaves it running.","重新探测 RAG 服务与知识库列表": "Re-probe the RAG service and knowledge bases","（点「刷新」拉取模型列表）": " (click Refresh to list models)","（列表外）": " (not listed)","已获取 ": "Loaded "," 个模型。": " models.","模型列表获取失败：": "Could not list models: ","读取 AI 配置失败": "Could not read the AI config","读取 AI 配置失败：": "Could not read the AI config: ","测试中…": "Testing…","连接成功": "Connected","连接失败": "Connection failed","测试失败：": "Test failed: ","AI 配置已保存": "AI settings saved","（自动路由）": " (auto)","在线（": "Online ("," 个知识库）": " knowledge bases)","启动中…（冷加载需数十秒）": "Starting… (cold start can take tens of seconds)","启动中…": "Starting…","RAG 启动失败：": "RAG failed to start: ","RAG 服务已停止": "RAG service stopped","RAG 停止失败：": "Could not stop the RAG service: "," 个结果": " results","无结果": "No results","离线": "Offline","还活着": "Reachable","批注": "Annotate","标注片段（跟文本内容走，原文编辑后自动同步；删光自动失效）": "Anchor text (follows the content and re-syncs after edits; gone when deleted)","AI 解释": "AI explain","RAG 解释": "RAG explain","删除标注": "Delete note","完成": "Done","备注": "Note","润色": "Polish","RAG润色": "RAG polish","AI 润色预览": "AI polish preview","原文": "Original","润色后（可先手动微调）": "Polished (tweak before applying)","替换原文": "Replace","写点备注…": "Add a note…","需 RAG 服务在线（AI 设置中启动）": "Requires the RAG service (start it in AI settings)","给选中片段加批注": "Add a note to the selection","AI 润色选中片段": "Polish the selection with AI","基于 RAG 知识库检索增强润色（需 RAG 服务在线）": "Retrieval-augmented polish (requires the RAG service)","解释中…": "Explaining…","已结合联网资料解释": "Explained with web results","联网搜索失败，已用纯模型结果": "Web search failed, used the model alone","AI 解释失败：": "Explain failed: ","RAG 解释失败：": "RAG explain failed: ","\n可在工具栏「AI」里检查 RAG 服务状态。": "\nCheck the RAG service in AI settings.","选中内容为空": "Nothing selected","无法标注该选区（跨元素边界）": "Cannot anchor this selection (crosses element boundaries)","润色中…（本地模型可能需要一些时间）": "Polishing… (a local model can take a while)","已结合联网资料润色": "Polished with web results","润色失败：": "Polish failed: ","检索知识库并润色中…（RAG 冷启动或本地模型可能需要一些时间）": "Retrieving and polishing… (RAG cold start or a local model can take a while)","RAG 润色失败：": "RAG polish failed: ","原文已变化，无法定位选区，请重新选择后重试。": "The text changed and the selection could not be located. Select again and retry.","报告将发送给开发者（": "The report goes to the developer (","）。未配置邮件客户端时，可复制下方内容自行粘贴发送。": "). With no mail client configured, copy the text below and send it yourself.","问题描述（可留空）": "Problem description (optional)","自动附带的报告内容（只读）": "Attached report (read-only)","复制报告内容": "Copy report","打开邮件客户端": "Open mail client","例如：内容与事实不符 / 出现不当表述 / 代码无法运行…": "e.g. factually wrong / inappropriate wording / code does not run…","报告内容已复制，请粘贴发送给开发者": "Report copied, paste it to the developer","报告内容已复制，请粘贴发送到 ": "Report copied, paste it to ","复制失败，请手动全选复制": "Copy failed, select all and copy manually","可复制下方内容发送给开发者。": "Copy the text below and send it to the developer.","（无）": "(none)","新标签页": "New tab","打开失败：": "Open failed: ","读取失败": "Read failed","读取文件失败：": "Could not read the file: ","已保存到原文件": "Saved to the original file","保存失败：": "Save failed: ","已载入原文件": "Loaded the original file","已打开：": "Opened: ","已载入": "Loaded","载入内置文档失败：": "Could not load the built-in document: ","使用指南": "User guide","版权与开源组件声明": "Copyright and open-source notices","通过「打开」按钮选择（浏览器不提供完整路径）": "Chosen with the Open button (the browser hides the full path)","该文件通过「打开」按钮选择，浏览器不提供完整路径，无法自动重载。\n请通过右键菜单打开它，或再次用「打开」选择。": "This file was picked with the Open button, so the browser hides its path and it cannot reload automatically.\nOpen it from the context menu, or pick it again with Open.","文档尚未保存，无法打开副本": "Save the document before opening a copy","已用系统程序打开副本": "Opened a copy with the system default app","用系统关联程序打开这份副本": "Open this copy with the system default app","选择保存位置失败：": "Could not choose a save location: ","粘贴图片前请先保存文档（Ctrl+S），图片将存入同名 .assets 目录。": "Save the document before pasting images (Ctrl+S); they go into a sibling .assets folder.","图片保存失败：": "Could not save the image: ","粘贴文件前请先保存文档（Ctrl+S），文件将存入同名 .assets 目录。": "Save the document before pasting files (Ctrl+S); they go into a sibling .assets folder.","文件超过 20MB 上限（当前 ": "File exceeds the 20 MB limit (currently ","正在写入 ": "Writing ","已插入数据点：": "Data point inserted: ","文件写入失败：": "Write failed: ","排版已更新（缓存）": "Typesetting updated (cached)","已落盘 ": "Written ","(未命名)": "(untitled)","文档": "Documents","桌面": "Desktop","下载": "Downloads","用户目录": "Home","上次目录": "Last folder","请先选择保存目录（点「浏览…」）": "Choose a folder first (click Browse…)","未命名.md": "Untitled.md","未命名文档": "Untitled document","预览不存在": "Preview not found","已导出：": "Exported: ","导出失败：": "Export failed: ","未知错误": "Unknown error","无法导出：": "Cannot export: ","。请先运行并确认全部执行点结果后再导出": ". Run the exec points and confirm their results before exporting","（状态栏「▶ 运行」一次跑全部）": "(▶ Run in the status bar runs them all)","正在生成打印版，请稍候…": "Building the print version…","打印导出失败（数据序列化错误）：": "Print export failed (data serialisation): ","导出 Word 文档": "Export Word","后台静默落盘 + 浏览器下载": "Saved in the background and downloaded by the browser","运行错误或失败静默导出": "Export silently on errors or failures","来源：": "Source: ","\n时间：": "\nTime: ","构建：": "Build: ","— AI 输出内容（自动附带，最多 1000 字）—\n": "— AI output (attached automatically, up to 1000 chars) —\n","— 问题描述 —\n": "— Problem description —\n","MDEditor AI 生成内容报告（": "MDEditor AI content report (","已恢复未落盘草稿": "Recovered an unsaved draft","检测到未落盘的本地草稿，已为你恢复（磁盘版本未被覆盖）": "An unsaved local draft was found and restored (the file on disk was not overwritten)","用磁盘版本": "Use the file on disk","恢复": "Restore","发现未完成的保存备份（": "Found an unfinished save backup (","），是否用它恢复本文档？": "). Restore this document from it?","恢复失败：": "Restore failed: ","已从保存备份恢复": "Restored from the save backup","就近": "Nearby","已到文末，从头继续": "Reached the end, continuing from the top","替换失败": "Replace failed","无命中": "No match","替换后与原文相同": "Replacement is identical to the original","已替换 ": "Replaced "," 处（Ctrl+Z 一步撤销）": " occurrences (Ctrl+Z undoes in one step)","正则表达式无效": "Invalid regular expression","已撤销全部替换": "Undid all replacements","渲染失败": "Render failed","<h2>请使用正确方式打开</h2>": "<h2>Please open this page properly</h2>","<p>本页面被直接双击打开（file://），此方式<b>没有后端服务</b>，公式、图片、保存、导出均不可用。</p>": "<p>This page was opened directly from disk (file://). <b>There is no backend</b>, so formulas, images, saving and exporting are unavailable.</p>","<p>正确打开方式（任选其一）：</p>": "<p>Open it one of these ways:</p>","<ol><li>右键任意 .md 文件 →「Open with Markdown Editor」</li>": "<ol><li>Right-click any .md file and choose Open with Markdown Editor</li>","<li>双击工具目录中的 <b>MarkdownEditor.exe</b></li>": "<li>Run <b>MarkdownEditor.exe</b> from the tool folder</li>","<li>双击 .md 文件（已关联本编辑器）</li></ol>": "<li>Double-click a .md file already associated with this editor</li></ol>","<p>若点下方按钮无反应，说明后端服务未运行——先做上面第 2 步。</p>": "<p>If the button below does nothing, the backend is not running. Do step 2 above first.</p>","一级标题": "H1","二级标题": "H2","标题": "Heading","加粗": "Bold","粗体": "Bold","斜体": "Italic","删除线": "Strikethrough","删除": "Strike","行内代码": "Code","引用": "Quote","无序列表": "Bullets","列表项": "List item","序号": "Numbering","有序列表": "Numbered list","任务": "Task","任务列表": "Task list","链接": "Link","插入链接": "Insert link","链接文字": "Link text","插入表格": "Insert table","图表自动编号（图、表各自计数；只作用于预览与导出，不改源文）": "Auto-number figures and tables (each counted separately; preview and export only, source untouched)","内置文档": "Built-in documents","内置文档 · 点击载入（可编辑/另存为）": "Built-in · click to load (editable, save as copy)","回到初始示例状态": "Reset to the initial sample","最近文件": "Recent files","暂无标题": "No headings","默认文档（使用指南）": "Default document (user guide)","切换界面语言：中文 / English": "Switch the interface language: 中文 / English","语法提示开关：开启后光标所在行弹出方言速查（语法检查不受影响）": "Syntax hint toggle: shows the dialect cheat-sheet at the cursor when on (lint checks unaffected)","提示": "Hints","保存到 ": "Save to ","图": "Figure","表": "Table","图片输出（「打印」与导出；预览始终按栏宽缩略，不受此项影响）": "Image output (Print and exports; the preview always uses a column-width thumbnail and is unaffected)","像素": "Pixels","原图输出（不压缩）": "Original (no compression)","实图输出 · 300dpi（印刷）": "Fit to display · 300 dpi (print)","实图输出 · 150dpi（电子交付）": "Fit to display · 150 dpi (screen)","说明": "Note","按每张图的实际显示宽度换算目标像素再降采样：只缩不放、压完不变小就回滚用原图；源文件与磁盘上的图一个字节都不动。150dpi 下含小字的截图会发糊，慎用。": "Each image is downscaled to the pixels its real display width needs: never enlarged, and reverted to the original when the result is not smaller. The source files on disk are never touched. At 150 dpi screenshots with small text lose sharpness, so use with care.","def run(data):\n    # data['kv'] = {'键': '值'}（框架按第一个 == 剥离）\n    # data['raw'] = 数据点原文列表（== 不够用时自行解析）\n    return str(...)  # 返回 str 替换执行点；作图存当前目录返回 ![](文件名)": "def run(data):\n    # data['kv'] = {'key': 'value'} (the framework strips the first ==)\n    # data['raw'] = raw text of this data point (parse it yourself if == is not enough)\n    return str(...)  # return a str to replace the exec point; to draw a chart, save the file and return ![](file name)"};
+"设置里的这份值；应用时写入本文档：没有档案就建档（创建快照只写一次、只读），已有档案只在履历里追加":"Applied to this document: a missing archive is created (snapshot written once, read-only); an existing one only gets an appended log","　⚠ 正文缺 @@ meta 行，填写后自动插入":"  ⚠ no @@ meta line in the text; one is added when you apply","正在读取元数据档案，稍后再点「应用」":"Reading the metadata archive, click Apply again in a moment","请先保存文档（Ctrl+S），元数据档案要跟着文件走":"Save the document first (Ctrl+S); the archive travels with the file","元数据写入失败":"Could not write the metadata","元数据无变化":"Metadata unchanged","保存失败：{0}":"Save failed: {0}","已自动落盘 {0}":"Autosaved {0}","自动落盘已跳过：文档还没有保存路径":"Autosave skipped: the document has no path yet","显示元数据区":"Show metadata","文档标题":"Title","作者":"Author","日期":"Date","标签":"Tags","代称":"Alias","位置":"Position","模板与字号":"Template & size","生成目录":"Contents","显示页码":"Show numbers","正文 · 字符数":"Body · chars","引用块 · 字符数":"Quote · chars","列表 · 字符数":"List · chars","不计入目录":"Excluded","标题自动序号":"Headings","自定义宽 × 高":"Custom W × H","页边距 上/右/下/左":"Margins T/R/B/L","公式 KaTeX":"Math KaTeX","新建": "New","分屏": "Split","跟随": "Follow","暗色": "Dark","亮色": "Light","文件": "Files","打开": "Open","打印": "Print","排版": "TS","保存": "Save","另存为": "As…","替换": "Replace","全部": "All","▶ 运行": "▶ Run","运行中…": "Running…","默认文档": "Default doc","已存入缓存": "Cached","编辑中...": "Editing…","本工具由 AI 生成": "AI-generated","本工具由 AI 辅助生成": "Made with AI assistance","本工具由 AI 辅助生成 (AI-assisted)": "Made with AI assistance","文档批注数": "Number of notes","仅编辑": "Editor","仅预览": "Preview","不跟随": "No follow","大纲": "Outline","查找…": "Find…","区分大小写": "Match case","正则表达式": "Regular expression","全字匹配": "Whole word","上一个（Shift+Enter）": "Previous (Shift+Enter)","下一个（Enter）": "Next (Enter)","展开/收起替换（Ctrl+H）": "Toggle replace (Ctrl+H)","关闭（Esc）": "Close (Esc)","替换为（\\n 换行、\\t 制表；正则模式支持 $1 引用）": "Replace with (\\n newline, \\t tab; $1 backreference in regex mode)","替换当前命中（Ctrl+Z 可撤销）": "Replace this match (Ctrl+Z to undo)","全部替换（整体一步，Ctrl+Z 一次撤销）": "Replace all (one step, undo once with Ctrl+Z)","运行全部 @@ MDE 执行点（手动模式）": "Run all @@ MDE exec points (manual mode)","视图切换": "Switch view","主题切换": "Switch theme","最近文件与切换": "Recent files","打开 .md 文件": "Open a .md file","新建文档 (Ctrl+N)": "New document (Ctrl+N)","保存（Ctrl+S）": "Save (Ctrl+S)","另存为…": "Save as…","导出 HTML": "Export HTML","导出 Word(.docx)：保留样式与可编辑公式": "Export Word (.docx): styles and editable formulas preserved","AI 设置：润色 / 智能备注的后端与模型": "AI settings: backend and model for polish / smart notes","排版设置：字体/表格/缩进/自动落盘": "Typesetting: fonts / tables / indent / autosave","low runner：写/生成 Python run，供 @@ MDE 数据点与执行点调用": "low runner: write/generate Python runs for @@ MDE data and exec points","预览跟随编辑区滚动（仅分屏模式生效），点击开/关": "Preview follows editor scroll (split view only). Click to toggle","打印：生成分页版 HTML（纸张/页码/目录）并在浏览器打开，Ctrl+P 即可打印或存为 PDF": "Print: build a paged HTML (paper, page numbers, contents) and open it; Ctrl+P to print or save as PDF","在这里写 Markdown...": "Write Markdown here…","Markdown 源码编辑区": "Markdown source editor","关闭": "Close","取消": "Cancel","应用": "Apply","保存文档": "Save document","文件名": "File name","格式": "Format","未命名": "Untitled","保存目录": "Folder","浏览…": "Browse…","Markdown 文档（.md，图片存同名 .assets 目录）": "Markdown (.md, images in a sibling .assets folder)","自包含文档（.smd，单文件含全部图片）": "Self-contained (.smd, all images in one file)","可直接粘贴路径，或点「浏览…」": "Paste a path, or click Browse…","排版设置": "Typesetting","自动落盘间隔（分钟，0=仅手动）": "Autosave interval (min, 0 = manual only)","字体 / 字号 / 对齐（字号留空 = 保持默认，单位磅；本机字体由后端自动枚举）": "Font / size / align (blank size keeps default, unit pt; local fonts listed by backend)","正文": "Body","H1 标题": "H1","H2 标题": "H2","H3 标题": "H3","H4~H6 标题": "H4–H6","引用块": "Quote","列表": "List","表格": "Table","代码": "Code","公式（KaTeX，字体固定）": "Math (KaTeX, fixed font)","图片": "Image","图题": "Figure caption","表题": "Table caption","本机字体": "Local fonts","(默认)": "(default)","默认": "Default","左对齐": "Left","居中": "Center","右对齐": "Right","两端对齐": "Justify","无": "None","首行缩进": "First line","悬挂缩进": "Hanging","整体缩进": "Block","磅": "pt","段落缩进（按元素独立，字符数 × 当前字号自动换算）": "Paragraph indent (per element; chars × current size)","列表标记外凸（续行悬挂）": "Hanging list markers","编号/圆点站到文字块外面，多行项的续行与首行文字左沿对齐；关闭则续行顶格（v2.13.5 及更早的口径）": "Markers sit outside the text block, wrapped lines align with the first line. Off = wrapped lines flush left (behaviour before v2.14)","段间距（正文块之间的垂直间距，单位 em＝正文字号；@@ blank{n} 逐处硬控可覆盖它）": "Paragraph gap (em = body size; @@ blank{n} overrides per spot)","统一段间距": "Uniform paragraph gap","表格样式": "Table style","三线表（去竖线，三条横线）": "Booktabs (no vertical rules, three rules)","表头底色": "Header shading","首列底色": "First column shading","页面（作用于「打印」导出）": "Page (used by the Print export)","纸张": "Paper","自定义": "Custom","自定义宽 × 高（mm）": "Custom width × height (mm)","宽": "W","高": "H","页边距 上/右/下/左（mm）": "Margins top/right/bottom/left (mm)","页码（打印导出时渲染）": "Page numbers (rendered on Print export)","页码": "Page number","显示": "Show","外侧（奇右偶左）": "Outside (right odd, left even)","底部居中": "Bottom center","底部右侧": "Bottom right","底部左侧": "Bottom left","顶部居中": "Top center","顶部右侧": "Top right","页码模板与字号（{p}=页码，{P}=全文总页数，{N}=本区总页数）": "Template and size ({p} = page, {P} = total pages, {N} = pages in this region)","目录（打印导出时自动生成，条目带页码）": "Contents (built on Print export, entries carry page numbers)","目录": "Contents","不生成": "None","生成": "Generate","置于文首": "At the start","第一个 # 之下": "After the first #","目录独占一页（后续 ## 与正文强制新页，不得侵入）": "Contents on its own page (following ## and body start a new page)","不计入目录（勾选的级别照常渲染、只是不进目录）": "Excluded from contents (checked levels still render, just not listed)","标题自动序号（只作用于预览与导出，不改源文；范围 ## ~ #####）": "Auto-number headings (preview and export only, source untouched; ## to #####)","自动序号": "Numbering","中文体　一、（一）1.（1）": "Chinese  一、 1.","层级体　1 / 1.1 / 1.1.1": "Decimal  1 / 1.1 / 1.1.1","图 / 表编号": "Fig. / table","全篇连续　图 1 / 表 1": "Whole doc  Fig. 1 / Tab. 1","按章重编　图 1-1 / 表 2-1": "Per chapter  Fig. 1-1","编号章级": "Chapter level","##　二级标题为章（默认）": "##  (default)","#　一级标题为章": "#","###　三级标题为章": "###","第 {p} 页 / 共 {P} 页": "Page {p} of {P}","low runner · run 库（编辑器级，全文档共用）": "low runner · run library (editor-wide, shared by all documents)","已保存": "Saved","运行": "Run","立即": "Immediately","等待": "Wait","秒": "s","手动": "Manual","名称": "Name","依赖目录": "Deps folder","AI 生成": "AI generate","报告 AI 生成内容": "Report AI content","保存入库": "Save to library","清空编辑区，另写一个新 run": "Clear the editor and start a new run","渲染完成后 0.4 秒自动运行（原行为）": "Run 0.4s after rendering (previous behaviour)","停止输入 N 秒后自动运行": "Run N seconds after typing stops","等待秒数": "Wait seconds","不自动运行：执行点旁 ▶ 单点运行，或左下角「▶ 运行」全部运行": "Never auto-run: use ▶ beside a point, or ▶ Run in the status bar","如 dark、统计（即文件名，@@ MDE import 用它）": "e.g. dark, stats (also the file name used by @@ MDE import)","打开 runtime/pylibs 目录，pip --target 装三方包": "Open runtime/pylibs to pip install --target third-party packages","对 AI 说出需求，如：求数据点里所有数字之和 / 统计某词出现次数 / 画折线图…（生成后需人工查阅）": "Describe what you need, e.g. sum all numbers in the data points / count a word / draw a line chart… (review the result)","向开发者报告不当的 AI 生成内容（微软商店政策 11.16）": "Report inappropriate AI-generated content (Microsoft Store policy 11.16)","先在下方输入框说出需求": "Describe what you need in the box below","AI 生成中（约 10~60 秒，取决于后端），完成后自动填入代码框…": "Generating (about 10–60 s depending on the backend); it will fill the code box…","AI 已生成——人工查阅后再「保存入库」": "Generated. Review it, then Save to library","（AI 未给名字，请手动命名）": " (no name from AI, please name it)","AI 生成失败：": "AI generation failed: ","\n可在工具栏「AI」里检查后端配置。": "\nCheck the backend in AI settings.","代码为空": "Code is empty","请先命名（@@ MDE import 的名字就是它）": "Name it first (this is the name used by @@ MDE import)","尚无文件路径，请先「另存为」": "No file path yet, use Save as first","未另存为": "Not saved yet","已覆盖 ": "Overwrote ","已保存 ": "Saved ","已覆盖": "Overwrote","（pip 名 ": " (pip name ","——运行将失败，请先安装：</div>": " — the run will fail, install it first:</div>","留空则按名称": "Blank uses the name","上一次生成": "Previous output","删": "Del","删除 ": "Delete ","（点两次确认）": " (click twice to confirm)","确定后删不掉": "Cannot be undone","确认删": "Confirm","只显示一次": "Shown only once","已载入 ": "Loaded ","——修改后「保存」即覆盖": " — Save overwrites it","读取失败：": "Read failed: ","run 库读取失败：": "Run library unreadable: ","待运行": "pending","▶ 待运行": "▶ Pending","全部运行": "Run all","打开就自动跑": "Runs on open","切手动不一定显示 ▶": "Manual mode may hide ▶","改别处 = 白跑一次": "Editing elsewhere wastes a run"," · 全局 ": " · global ","运行此执行点": "Run this point","文件改了但数没变": "File changed, data did not","有未完成": "Unfinished","外部改了文件 → 复位后仍命中旧结果": "File changed outside, reset still hits the old result","全局执行点须返回列表（得到 ": "Global points must return a list (got ","返回 ": "Returned "," 项 ≠ 标记 ": " items ≠ "," 个": " markers","执行失败": "Run failed","网络错误": "Network error","缺少包 ": "Missing package ","重试": "Retry","数据没变": "Data unchanged","数据变了": "Data changed","已替 data 运行": "Ran on data"," 个执行点未运行": " exec points not run"," 个执行点运行失败（红色错误信息就在执行点旁，▶ 可重试）": " exec points failed (the red message sits beside the point; ▶ retries)"," 个执行点已置为待运行": " exec points set back to pending","AI 设置（润色 / 智能备注）": "AI settings (polish / smart notes)","后端": "Backend","LM Studio（本地 :1234）": "LM Studio (local :1234)","Ollama（本地 :11434）": "Ollama (local :11434)","OpenAI 兼容（外部 API）": "OpenAI-compatible (external API)","服务地址（留空按后端默认端口）": "Endpoint (blank = backend default port)","API Key（OpenAI 兼容后端必填）": "API Key (required for OpenAI-compatible)","模型（下拉为后端实加载的模型）": "Model (list comes from the backend)","刷新": "Refresh","超时（秒）": "Timeout (s)","最大输出 tokens": "Max output tokens","温度 temperature（0~2）": "Temperature (0–2)","联网查询（润色 / AI 解释时检索网络资料）": "Web search (for polish / explain)","启用联网查询（关闭则 AI 仅凭自身润色/解释）": "Enable web search (off = model knowledge only)","搜索源": "Search provider","DuckDuckGo（免费，无需 Key）": "DuckDuckGo (free, no key)","Tavily（需 API Key）": "Tavily (needs an API key)","Google Custom Search（需 Key + CX）": "Google Custom Search (needs key + CX)","Bing Search（需 API Key）": "Bing Search (needs an API key)","自定义 API": "Custom API","API Key（Tavily / 自定义 API 用）": "API Key (Tavily / custom API)","自定义 API URL（{q} 与 {key} 占位）": "Custom API URL ({q} and {key} placeholders)","结果条数（1~10）": "Results (1–10)","RAG 知识库（检索增强润色 / 解释）": "RAG knowledge base (retrieval-augmented)","rag-assistant 路径（含 main.py 的目录）": "rag-assistant path (the folder holding main.py)","知识库（空 = 自动路由）": "Knowledge base (blank = auto)","RAG 服务（端口 8767）": "RAG service (port 8767)","探测中…": "Probing…","启动": "Start","停止": "Stop","测试连接": "Test connection","本地推理需先启动 LM Studio / Ollama 并加载模型；OpenAI 兼容后端填外部 API 地址与 Key（DeepSeek、硅基流动等均可用）；润色与「AI 解释」都走此配置。": "Local inference needs LM Studio / Ollama running with a model loaded; for OpenAI-compatible backends fill in the endpoint and key (DeepSeek, SiliconFlow and others work). Polish and Explain both use this config.","联网查询开启后，润色 / AI 解释先检索网络资料注入提示词，搜索失败自动降级为纯模型结果；与 RAG 相互独立。": "With web search on, polish / explain first pull web results into the prompt; failures fall back to the model alone. Independent of RAG.","「RAG润色 / RAG解释」在上述基础上检索 rag-assistant 知识库作为参考资料，需先在下方填写路径并启动 RAG 服务；启动/停止仅手动触发，退出编辑器不影响其运行。": "RAG polish / RAG explain also retrieve from the rag-assistant knowledge base. Set the path below and start the service first; start and stop are manual, and quitting the editor leaves it running.","重新探测 RAG 服务与知识库列表": "Re-probe the RAG service and knowledge bases","（点「刷新」拉取模型列表）": " (click Refresh to list models)","（列表外）": " (not listed)","已获取 ": "Loaded "," 个模型。": " models.","模型列表获取失败：": "Could not list models: ","读取 AI 配置失败": "Could not read the AI config","读取 AI 配置失败：": "Could not read the AI config: ","测试中…": "Testing…","连接成功": "Connected","连接失败": "Connection failed","测试失败：": "Test failed: ","AI 配置已保存": "AI settings saved","（自动路由）": " (auto)","在线（": "Online ("," 个知识库）": " knowledge bases)","启动中…（冷加载需数十秒）": "Starting… (cold start can take tens of seconds)","启动中…": "Starting…","RAG 启动失败：": "RAG failed to start: ","RAG 服务已停止": "RAG service stopped","RAG 停止失败：": "Could not stop the RAG service: "," 个结果": " results","无结果": "No results","离线": "Offline","还活着": "Reachable","批注": "Annotate","标注片段（跟文本内容走，原文编辑后自动同步；删光自动失效）": "Anchor text (follows the content and re-syncs after edits; gone when deleted)","AI 解释": "AI explain","RAG 解释": "RAG explain","删除标注": "Delete note","完成": "Done","备注": "Note","润色": "Polish","RAG润色": "RAG polish","AI 润色预览": "AI polish preview","原文": "Original","润色后（可先手动微调）": "Polished (tweak before applying)","替换原文": "Replace","写点备注…": "Add a note…","需 RAG 服务在线（AI 设置中启动）": "Requires the RAG service (start it in AI settings)","给选中片段加批注": "Add a note to the selection","AI 润色选中片段": "Polish the selection with AI","基于 RAG 知识库检索增强润色（需 RAG 服务在线）": "Retrieval-augmented polish (requires the RAG service)","解释中…": "Explaining…","已结合联网资料解释": "Explained with web results","联网搜索失败，已用纯模型结果": "Web search failed, used the model alone","AI 解释失败：": "Explain failed: ","RAG 解释失败：": "RAG explain failed: ","\n可在工具栏「AI」里检查 RAG 服务状态。": "\nCheck the RAG service in AI settings.","选中内容为空": "Nothing selected","无法标注该选区（跨元素边界）": "Cannot anchor this selection (crosses element boundaries)","润色中…（本地模型可能需要一些时间）": "Polishing… (a local model can take a while)","已结合联网资料润色": "Polished with web results","润色失败：": "Polish failed: ","检索知识库并润色中…（RAG 冷启动或本地模型可能需要一些时间）": "Retrieving and polishing… (RAG cold start or a local model can take a while)","RAG 润色失败：": "RAG polish failed: ","原文已变化，无法定位选区，请重新选择后重试。": "The text changed and the selection could not be located. Select again and retry.","报告将发送给开发者（": "The report goes to the developer (","）。未配置邮件客户端时，可复制下方内容自行粘贴发送。": "). With no mail client configured, copy the text below and send it yourself.","问题描述（可留空）": "Problem description (optional)","自动附带的报告内容（只读）": "Attached report (read-only)","复制报告内容": "Copy report","打开邮件客户端": "Open mail client","例如：内容与事实不符 / 出现不当表述 / 代码无法运行…": "e.g. factually wrong / inappropriate wording / code does not run…","报告内容已复制，请粘贴发送给开发者": "Report copied, paste it to the developer","报告内容已复制，请粘贴发送到 ": "Report copied, paste it to ","复制失败，请手动全选复制": "Copy failed, select all and copy manually","可复制下方内容发送给开发者。": "Copy the text below and send it to the developer.","（无）": "(none)","新标签页": "New tab","打开失败：": "Open failed: ","读取失败": "Read failed","读取文件失败：": "Could not read the file: ","已保存到原文件": "Saved to the original file","保存失败：": "Save failed: ","已载入原文件": "Loaded the original file","已打开：": "Opened: ","已载入": "Loaded","载入内置文档失败：": "Could not load the built-in document: ","使用指南": "User guide","版权与开源组件声明": "Copyright and open-source notices","通过「打开」按钮选择（浏览器不提供完整路径）": "Chosen with the Open button (the browser hides the full path)","该文件通过「打开」按钮选择，浏览器不提供完整路径，无法自动重载。\n请通过右键菜单打开它，或再次用「打开」选择。": "This file was picked with the Open button, so the browser hides its path and it cannot reload automatically.\nOpen it from the context menu, or pick it again with Open.","文档尚未保存，无法打开副本": "Save the document before opening a copy","已用系统程序打开副本": "Opened a copy with the system default app","用系统关联程序打开这份副本": "Open this copy with the system default app","选择保存位置失败：": "Could not choose a save location: ","粘贴图片前请先保存文档（Ctrl+S），图片将存入同名 .assets 目录。": "Save the document before pasting images (Ctrl+S); they go into a sibling .assets folder.","图片保存失败：": "Could not save the image: ","粘贴文件前请先保存文档（Ctrl+S），文件将存入同名 .assets 目录。": "Save the document before pasting files (Ctrl+S); they go into a sibling .assets folder.","文件超过 20MB 上限（当前 ": "File exceeds the 20 MB limit (currently ","正在写入 ": "Writing ","已插入数据点：": "Data point inserted: ","文件写入失败：": "Write failed: ","排版已更新（缓存）": "Typesetting updated (cached)","已落盘 ": "Written ","(未命名)": "(untitled)","文档": "Documents","桌面": "Desktop","下载": "Downloads","用户目录": "Home","上次目录": "Last folder","请先选择保存目录（点「浏览…」）": "Choose a folder first (click Browse…)","未命名.md": "Untitled.md","未命名文档": "Untitled document","预览不存在": "Preview not found","已导出：": "Exported: ","导出失败：": "Export failed: ","未知错误": "Unknown error","无法导出：": "Cannot export: ","。请先运行并确认全部执行点结果后再导出": ". Run the exec points and confirm their results before exporting","（状态栏「▶ 运行」一次跑全部）": "(▶ Run in the status bar runs them all)","正在生成打印版，请稍候…": "Building the print version…","打印导出失败（数据序列化错误）：": "Print export failed (data serialisation): ","导出 Word 文档": "Export Word","后台静默落盘 + 浏览器下载": "Saved in the background and downloaded by the browser","运行错误或失败静默导出": "Export silently on errors or failures","来源：": "Source: ","\n时间：": "\nTime: ","构建：": "Build: ","— AI 输出内容（自动附带，最多 1000 字）—\n": "— AI output (attached automatically, up to 1000 chars) —\n","— 问题描述 —\n": "— Problem description —\n","MDEditor AI 生成内容报告（": "MDEditor AI content report (","已恢复未落盘草稿": "Recovered an unsaved draft","检测到未落盘的本地草稿，已为你恢复（磁盘版本未被覆盖）": "An unsaved local draft was found and restored (the file on disk was not overwritten)","用磁盘版本": "Use the file on disk","恢复": "Restore","发现未完成的保存备份（": "Found an unfinished save backup (","），是否用它恢复本文档？": "). Restore this document from it?","恢复失败：": "Restore failed: ","已从保存备份恢复": "Restored from the save backup","就近": "Nearby","已到文末，从头继续": "Reached the end, continuing from the top","替换失败": "Replace failed","无命中": "No match","替换后与原文相同": "Replacement is identical to the original","已替换 ": "Replaced "," 处（Ctrl+Z 一步撤销）": " occurrences (Ctrl+Z undoes in one step)","正则表达式无效": "Invalid regular expression","已撤销全部替换": "Undid all replacements","渲染失败": "Render failed","<h2>请使用正确方式打开</h2>": "<h2>Please open this page properly</h2>","<p>本页面被直接双击打开（file://），此方式<b>没有后端服务</b>，公式、图片、保存、导出均不可用。</p>": "<p>This page was opened directly from disk (file://). <b>There is no backend</b>, so formulas, images, saving and exporting are unavailable.</p>","<p>正确打开方式（任选其一）：</p>": "<p>Open it one of these ways:</p>","<ol><li>右键任意 .md 文件 →「Open with Markdown Editor」</li>": "<ol><li>Right-click any .md file and choose Open with Markdown Editor</li>","<li>双击工具目录中的 <b>MarkdownEditor.exe</b></li>": "<li>Run <b>MarkdownEditor.exe</b> from the tool folder</li>","<li>双击 .md 文件（已关联本编辑器）</li></ol>": "<li>Double-click a .md file already associated with this editor</li></ol>","<p>若点下方按钮无反应，说明后端服务未运行——先做上面第 2 步。</p>": "<p>If the button below does nothing, the backend is not running. Do step 2 above first.</p>","一级标题": "H1","二级标题": "H2","标题": "Heading","加粗": "Bold","粗体": "Bold","斜体": "Italic","删除线": "Strikethrough","删除": "Strike","行内代码": "Code","引用": "Quote","无序列表": "Bullets","列表项": "List item","序号": "Numbering","有序列表": "Numbered list","任务": "Task","任务列表": "Task list","链接": "Link","插入链接": "Insert link","链接文字": "Link text","插入表格": "Insert table","图表自动编号（图、表各自计数；只作用于预览与导出，不改源文）": "Auto-number figures and tables (each counted separately; preview and export only, source untouched)","内置文档": "Built-in documents","内置文档 · 点击载入（可编辑/另存为）": "Built-in · click to load (editable, save as copy)","回到初始示例状态": "Reset to the initial sample","最近文件": "Recent files","暂无标题": "No headings","默认文档（使用指南）": "Default document (user guide)","切换界面语言：中文 / English": "Switch the interface language: 中文 / English","语法提示开关：开启后光标所在行弹出方言速查（语法检查不受影响）": "Syntax hint toggle: shows the dialect cheat-sheet at the cursor when on (lint checks unaffected)","提示": "Hints","保存到 ": "Save to ","图": "Figure","表": "Table","图片输出（「打印」与导出；预览始终按栏宽缩略，不受此项影响）": "Image output (Print and exports; the preview always uses a column-width thumbnail and is unaffected)","像素": "Pixels","原图输出（不压缩）": "Original (no compression)","实图输出 · 300dpi（印刷）": "Fit to display · 300 dpi (print)","实图输出 · 150dpi（电子交付）": "Fit to display · 150 dpi (screen)","说明": "Note","按每张图的实际显示宽度换算目标像素再降采样：只缩不放、压完不变小就回滚用原图；源文件与磁盘上的图一个字节都不动。150dpi 下含小字的截图会发糊，慎用。": "Each image is downscaled to the pixels its real display width needs: never enlarged, and reverted to the original when the result is not smaller. The source files on disk are never touched. At 150 dpi screenshots with small text lose sharpness, so use with care.","def run(data):\n    # data['kv'] = {'键': '值'}（框架按第一个 == 剥离）\n    # data['raw'] = 数据点原文列表（== 不够用时自行解析）\n    return str(...)  # 返回 str 替换执行点；作图存当前目录返回 ![](文件名)": "def run(data):\n    # data['kv'] = {'key': 'value'} (the framework strips the first ==)\n    # data['raw'] = raw text of this data point (parse it yourself if == is not enough)\n    return str(...)  # return a str to replace the exec point; to draw a chart, save the file and return ![](file name)"};
 var I18N_RE=[[new RegExp("^批注 (\\d+)$"),"Notes {1}"],[new RegExp("^(\\d+) 字符$"),"{1} chars"],[new RegExp("^(\\d+) 词$"),"{1} words"],[new RegExp("^(\\d+) 行$"),"{1} lines"],[new RegExp("^第 (\\d+) 页 / 共 (\\d+) 页$"),"Page {1} of {2}"],[new RegExp("^(\\d+) 个结果$"),"{1} results"],[new RegExp("^在线（(\\d+) 个知识库）$"),"Online ({1} knowledge bases)"],[new RegExp("^已获取 (\\d+) 个模型。$"),"Loaded {1} models."],[new RegExp("^共 (\\d+) 条批注，点击正文中的虚线段可查看/编辑$"),"{1} notes; click a dashed span in the text to view or edit"],[new RegExp("^选中文字后点「备注」可加批注（AI 可在设置中配置）$"),"Select text and click Note to annotate (AI is configured in settings)"],[new RegExp("^已替换 (\\d+) 处（Ctrl\\+Z 一步撤销）$"),"Replaced {1} occurrences (Ctrl+Z undoes in one step)"],[new RegExp("^(\\d+) 个执行点未运行$"),"{1} exec points not run"],[new RegExp("^(\\d+) 个执行点已置为待运行$"),"{1} exec points set back to pending"],[new RegExp("^已载入 (.+?)——修改后「保存」即覆盖$"),"Loaded {1} — Save overwrites it"],[new RegExp("^验证失败：(.+)$"),"Verification failed: {1}"],[new RegExp("^删除 (.+)（点两次确认）$"),"Delete {1} (click twice)"],[new RegExp("^保存到 (.+)$"),"Save to {1}"],[new RegExp("^(.+) · (\\d{4}/\\d{1,2}/\\d{1,2} .+)$"),"{1} · {2}"],[new RegExp("^元数据已更新（(\\d+) 项）$"),"Metadata updated ({1} fields)"],[new RegExp("^元数据写入失败：(.+)$"),"Could not write the metadata: {1}"]];
 var _lang='zh';
 function _i18nLookup(t){
@@ -2825,6 +2904,7 @@ function _i18nInRoot(el){
 }
 function applyLang(l){
   _lang=(l==='en')?'en':'zh';
+  window.__MDE_LANG__=_lang;   /* 解析器段读它决定元数据区标签（独立作用域） */
   document.body.setAttribute('data-lang',_lang);
   var rs=_i18nRoots();
   for(var i=0;i<rs.length;i++) _i18nWalk(rs[i]);
@@ -2835,6 +2915,10 @@ function applyLang(l){
      所以由它自己挂到 window 上，这里只负责有空就调；**只重画那句说明，不动
      输入框**——框里可能是刚敲、还没应用的设置值。 */
   try{ if(typeof window.__mdeMetaHint==='function') window.__mdeMetaHint(); }catch(e){}
+  /* 元数据区的行标签是渲染时按语言取的（它不在 I18N_ROOTS 里，见 _fmZone 注释），
+     所以换语言必须重画一次预览，否则那几行会停在旧语言。渲染函数在 UI 段
+     的另一个作用域里，只能走它挂出来的桥。 */
+  try{ if(typeof window.__mdeLangRepaint==='function') window.__mdeLangRepaint(); }catch(e){}
   /* 导入面板的映射表是接口数据，DOM 词表翻不到；面板开着就按新语言重取一遍。 */
   try{ if(typeof window.__mdeImportReload==='function') window.__mdeImportReload(); }catch(e){}
 }
@@ -2918,6 +3002,15 @@ I18N_EN["选文件失败："]="Could not pick a file: ";
 I18N_EN["先选一个文件，或把路径粘进来"]="Pick a file, or paste a path";
 I18N_EN["已转换，确认无误后用「另存为」保存"]="Converted. Check it, then use Save as to keep it";
 I18N_EN["导入"]="Import";
+/* v2.26.3 元数据：作者链 / 创建 / 应用≠落盘 */
+I18N_EN["创建"]="Created";
+I18N_EN["最近修改"]="Last edited";
+I18N_EN["留空则记为 default"]="Blank = recorded as default";
+I18N_EN["元数据写入失败："]="Could not write the metadata: ";
+I18N_EN["设置里的这份值。「应用」只是把它存进设置，文档一个字都不动；保存文档时才写档案：没有档案就建档（创建快照只写一次、只读），已有档案就追加这次保存的记录（字段变了记新旧值，没变记一条「保存」）。开关开着就建档，作者留空记为 default，其余留空就是不记。标签与代称的显示只看履历：履历里最后一次被记录的值就是显示值，从没人记过就留空；本次保存没记就沿用之前的。"]="These values live in your typesetting settings. Apply only stores them there and leaves the document untouched; the archive is written when you save: a missing archive is created at that point (snapshot written once, then read-only), and an existing one gets a record for this save appended (old and new values when a field changed, a plain \"saved\" line otherwise). With the switch on an archive is always created, a blank author is recorded as default, and any other blank field is simply not recorded. Tags and Alias display purely from the history: the last recorded value is what is shown; if no one ever recorded one the line stays empty, and a save without one keeps the previous value.";
+I18N_EN["设置已保存；元数据在保存文档时才写"]="Settings saved; the metadata archive is written when you save the document";
+I18N_EN["front matter 已写入正文"]="Front matter written into the document";
+I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="Typesetting changes are not applied yet (they exist only in this panel and are not saved)";
 /*I18N_END*/
 
 
@@ -3294,6 +3387,22 @@ I18N_EN["导入"]="Import";
     var h=5381;
     for(var i=0;i<s.length;i++){ h=((h<<5)+h+s.charCodeAt(i))>>>0; }
     return 'h'+h.toString(36);
+  }
+  /* 块的渲染结果不只是源码的函数：含 @@ meta 的那一块还要读 window.__MDE_META__。
+     如果只按源码算哈希，档案从"无"变成"有"（保存时建档）后源码一字未改，
+     哈希不变 → 复用旧的空块，元数据区永远不出现（2026-11-01 实测踩到）。
+     所以对这些块把档案指纹也并进去；其余块不受影响，缓存照旧生效。 */
+  function _metaSig(){
+    /* 语言也要并进去：切到英文后行标签会变，而源码与档案一字未动，
+       只按档案算签名会命中旧缓存，元数据区永远停在中文。 */
+    try{
+      return blkHash((window.__MDE_LANG__||'zh')+'|'+JSON.stringify(window.__MDE_META__||null));
+    }catch(e){ return 'x'; }
+  }
+  function blockHash(s){
+    var h=blkHash(s);
+    if(/^[ ]{0,3}@@\s*meta[ \t]*$/m.test(s)) h+='-'+_metaSig();
+    return h;
   }
   var renderQueue=null;
   /* ---- 图表围栏渲染：vendor 懒加载，全部本地（/static/ 路由） ----
@@ -3792,7 +3901,7 @@ I18N_EN["导入"]="Import";
       if(node) node.setAttribute('data-src-line', String(startLines[i]||0));
       /* force=排版等非源文本因素变化：块哈希只反映源文本，缩进包围块的
          margin 是解析期内联写入的，不强制重渲的话排版更新永不生效 */
-      if(!force && node && node.getAttribute('data-h')===blkHash(blocks[i])) continue;
+      if(!force && node && node.getAttribute('data-h')===blockHash(blocks[i])) continue;
       changed.push(i);
     }
     for(var j=blocks.length;j<existing.length;j++){
@@ -3810,7 +3919,7 @@ I18N_EN["导入"]="Import";
       var div=q.existing[bi];
       var fresh=false;
       if(!div){ div=document.createElement('div'); div.className='pblk'; fresh=true; }
-      div.setAttribute('data-h', blkHash(q.blocks[bi]));
+      div.setAttribute('data-h', blockHash(q.blocks[bi]));
       div.setAttribute('data-src-line', String(q.startLines[bi]||0));
       div.innerHTML=parseMarkdown(q.blocks[bi]);
       restoreMath(div); fixLocalImages(div);
@@ -5034,6 +5143,7 @@ I18N_EN["导入"]="Import";
   }
   /* 统一载入：.smd 走 JSON 响应（content+base），普通 .md 走纯文本 */
   function fetchDocInto(p){
+    markOpened();       /* 打开的是别人（或以前的）文件，不是本次新建 */
     return fetch('/api/file?path='+encodeURIComponent(p))
       .then(function(r){
         if(!r.ok) throw new Error('HTTP '+r.status);
@@ -5058,6 +5168,9 @@ I18N_EN["导入"]="Import";
         return loadMetaFor(p).then(function(){ return d; });   /* 元数据先就绪，再交给渲染 */
       });
   }
+  /* 任何一次「打开已有文件」都走这里：清除「本次新建」标记，
+     之后建档才敢写 created=none（接手别人的内容，不猜它哪年建的）。 */
+  function markOpened(){ _docCreatedHere=false; }
   function loadFromUrl(){
     var m=location.search.match(/[?&]file=([^&]+)/);
     if(!m) return;
@@ -5141,6 +5254,9 @@ I18N_EN["导入"]="Import";
           setDraft(currentFile,undefined);
           ss.textContent=silent?TF('已自动落盘 {0}',new Date().toLocaleTimeString()):'已保存到原文件';
           ss.className='saved';
+          /* 正文落盘之后才写档案：档案跟着文件走，没有文件就没有落点；
+             顺序反过来会在保存失败时留下一份指向旧内容的履历（v2.26.3）。 */
+          metaSyncAfterSave();
           return true;
         }
         showToast(TF('保存失败：{0}',(j&&j.error)||T('未知错误')));
@@ -5478,14 +5594,32 @@ I18N_EN["导入"]="Import";
       for(var k=0;k<sels.length;k++)addFontGroup(sels[k],cached);
     }
   }
-  /* ── v2.23.0 元数据（面板统一入口）────────────────────────────────
-     面板的 5 个输入框就是统一入口，落到哪种载体由**文档现状**决定：
-       首行有合法 front matter  → 改 front matter 里对应的键（不新增无关键）
-       有 @@ meta / 都没有      → 建/改档案 assets/.mde/，并在缺 @@ meta 时插入
-     判据与渲染侧（parseMarkdown 里的前置消费）逐条对齐，两边不能有两套。 */
-  var META_UI_KEYS=['title','author','date','tags','note'];
-  var META_UI_IDS={title:'tsMetaTitle',author:'tsMetaAuthor',date:'tsMetaDate',
-                   tags:'tsMetaTags',note:'tsMetaNote'};
+  /* ── v2.23.0 元数据（面板统一入口）
+     **「应用」只做一件事：把框里的值持久化成设置**（tsApply → TS_KEY，走
+     localStorage + runtime/ui-settings.json 双通道）。它不碰文档档案，也不记
+     任何"待落盘"状态。v2.26.3 曾用 `_metaPending` 记「应用过的字段」，等于把
+     "什么时候落盘"又绑回了应用——那个中间态已删除（v2.26.4）。
+
+     **档案只在 save 那一刻写**：建档（zero）与追加履历（up）都挂在这里。
+       · 没有档案 → 建档；本次会话新建的写真实时间，接手别人已有内容的写 none
+       · 已有档案 → 拿「设置里这份值」跟档案当前值逐字比，有差异就记成我这次的修改
+     于是「应用」之后不保存 = 只有设置变了，文档里一个字没动；改了文章并保存，
+     才算我留了痕。
+
+     通道 a（首行 front matter）例外：那几行本来就在正文里，「应用」改写的是
+     正文那一段，不是档案。它不是"设置"，所以不等保存。
+
+     日期只有出没有进（v2.26.3）：白名单里还留着 date，老档案里的值照常显示，
+     但面板不再提供输入框——以后不再有人手填日期，也就不会有"填错了看不出"的假时间。 */
+  /* v2.26.3 当天二改（主人 2026-11-02 定）：面板收四件——author/note + tags/title。
+     标签 = 轻分类；代称 = 归属/项目标注（沿用档案键 title，老档案记过的标题
+     自动成为代称行的值，零迁移）。四件都进 tsCfg.meta、都随保存入档，差别只在
+     渲染：作者/备注看履历追加（作者链 + 最新值），标签/代称取履历里最后一次
+     被记录的值（覆盖显示，为空为继承，全链没记过就留空）。设置框只是输入口，
+     **save 之前绝不参与显示**——显示只看履历，不回读设置。 */
+  var META_UI_KEYS=['author','note','tags','title'];
+  var META_UI_IDS={author:'tsMetaAuthor',note:'tsMetaNote',tags:'tsMetaTags',title:'tsMetaTitle'};
+  var _docCreatedHere=false;  /* 本文档是否本次会话新建：决定 zero.created 写现在还是 none */
   function docFrontMatter(){
     var t=getText();
     if(t.charCodeAt(0)===0xFEFF)t=t.slice(1);
@@ -5509,7 +5643,6 @@ I18N_EN["导入"]="Import";
     }
     return kv?out:null;
   }
-  function hasMetaLine(){return /^[ ]{0,3}@@\s*meta[ \t]*$/m.test(getText());}
   function docMetaState(){
     var y=docFrontMatter();
     if(y)return {source:'yaml',fields:y};
@@ -5517,11 +5650,13 @@ I18N_EN["导入"]="Import";
     if(m&&m.fields)return {source:'archive',fields:m.fields,zero:m.zero,up:m.up};
     return {source:'none',fields:{}};
   }
-  /* 面板五个框 = **排版设置里的那一份元数据**（tsCfg.meta），跟当前打开的是哪个
-     文件毫无关系，也绝不回读文档档案——这里是设置，只有"写"。 */
+  /* 面板这几框 = **排版设置里的那一份元数据**（tsCfg.meta），跟当前打开的是哪个
+     文件毫无关系，也绝不回读文档档案——这里是设置，只有"写"。
+     v2.26.3 起还要说清两件事：应用只改设置，保存才落文档；开关开着就建档。 */
   function tsMetaHint(){
     var el=document.getElementById('tsMetaStat');
-    if(el)el.textContent=TF('设置里的这份值；应用时写入本文档：没有档案就建档（创建快照只写一次、只读），已有档案只在履历里追加');
+    if(!el)return;
+    el.textContent=TF('设置里的这份值。「应用」只是把它存进设置，文档一个字都不动；保存文档时才写档案：没有档案就建档（创建快照只写一次、只读），已有档案就追加这次保存的记录（字段变了记新旧值，没变记一条「保存」）。开关开着就建档，作者留空记为 default，其余留空就是不记。标签与代称的显示只看履历：履历里最后一次被记录的值就是显示值，从没人记过就留空；本次保存没记就沿用之前的。');
   }
   function tsMetaFill(){
     for(var i=0;i<META_UI_KEYS.length;i++){
@@ -5533,19 +5668,97 @@ I18N_EN["导入"]="Import";
   }
   /* 语言切换只重画这一句，**不动输入框**（里面可能是刚敲、还没应用的设置值） */
   window.__mdeMetaHint=tsMetaHint;
-  /* 面板 → 待写字段。**只提交填了的项**：留空 = 这次不涉及该字段，绝不因为
-     框里没有字就把文档里已有的值写成空；全部留空 → 不碰文档（返回 null）。
-     重复点「应用」不刷履历：写档案那条路里 md_meta.update 逐字段 diff。 */
-  function collectMetaChanges(){
-    var want={},any=false;
+  /* 跨作用域的桥：applyLang 在词表段、render 在 UI 段，两边互相看不见（同
+     __mdeMetaHint 的理由）。切语言后元数据区的行标签要跟着换，必须重画预览。 */
+  window.__mdeLangRepaint=function(){ try{ render(); }catch(e){} };
+  /* 面板 → 字段表（**读输入框**，只在「应用」那一刻用）。
+     留空 = 这次不涉及该字段，绝不因为框里没有字就把文档里已有的值写成空。 */
+  function metaUiFields(){
+    var want={};
     for(var i=0;i<META_UI_KEYS.length;i++){
       var k=META_UI_KEYS[i];
       var v=(document.getElementById(META_UI_IDS[k]).value||'').replace(/^\s+|\s+$/g,'');
-      if(!v)continue;
-      want[k]=v;any=true;
+      if(v)want[k]=v;
     }
-    if(!any)return null;
-    return {source:docMetaState().source,fields:want};
+    return want;
+  }
+  /* 保存时用的字段表：**读已持久化的设置**（tsCfg.meta），不读输入框。
+     「应用」是唯一的确认动作；敲了没应用的临时输入不参与落盘——否则应用
+     形同虚设，跟"应用只是持久化"这条自相矛盾。规则只有一条：
+     应用把框 → 设置，保存把设置 → 文档。 */
+  function metaCfgFields(){
+    var want={},src=(tsCfg&&tsCfg.meta)||{};
+    for(var i=0;i<META_UI_KEYS.length;i++){
+      var k=META_UI_KEYS[i];
+      var v=String(src[k]==null?'':src[k]).replace(/^\s+|\s+$/g,'');
+      if(v)want[k]=v;
+    }
+    return want;
+  }
+  /* 本机这一位是谁：设置里的作者。空就是 default——不冒充别人，也不留白，
+     免得履历里出现无名氏。 */
+  function metaWho(){
+    var v=String((tsCfg&&tsCfg.meta&&tsCfg.meta.author)||'').replace(/^\s+|\s+$/g,'');
+    return v||'default';
+  }
+  /* 「有内容」才算一次真正的落盘：新建文档只带一行 `@@ meta` 锚点，那不是
+     内容。空文档保存不建档——档案要写的是"这份文章是谁的"，没文章就没有它。 */
+  function metaHasBody(){
+    var t=getText().replace(/^[ ]{0,3}@@\s*meta[ \t]*$/mg,'');
+    return /\S/.test(t);
+  }
+  /* 保存时该发的档案动作；返回 null = 这次什么都不用做。四种不发：
+       ① 开关关着（用户明确不要元数据）
+       ② 还没有落盘路径（档案跟着文件走，没有文件就没有落点）
+       ③ 通道 a：front matter 的值就在正文里，不由档案管
+       ④ 正文还没有内容（新建的空文档谈不上建档）
+     剩下的**每一次保存都要发**：只要开关开着就建；有档案就忠实追加一行
+     （字段变了记 from→to，没变记一条「保存」）。去重与取最新是渲染时的事，
+     不在这里提前优化——"这次没有我的新痕"这种判断，一旦放到发送前，就会
+     把"改了正文、元数据没动"的保存整个吞掉（2026-11-01 定）。
+     settings 里的这份值不带任何"是否应用过"的标记：应用只是持久化，
+     用不用它，判断权归保存这一刻。 */
+  function metaSyncJob(){
+    if(window.__MDE_META_ON__===false)return null;
+    if(!currentFile)return null;
+    if(docFrontMatter())return null;
+    if(!metaHasBody())return null;
+    var fields=metaCfgFields();         /* 已持久化的设置 = 我这次要留的痕 */
+    var here=!!_docCreatedHere;
+    return {
+      path:currentFile,
+      action:'sync',
+      /* null = 本次会话新建（建档时间写现在）
+         "none" = 接手别人已有的内容（不猜它哪年建的） */
+      created:here?null:'none',
+      /* 建档底稿：自己建的文件用设置值；接手别人的只留 default——
+         创建者不是我，我不替他填标题/标签 */
+      baseline:here?fields:{},
+      fields:fields,
+      who:metaWho(),
+      /* touch：这是一次保存，字段一个没变也要留一条痕。up 是**忠实追加**的
+         流水账——每次 save 一行，去重排序全在渲染时做。以前这里靠 diff 早退
+         （元数据没变就一条请求都不发），结果"改了正文、元数据没动"的保存
+         什么都不留、最近修改也不走，与"up 记录每一次 save"相违（2026-11-01 定）。 */
+      touch:true
+    };
+  }
+  /* 保存成功后紧接着落档案。失败只提示，不回滚正文——正文才是文档，
+     档案是附录，附录写不进去不能把正文也判死。 */
+  function metaSyncAfterSave(){
+    var job=metaSyncJob();
+    if(!job)return Promise.resolve(false);
+    return fetch('/api/meta',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(job)})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if(!(j&&j.ok)){ showToast(T('元数据写入失败：')+((j&&j.error)||T('未知错误'))); return false; }
+        window.__MDE_META__=j.meta||null;
+        window.__MDE_META_LOADED__=true;
+        scheduleRender();
+        return true;
+      })
+      .catch(function(e){ showToast(T('元数据写入失败：')+e.message); return false; });
   }
   /* 写回 front matter：原地改对应键的值，没有的键**不新增**——面板不该悄悄
      改变别人文件的键集合。值含 : # 或首尾空白时加引号，避免破坏 YAML 结构。 */
@@ -5574,47 +5787,22 @@ I18N_EN["导入"]="Import";
     scheduleRender();
     return true;
   }
-  function insertMetaLine(){
-    if(hasMetaLine())return false;
-    var t=getText();
-    setText('@@ meta\n\n'+t);
-    scheduleRender();
-    return true;   /* 调用方据此决定要不要落盘 */
-  }
-  function submitMeta(job){
-    if(job.source==='yaml'){
-      writeFrontMatter(job.fields);
-      if(!currentFile)return null;
-      /* 改完正文必须落盘：面板改的也是正文，不落盘刷新即丢 */
-      return fetch('/api/file',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({path:currentFile,content:getText()})})
-        .then(function(r){return r.json();})
-        .then(function(j){if(j&&j.ok)applySavedContent(j);})
-        .catch(function(){});
-    }
-    if(!currentFile){showToast('请先保存文档（Ctrl+S），元数据档案要跟着文件走');return null;}
-    return fetch('/api/meta',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({path:currentFile,action:'update',fields:job.fields})})
+  /* 「应用」在档案这一侧是空的——通道 b 什么都不做，档案等保存那一刻才写
+     （见 metaSyncJob / metaSyncAfterSave）。
+     唯一有动作的是通道 a：front matter 那几行本来就在正文里，「应用」改的是
+     正文的一段，不是档案，所以不等保存——它跟"设置"是两回事。
+     **不替用户在正文里插 @@ meta 行**：要不要把元数据显示出来是他自己的选择
+     （2026-11-01 定），自动插等于擅自改别人的正文。 */
+  function applyMeta(){
+    if(!docFrontMatter())return null;   /* 通道 b：这里没有可做的事 */
+    writeFrontMatter(metaUiFields());
+    if(!currentFile)return null;
+    /* 改完正文必须落盘：改的就是正文，不落盘刷新即丢 */
+    return fetch('/api/file',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({path:currentFile,content:getText()})})
       .then(function(r){return r.json();})
-      .then(function(j){
-        if(!(j&&j.ok)){showToast('元数据写入失败：'+((j&&j.error)||'未知错误'));return;}
-        window.__MDE_META__=j.meta||null;
-        var added=insertMetaLine();   /* 正文缺 @@ meta 就补一行（位置锚点） */
-        scheduleRender();
-        var ss=document.getElementById('statSave');
-        ss.textContent=j.changed?('元数据已更新（'+j.changed+' 项）'):'元数据无变化';
-        ss.className='saved';
-        /* 补的锚点行也算正文改动，必须立刻落盘：setText 不发 input 事件，
-           dirty 不会置位，不写就得等用户自己想起按 Ctrl+S。 */
-        if(added&&currentFile){
-          fetch('/api/file',{method:'POST',headers:{'Content-Type':'application/json'},
-              body:JSON.stringify({path:currentFile,content:getText()})})
-            .then(function(r){return r.json();})
-            .then(function(k){if(k&&k.ok)applySavedContent(k);})
-            .catch(function(){});
-        }
-      })
-      .catch(function(e){showToast('元数据写入失败：'+e.message);});
+      .then(function(j){if(j&&j.ok)applySavedContent(j);})
+      .catch(function(){});
   }
   function tsOpen(){
     document.getElementById('tsAuto').value=tsCfg.autoSaveMin;
@@ -5656,9 +5844,16 @@ I18N_EN["导入"]="Import";
     document.getElementById('tsGapEm').value=tsCfg.gap.em;
     document.getElementById('tsHangOn').checked=!!tsCfg.list.hang;
     tsMetaFill();   /* 填的是排版设置里那份值，与当前文件无关 */
+    /* 打开面板＝从设置重填所有框：上次没应用的改动已被丢弃，提示同步清掉 */
+    document.getElementById('tsDirty').hidden=true;
     document.getElementById('tsOverlay').hidden=false;
   }
   document.getElementById('btnTypeset').addEventListener('click',tsOpen);
+  /* 面板里任何控件动过 → 底栏提示「尚未应用」。应用＝持久化，不点就等于
+     什么都没存：关掉再打开会从 tsCfg 重填，这些改动当场消失（v2.26.3）。 */
+  function tsMarkDirty(){document.getElementById('tsDirty').hidden=false;}
+  document.getElementById('tsBody').addEventListener('input',tsMarkDirty);
+  document.getElementById('tsBody').addEventListener('change',tsMarkDirty);
 
   document.getElementById('tsClose').addEventListener('click',function(){document.getElementById('tsOverlay').hidden=true;});
   document.getElementById('tsOverlay').addEventListener('click',function(e){if(e.target===this)this.hidden=true;});
@@ -6057,9 +6252,12 @@ I18N_EN["导入"]="Import";
     _autoAskDeclined=false; _autoAskOpen=false; _svAuto=false;
     /* v2.23.0 新建即插入元数据锚点（老文件不管）：@@ meta 本身不渲染任何东西，
        等人在「排版 → 元数据」里填了第一个字段、首次保存建档之后，区域才出现。
-       光标落在第二行——末尾就是空行，直接开写正文。 */
+       光标落在第二行——末尾就是空行，直接开写正文。
+       建档不在这一刻：新文档只是内存里的字符串，没有路径就没有档案的落点，
+       第一次保存（含另存为）才建。 */
     window.__MDE_META__=null;
     window.__MDE_META_LOADED__=true;
+    _docCreatedHere=true;   /* 这次会话新建的：建档时 zero.created 写现在，不写 none */
     setText('@@ meta\n\n');
     dirty = false;
     annotationsLoad(null);
@@ -6168,6 +6366,8 @@ I18N_EN["导入"]="Import";
         document.getElementById('statSave').className = 'saved';
         dirty = false;
         updateSaveBtn();
+        /* 另存为也是一次落盘：新路径上该建档就建档（本次新建 → created 写现在） */
+        metaSyncAfterSave();
       }).catch(function(e){ showToast('保存失败：'+e.message); });
   }
   function doSaveAs(defaultName, content, auto){
@@ -6362,16 +6562,23 @@ I18N_EN["导入"]="Import";
     tsCfg.list.hang=!!document.getElementById('tsHangOn').checked;
     tsCfg.metaOn=!!document.getElementById('tsMetaOn').checked;
     /* 元数据是排版设置的一部分：先把框里的值存进配置（随 TS_KEY 持久化，
-       以后打开任何文件都在），再按它去写当前文档。 */
+       以后打开任何文件都在）。**应用只做这件事**，文档档案等保存那一刻再落
+       ——「应用」= 改设置，「保存」= 落到这篇文档（v2.26.3）。 */
     for(var _mi2=0;_mi2<META_UI_KEYS.length;_mi2++){
       var _mk2=META_UI_KEYS[_mi2];
       tsCfg.meta[_mk2]=(document.getElementById(META_UI_IDS[_mk2]).value||'').replace(/^\s+|\s+$/g,'');
     }
-    var _metaJob=collectMetaChanges();
     applyTypeset();applyPaperWidth();render(true);resetAutoDisk();
     document.getElementById('tsOverlay').hidden=true;
-    if(_metaJob)submitMeta(_metaJob);
-    var ss=document.getElementById('statSave');ss.textContent='排版已更新（缓存）';ss.className='saved';
+    document.getElementById('tsDirty').hidden=true;   /* 已持久化，提示收起 */
+    applyMeta();
+    /* 「应用」只到设置为止：通道 b 的档案要等保存才写，通道 a 的 front matter
+       当场改进正文。两句话各说各的落点，不合并——合并过两次都把它说糊了。 */
+    var ss=document.getElementById('statSave');
+    ss.textContent=docFrontMatter()
+      ? TF('front matter 已写入正文')
+      : TF('设置已保存；元数据在保存文档时才写');
+    ss.className='saved';
   });
   var dirty=false,diskTimer=null;
   editor.addEventListener('input',function(){dirty=true;});
@@ -6596,6 +6803,9 @@ I18N_EN["导入"]="Import";
     /* 不覆盖源文件：清掉当前路径，逼作者显式「另存为」 */
     currentFile = null;
     try { currentBase = null; } catch (e) {}
+    /* 导入出来的是新文档（内容虽来自别处，但这份文件是本次新建的），
+       建档时 created 写现在 */
+    _docCreatedHere = true;
     scheduleRender();
     scheduleSave();
     updateFileIndicator(label || '导入');
@@ -6695,6 +6905,7 @@ I18N_EN["导入"]="Import";
     if(idx<0||idx>=BUILTIN_DOCS.length)return;
     var d=BUILTIN_DOCS[idx];
     if(!d.file){ return; }
+    markOpened();
     fetch('/doc?file='+encodeURIComponent(d.file))
       .then(function(r){return r.json();})
       .then(function(j){

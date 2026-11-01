@@ -34,7 +34,6 @@ import os
 import io
 import json
 import time
-import hashlib
 import zipfile
 import shutil
 import warnings
@@ -42,6 +41,8 @@ import zlib
 import itertools
 import threading
 import urllib.parse
+
+import md_sm3
 
 FORMAT_VERSION = 1
 DOC_NAME = "doc.md"
@@ -363,11 +364,11 @@ _TMP_RESOLVED = None
 def _base_dir_for(smd_path):
     """返回该 .smd 的解包工作目录；未解包或包已变化（外部修改）则重新解包。
 
-    目录名 = md5(绝对路径小写)，跨会话稳定；目录内 .source.json 记录
+    目录名 = SM3(绝对路径小写)，跨会话稳定；目录内 .source.json 记录
     打开时的包指纹，保存/贴图后同步更新，外部改动会触发重解包。
     """
     abspath = os.path.abspath(smd_path)
-    d = os.path.join(_tmp_root(), hashlib.md5(abspath.lower().encode("utf-8")).hexdigest()[:16])
+    d = os.path.join(_tmp_root(), md_sm3.hexdigest(abspath.lower())[:16])
     doc = os.path.join(d, DOC_NAME)
     sig_file = os.path.join(d, ".source.json")
     if os.path.isfile(doc) and os.path.isfile(sig_file):
@@ -982,7 +983,7 @@ def clear_tmp():
 def base_dir_for(smd_path):
     """返回该 .smd 的解包工作目录；未解包或包已变化（外部修改）则重新解包。
 
-    目录名 = md5(绝对路径小写)，跨会话稳定；目录内 .source.json 记录
+    目录名 = SM3(绝对路径小写)，跨会话稳定；目录内 .source.json 记录
     打开时的包指纹，保存/贴图后同步更新，外部改动会触发重解包。
     """
     with locked(smd_path):

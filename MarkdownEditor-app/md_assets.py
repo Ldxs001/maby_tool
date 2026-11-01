@@ -8,10 +8,11 @@
 纯函数模块，无副作用，供 md_server.py 与 md_app.pyw 共用。
 """
 import base64
-import hashlib
 import json
 import os
 import re
+
+import md_sm3
 
 IMG_RE = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
 INVALID = re.compile(r'[\\/:*?"<>|\r\n\t]+')
@@ -64,7 +65,9 @@ def materialize_into(content, assets_dir, ref_prefix):
     counter = [0]
 
     # 内容寻址复用：assets 目录里已有同字节文件 → 直接复用其文件名，
-    # 不重复落盘（编辑区未同步的旧引用重复保存时零膨胀，真幂等）
+    # 不重复落盘（编辑区未同步的旧引用重复保存时零膨胀，真幂等）。
+    # 指纹用 SM3（v2.26.3 全项目统一）：这里只当**内存里的去重键**，不参与
+    # 文件名生成（名字来自 alt 文本），所以换算法不动任何已落盘的文件。
     _by_hash = {}
     if os.path.isdir(assets):
         for _fn in os.listdir(assets):
@@ -72,7 +75,7 @@ def materialize_into(content, assets_dir, ref_prefix):
             if os.path.isfile(_fp):
                 try:
                     with open(_fp, "rb") as _f:
-                        _by_hash[hashlib.sha1(_f.read()).hexdigest()] = _fn
+                        _by_hash[md_sm3.hexdigest(_f.read())] = _fn
                 except Exception:
                     pass
 
@@ -126,7 +129,7 @@ def materialize_into(content, assets_dir, ref_prefix):
         if data is None:
             return m.group(0)
         counter[0] += 1
-        h = hashlib.sha1(data).hexdigest()
+        h = md_sm3.hexdigest(data)
         name = _by_hash.get(h)
         if name is None:
             try:

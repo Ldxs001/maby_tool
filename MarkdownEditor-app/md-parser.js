@@ -861,13 +861,55 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
      两条同时成立＝冲突：都不渲染，只出一条提示条（不替人挑）。
      元数据区一律带 data-mde-zone，三个导出出口按此属性整块剔除——
      元数据只在预览区看得见。 */
-  var MDE_META_KEYS=[['title','标题'],['author','作者'],['date','日期'],['tags','标签'],['note','备注']];
+  var MDE_META_KEYS=[['title','代称'],['author','作者'],['date','日期'],['tags','标签'],['note','备注']];
   function _fmEsc(s){return escapeHtml(String(s==null?'':s));}
   function _mdeMetaOn(){
     try{return !(typeof window!=='undefined'&&window.__MDE_META_ON__===false);}catch(e){return true;}
   }
-  function _fmZone(rows,zone,last){
-    var h='<div class="mde-fm" data-mde-zone="'+zone+'"><div class="mde-fm-h">元数据</div>';
+  /* 元数据区的行标签要跟界面语言走。解析器跑在独立作用域里，看不到 UI 段的
+     I18N_EN；md-parser.js 又是独立发行版，本就不该反过来依赖宿主界面——
+     所以这里自带一份最小的元数据标签表。语言开关由 UI 段写到 window.__MDE_LANG__。 */
+  var _FM_LBL_EN={'元数据':'Metadata','作者':'Author','创建':'Created',
+                  '最近修改':'Last edited','代称':'Alias','标题':'Title','日期':'Date',
+                  '标签':'Tags','备注':'Note','指纹':'Fingerprint',
+                  '注意':'Alert','未记录改动：正文与最后一次记录不符':
+                  'Unrecorded change: the text no longer matches the last entry'};
+  function _fmTxt(s){
+    try{
+      if(typeof window!=='undefined'&&window.__MDE_LANG__==='en'){
+        var v=_FM_LBL_EN[s];
+        if(v)return v;
+      }
+    }catch(e){}
+    return s;
+  }
+  /* v2.26.3：作者 / 创建 / 最近修改这三行是**档案的元信息**，由后端合成好送过来
+     （read() 的 authors / created / last），前端不再自己拼——两边各算一套必然分叉。
+     head 是可选的置顶行数组（通道 a 不传，通道 b 传作者与创建）。 */
+  function _fmZone(rows,zone,last,head,fp,warn){
+    var h='<div class="mde-fm" data-mde-zone="'+zone+'"><div class="mde-fm-h">'+_fmEsc(_fmTxt('元数据'))+'</div>';
+    if(head){
+      for(var q=0;q<head.length;q++){
+        h+='<div class="mde-fm-row"><span class="mde-fm-k">'+_fmEsc(head[q].k)+'</span>'
+          +'<span class="mde-fm-v">'+_fmEsc(head[q].v)+'</span></div>';
+      }
+    }
+    if(last){
+      h+='<div class="mde-fm-row mde-fm-last"><span class="mde-fm-k">'+_fmEsc(_fmTxt('最近修改'))+'</span>'
+        +'<span class="mde-fm-v">'+_fmEsc(last)+'</span></div>';
+    }
+    if(fp&&fp.short){
+      /* SM3 指纹：只显示前 8 位（人看），悬停看全长（可核对）。存进 up.md 的
+         永远是全长——截断存档等于自动把校验降级成 64 位哈希，不值。 */
+      h+='<div class="mde-fm-row mde-fm-fp" title="'+_fmEsc(fp.full||'')+'"><span class="mde-fm-k">'
+        +_fmEsc(_fmTxt('指纹'))+'</span><span class="mde-fm-v">sm3 '+_fmEsc(fp.short)+'</span></div>';
+    }
+    if(warn){
+      /* stale=true：磁盘正文与 up 末条指纹对不上 → 有一次没被记录的改动
+         （外部工具改过，或者改完没保存就关了）。红字，不静默。 */
+      h+='<div class="mde-fm-row mde-fm-warn"><span class="mde-fm-k">'+_fmEsc(_fmTxt('注意'))+'</span>'
+        +'<span class="mde-fm-v">'+_fmEsc(_fmTxt('未记录改动：正文与最后一次记录不符'))+'</span></div>';
+    }
     for(var k=0;k<rows.length;k++){
       if(rows[k].k===null){                 /* 不合 key: value 的行按原文行露出，零吞字 */
         h+='<div class="mde-fm-row mde-fm-raw"><span class="mde-fm-v">'+_fmEsc(rows[k].v)+'</span></div>';
@@ -876,13 +918,30 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
       h+='<div class="mde-fm-row"><span class="mde-fm-k">'+_fmEsc(rows[k].k)+'</span>'
         +'<span class="mde-fm-v">'+_fmEsc(rows[k].v)+'</span></div>';
     }
-    if(last){
-      h+='<div class="mde-fm-row mde-fm-last"><span class="mde-fm-k">最近修改</span>'
-        +'<span class="mde-fm-v">'+_fmEsc(last)+'</span></div>';
-    }
     return h+'</div>';
   }
-  /* 档案元数据 → 渲染行。无任何非空字段即返回 null（没数据就没区域，不占位） */
+  /* ISO 时间戳 → 人看的 `YYYY-MM-DD HH:MM`。`none` 原样保留：那是
+     「不知道建档时间」的显式标记，不能给它编一个日期。 */
+  function _fmStamp(s){
+    s=String(s==null?'':s).replace(/^\s+|\s+$/g,'');
+    if(!s)return '';
+    if(s==='none')return 'none';
+    var m=/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(s);
+    return m?(m[1]+' '+m[2]):s;
+  }
+  /* 档案元数据 → 渲染行。没有档案就返回 null（没数据就没区域，不占位）。
+     v2.26.3 起区块结构固定为：
+       作者（创建者 + 全部操作者，至少 default）
+       创建（zero.created；接手别人的文件是 none）
+       最近修改（up 最后一条的时间；up 空就不出）
+       代称 / 日期 / 标签 / 备注（有值才出）
+     继承的真相（主人 2026-11-02 定）：标签与代称的显示**只看履历**——
+     up（含 zero 建档）里最后一次被记录的值就是显示值（"覆盖显示"）；当前
+     作者保存时没记这两个字段，合成的 fields 自然保持前值（"继承之前"）；
+     从没人记过就留空。排版设置里那两个框只是**输入口**：save 之前绝不把
+     设置值显示出来，save 之后它进了履历，走的就是同一条履历规则。
+     同步只记非空值（metaCfgFields 丢空），所以履历里的值一旦写上就不会
+     被"改回空"抹掉——继承链天然成立，不需要额外的兜底逻辑。 */
   function _metaFromWindow(){
     try{
       var m=(typeof window!=='undefined')?window.__MDE_META__:null;
@@ -890,20 +949,33 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
       /* 渲染取的是**当前值**：服务端 read() 已经把 zero.fields 与 up 里的
          变更叠加成 fields。只读 zero 会把「改过的」值漏掉，等于回到建档那一刻
          ——这正是主人定的 zero+up 合成渲染（2026-10-31）。 */
-      var f=(m.fields&&typeof m.fields==='object')?m.fields:((m.zero&&m.zero.fields)||{}),rows=[];
+      var f=(m.fields&&typeof m.fields==='object')?m.fields:((m.zero&&m.zero.fields)||{});
+      var head=[];
+      var au=(m.authors&&m.authors.length)?m.authors:[(f.author||'').toString()||'default'];
+      head.push({k:_fmTxt('作者'),v:au.join('，')});
+      var cr=_fmStamp(m.created||(m.zero&&m.zero.created)||'');
+      head.push({k:_fmTxt('创建'),v:cr||'none'});
+      var rows=[];
       for(var q=0;q<MDE_META_KEYS.length;q++){
+        if(MDE_META_KEYS[q][0]==='author')continue;   /* 作者已在作者链里，不重复出 */
         var vv=f[MDE_META_KEYS[q][0]];
         if(vv===undefined||vv===null||String(vv).replace(/^\s+|\s+$/g,'')==='')continue;
-        rows.push({k:MDE_META_KEYS[q][1],v:String(vv)});
+        rows.push({k:_fmTxt(MDE_META_KEYS[q][1]),v:String(vv)});
       }
-      if(!rows.length)return null;
-      var up=m.up||[],last=null;
-      if(up.length){
-        var t=up[up.length-1];
-        last=(t&&t.at?String(t.at):'')+(t&&t.key?(' · '+t.key):'');
-        if(!last)last=null;
+      var last=(m.last!=null&&String(m.last)!=='')?String(m.last):'';
+      /* 兜底：老版本后端不返回 last，就从 up 最后一条自己取（只取时间，
+         不带字段名——「最近修改」只回答"什么时候"）。 */
+      if(!last&&m.up&&m.up.length){
+        var _t=m.up[m.up.length-1];
+        last=(_t&&_t.at)?String(_t.at):'';
       }
-      return {rows:rows,last:last};
+      /* 溯源三件套（v2.26.3）：SM3 指纹（老档案没有 → null，不出行）、
+         stale（true = 磁盘正文与末条对不上；null = 无从判断，不出告警）。
+         stale===false 和 ===null 都不画告警行——"正常"和"不知道"都不吵。 */
+      var _h=(m.hash!=null&&String(m.hash).length===64)?String(m.hash):'';
+      return {rows:rows,head:head,last:last||null,
+              fp:_h?{full:_h,short:_h.slice(0,8)}:null,
+              warn:(m.stale===true)};
     }catch(e){return null;}
   }
   /* 前置消费：四条判据全中才认
@@ -1007,7 +1079,7 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
         _metaSeen=true;
         if(!_fmConflict&&!_fmRows&&_mdeMetaOn()){
           var _mz=_metaFromWindow();
-          if(_mz)html+=_fmZone(_mz.rows,'b',_mz.last);
+          if(_mz)html+=_fmZone(_mz.rows,'b',_mz.last,_mz.head,_mz.fp,_mz.warn);
         }
       }
       i++;curInd=0;continue;

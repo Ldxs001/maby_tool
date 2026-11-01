@@ -10,7 +10,6 @@ MD 编辑器本地后端 + 系统托盘（纯标准库，零第三方依赖）
 本文件与 markdown-editor.html 一同分发，配合内置 python/ 即可在任意 Windows 运行。
 """
 import http.server
-import hashlib
 import itertools
 import io
 import base64
@@ -65,7 +64,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 121  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 124  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 # MSIX 商城版判定（微软商店政策 11.16 的"报告 AI 生成内容"入口用）：
 # 商城包与侧载包恒落在 WindowsApps 之下，Release 安装包/便携形态不会。
@@ -208,6 +207,8 @@ except Exception as _e:  # embedded Python 下兜底，与 md_assets 同模式
 try:
     if HERE not in sys.path:
         sys.path.insert(0, HERE)
+    # SM3 先行：md_meta 依赖它，先探一次能把「环境不带 SM3」的问题指到正确的模块
+    import md_sm3
     import md_meta as _meta
 except Exception as _e:
     _meta = None
@@ -1384,7 +1385,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception as e:  # pragma: no cover
                 self._send(500, "read editor failed: %s" % e)
                 return
-            build = hashlib.md5(html.encode("utf-8")).hexdigest()[:10]
+            build = md_sm3.hexdigest(html)[:10]
             _attrs = ' data-msix="1"' if _IS_MSIX else ''
             if _REPORT_MAIL:
                 _attrs += ' data-report-mail="%s"' % _REPORT_MAIL.replace('"', '')
@@ -2035,10 +2036,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                            ensure_ascii=False))
             return
         if u.path == "/api/meta":
-            # 元数据档案：三动作一入口。
-            #   read   → {meta: {zero, up, fields} | null}
+            # 元数据档案：四动作一入口。
+            #   read   → {meta: {zero, up, fields, authors, created, last} | null}
             #   ensure → 建档（已存在则原样返回，绝不覆盖创建者快照）
             #   update → 逐字段 diff 追加 up.md，永不改 zero.json
+            #   sync   → v2.26.3：保存时的统一入口，该建档就建档、该记履历就记履历
+            #            created=null 本次会话新建；created="none" 接手别人的文件
             # .smd 情形写完立即进包：只写解包目录的话，会话结束工作目录被清，
             # 档案就没了（正文能活下来是因为 /api/file 走 save_from_dir）。
             try:
@@ -2047,6 +2050,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 p = (obj.get("path") or "").strip()
                 action = (obj.get("action") or "read").strip()
                 fields = obj.get("fields") or {}
+                who = (obj.get("who") or "").strip()
                 if not p:
                     self._send(400, json.dumps({"ok": False, "error": "missing path"},
                                                ensure_ascii=False))
@@ -2056,6 +2060,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                                ensure_ascii=False))
                     return
                 adir = _meta_assets_dir(p)
+                # 正文原文：溯源指纹与 stale 判断都要它（v2.26.3）。.smd 读解包
+                # 目录里的真身，磁盘 .md 直接读。读不到就 None——退化成"不带指纹
+                # 的老行为"，绝不让一次读失败把整个保存搞挂。
+                try:
+                    _docp = (os.path.join(_smd.base_dir_for(p), _smd.DOC_NAME)
+                             if (_smd is not None and _smd.is_smd(p)) else p)
+                    _body = _read_text_any(_docp) if os.path.isfile(_docp) else None
+                except Exception:
+                    _body = None
                 # .smd 的 adir 是解包临时目录，里面只是副本：绝不能设只读——
                 # 否则临时目录删不干净，下次解包撞只读文件直接 500。
                 keep_lock = not (_smd is not None and _smd.is_smd(p))
@@ -2063,10 +2076,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if action == "ensure":
                     rec, _new = _meta.ensure(adir, fields, lock=keep_lock)
                 elif action == "update":
-                    rec, changed = _meta.update(adir, fields, lock=keep_lock)
+                    rec, changed = _meta.update(adir, fields, lock=keep_lock, who=who)
+                elif action == "sync":
+                    # created 省略/为 null = 本次会话新建的文档；"none" = 接手别人的
+                    # touch=true = 这次保存要留痕（字段没变也记一行「保存」）
+                    # content  → 算 SM3 指纹写进履历；与上一条相同则不追加
+                    rec, changed, _born = _meta.sync(
+                        adir, fields or None, who=who,
+                        created=obj.get("created", None),
+                        lock=keep_lock, baseline=obj.get("baseline"),
+                        touch=bool(obj.get("touch")), content=_body)
                 else:
-                    rec = _meta.read(adir)
-                if action in ("ensure", "update") and _smd is not None and _smd.is_smd(p):
+                    rec = _meta.read(adir, content=_body)
+                if action in ("ensure", "update", "sync") and _smd is not None and _smd.is_smd(p):
                     with _smd.locked(p):
                         _smd.save_from_dir(p, _smd.base_dir_for(p))
                 self._send(200, json.dumps({"ok": True, "meta": rec, "changed": changed},
@@ -2176,7 +2198,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     # 响应回传改写后正文给前端同步编辑区（否则下次 Ctrl+S 把旧引用写回包）
                     stage = _smd.base_dir_for(path) if os.path.isfile(path) else \
                         os.path.join(_smd._tmp_root(),
-                                     hashlib.md5(os.path.abspath(path).lower().encode("utf-8")).hexdigest()[:16])
+                                     md_sm3.hexdigest(os.path.abspath(path).lower())[:16])
                     os.makedirs(stage, exist_ok=True)
                     src = (obj.get("src") or "").strip()
                     base = (obj.get("base") or "").strip()
@@ -2375,7 +2397,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     if not same:
                         # 同名不同内容：加短哈希后缀，绝不覆盖
                         stem2, ext2 = os.path.splitext(fname)
-                        h = hashlib.sha256(blob).hexdigest()[:4]
+                        h = md_sm3.hexdigest(blob)[:4]
                         cand = "%s__%s%s" % (stem2, h, ext2)
                         n = 1
                         while os.path.exists(os.path.join(assets, cand)):
@@ -3449,13 +3471,13 @@ def _slice_tall_images(body_html, icb_w_mm, img_maxh_mm, dpi=0):
         # 调整后渲染高不超版心 → 整图原子，不切
         if eff_w_mm * h / w <= img_maxh_mm:
             return tag
-        import hashlib
         with open(path, "rb") as f:
-            digest = hashlib.sha1(f.read()).hexdigest()[:12]
+            digest = md_sm3.hexdigest(f.read())[:12]
         # 条带像素高：渲染高 = 版心高/6（细条带续排，页面剩余留白上限 = 一条高）。
         # 1/3 版心实测留白过大（吸附后 3 条塞不进一页即剩 ~80mm 空白），故取 1/6
         strip_px = max(1, int(round(max(20.0, img_maxh_mm / 6.0) / eff_w_mm * w)))
-        # 缓存键 = 内容 sha1 + 条带几何（strip_px）+ dpi —— 任一参数变更旧切片不复用
+        # 缓存键 = 内容 SM3 + 条带几何（strip_px）+ dpi —— 任一参数变更旧切片不复用
+        # （v2.26.3 起全项目统一 SM3；换算法会让旧切片缓存一次性失效，重新切一遍，无别再生成）
         digest = "%s-%d-%d" % (digest, strip_px, dpi)
         n = (h + strip_px - 1) // strip_px
         gap = max(1, strip_px // 4)

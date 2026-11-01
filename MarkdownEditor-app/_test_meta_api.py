@@ -126,5 +126,113 @@ ck("B5 保存正文后档案仍在包内",
    "assets/.mde/zero.json" in names and "assets/.mde/up.md" in names, ",".join(names))
 ck("B6 保存响应带回 meta", bool(js2.get("meta")), list(js2.keys()))
 
-print("\n===== %d 项，FAIL %d =====" % (23, len(fails)))
+# ---------- C. sync：v2.26.3 保存时的统一入口 ----------
+# 「应用」只改设置，「保存」才落档案；档案写操作全走 sync，前端不需要知道
+# ensure / update 的先后。两种建档来历必须能区分。
+md2 = os.path.join(TD, "someone_else.md")
+with io.open(md2, "w", encoding="utf-8") as f:
+    f.write("# 别人的文章\n\n接手时已经有内容\n")
+
+# C1-C3 接手别人的文件：创建时间写 none（不猜），只补 default 与「谁开始留痕」
+j9 = post("/api/meta", {"path": md2, "action": "sync", "created": "none",
+                        "baseline": {}, "fields": {}, "who": "Ldxs"})
+m9 = j9.get("meta") or {}
+ck("C1 接手别人的文件 created=none", j9.get("ok") and m9.get("created") == "none",
+   m9.get("created"))
+ck("C2 补作者 default 并记下当前留痕人", m9.get("authors") == ["default", "Ldxs"],
+   m9.get("authors"))
+ck("C3 不把本机面板的标题/标签灌进别人的文档",
+   not (m9.get("fields") or {}).get("tags") and not (m9.get("fields") or {}).get("title"),
+   m9.get("fields"))
+
+# C4-C6 本次会话新建：创建时间就是现在，面板值是创建者快照
+md3 = os.path.join(TD, "mine.md")
+with io.open(md3, "w", encoding="utf-8") as f:
+    f.write("@@ meta\n\n我写的新文章\n")
+j10 = post("/api/meta", {"path": md3, "action": "sync", "who": "Ldxs",
+                         "baseline": {"title": "我的新文章", "author": "Ldxs"},
+                         "fields": {}})
+m10 = j10.get("meta") or {}
+ck("C4 本次新建 created 写真实时间", (m10.get("created") or "")[:4] == "2026",
+   m10.get("created"))
+ck("C5 面板值成为创建者快照", (m10.get("fields") or {}).get("title") == "我的新文章",
+   m10.get("fields"))
+
+# C6 幂等：没有改动就一条都不写，zero 也不动
+j11 = post("/api/meta", {"path": md3, "action": "sync", "who": "Ldxs", "fields": {}})
+ck("C6 无改动不刷履历", j11.get("changed") == 0 and
+   (j11.get("meta") or {}).get("created") == m10.get("created"),
+   j11.get("changed"))
+
+# C7 有改动才进 up，作者链按时间序累积
+j12 = post("/api/meta", {"path": md3, "action": "sync", "who": "张三",
+                         "fields": {"title": "改过的标题"}})
+m12 = j12.get("meta") or {}
+ck("C7 改动记 1 条并累积作者链",
+   j12.get("changed") == 1 and m12.get("authors") == ["Ldxs", "张三"] and
+   (m12.get("fields") or {}).get("title") == "改过的标题",
+   (j12.get("changed"), m12.get("authors"), m12.get("fields")))
+
+# C8 touch=true：字段没变也留一条「保存」——up 是忠实追加的流水账，
+#    写不写由 touch 决定、不由 diff 决定（2026-11-01 定）
+j13 = post("/api/meta", {"path": md3, "action": "sync", "who": "张三",
+                         "fields": {"title": "改过的标题"}, "touch": True})
+m13 = j13.get("meta") or {}
+ck("C8 touch=true：字段没变也追加一条「保存」，changed 仍为 0",
+   j13.get("ok") and j13.get("changed") == 0 and
+   (m13.get("up") or [{}])[-1].get("note") == "保存" and bool(m13.get("last")),
+   (j13.get("changed"), (m13.get("up") or [])[-1:]))
+
+# C9 touch 缺省：老调用方语义不变，无改动一条都不写
+j14 = post("/api/meta", {"path": md3, "action": "sync", "who": "张三",
+                         "fields": {"title": "改过的标题"}})
+m14 = j14.get("meta") or {}
+ck("C9 touch 缺省：无改动一条不写（老语义，不破坏既存调用）",
+   j14.get("changed") == 0 and
+   len(m14.get("up") or []) == len(m13.get("up") or []),
+   (len(m14.get("up") or []), len(m13.get("up") or [])))
+
+# C10-C13 SM3 内容指纹（v2.26.3）：服务端从磁盘算，前端不参与
+with io.open(md3, "r", encoding="utf-8") as _f:
+    _body = _f.read()
+_up_md = os.path.join(TD, "mine.assets", ".mde", "up.md")
+j15 = post("/api/meta", {"path": md3, "action": "sync", "who": "张三",
+                         "touch": True, "content": _body})
+m15 = j15.get("meta") or {}
+ck("C10 sync 带正文：返回 64 位指纹且写进 up.md 原文",
+   len(m15.get("hash") or "") == 64 and
+   ("sm3:" + m15["hash"]) in io.open(_up_md, encoding="utf-8").read(),
+   (m15.get("hash") or "")[:16])
+
+_n = len(m15.get("up") or [])
+j16 = post("/api/meta", {"path": md3, "action": "sync", "who": "张三",
+                         "touch": True, "content": _body})
+m16 = j16.get("meta") or {}
+ck("C11 同内容重复保存不追加（内容没变，最近修改不该往前走）",
+   len(m16.get("up") or []) == _n,
+   (len(m16.get("up") or []), _n))
+
+_body2 = _body + "\n新增一段\n"
+with io.open(md3, "w", encoding="utf-8") as f:
+    f.write(_body2)
+j17 = post("/api/meta", {"path": md3, "action": "sync", "who": "张三",
+                         "touch": True, "content": _body2})
+m17 = j17.get("meta") or {}
+ck("C12 内容变了：追加一条且指纹换新",
+   len(m17.get("up") or []) == _n + 1 and m17.get("hash") != m15.get("hash"),
+   (len(m17.get("up") or []), _n + 1))
+
+j18 = post("/api/meta", {"path": md3, "action": "read"})
+m18 = j18.get("meta") or {}
+ck("C12b read 带回 stale 且盘上一致时为 False",
+   m18.get("stale") is False, m18.get("stale"))
+
+with io.open(md3, "w", encoding="utf-8") as f:
+    f.write(_body)                      # 模拟被外部改回旧版
+j19 = post("/api/meta", {"path": md3, "action": "read"})
+ck("C13 盘上正文与末条指纹不符：stale=True（未记录改动可见）",
+   (j19.get("meta") or {}).get("stale") is True,
+   (j19.get("meta") or {}).get("stale"))
+
+print("\n===== %d 项，FAIL %d =====" % (35, len(fails)))
 sys.exit(1 if fails else 0)

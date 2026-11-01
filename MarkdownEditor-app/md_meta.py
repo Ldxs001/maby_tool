@@ -23,6 +23,17 @@
    up 存的是"后来改了什么"，两者合起来才是"现在是什么"。前端要渲染就直接
    用 read() 返回的 fields，不要自己去算——两边算两套必然分叉。
 
+4. **作者是链，不是值**（v2.26.3）。zero.fields.author 是创建者，up 里每条
+   `@who` 是那次保存的操作者，按时间序去重拼起来才是「作者」这一行。所以
+   没有人会"覆盖"掉创建者——Ldxs 改完之后显示的是 `wUwproject，Ldxs`。
+   who 的来源是本机排版设置里的「作者」框：谁的机器写着谁，不冒充。
+
+5. **建档有两种来历**（v2.26.3），由调用方用 created 参数说明：
+     created=None    本次会话新建（含另存为）→ 创建时间 = 现在，字段 = 面板值
+     created="none"  接手别人已有的内容      → 创建时间 = none，字段只留
+                     author=default，并立刻记一条「建档」行，写明是谁开始留痕。
+   第二种的意义是"证明现在这位不是创建人"，而不是假装知道它是哪年建的。
+
 纯 IO 模块，无全局状态，供 md_server.py 调用。
 """
 import io
@@ -30,6 +41,8 @@ import json
 import os
 import re
 import time
+
+import md_sm3
 
 META_DIR = ".mde"
 ZERO_NAME = "zero.json"
@@ -44,8 +57,21 @@ FIELD_KEYS = tuple(k for k, _ in FIELDS)
 
 MAX_VAL = 500          # 单字段上限，防止把整篇文章塞进元数据
 
-# up.md 一行：- 2026-10-30 23:24 · title：`` → `我写故我播`
-_UP_RE = re.compile(r"^-\s*(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2})\s*·\s*([A-Za-z_][\w\-]*)\s*[：:]\s*(.*?)\s*→\s*(.*)$")
+DEFAULT_AUTHOR = "default"   # 作者为空时的占位：至少说明"有人，但没报名"
+CREATED_UNKNOWN = "none"     # 接手别人的文件时，创建时间就写这个——不猜
+
+# up.md 一行：- 2026-10-30 23:24 @Ldxs · title：`旧` → `新`
+# @who 是 v2.26.3 加的，老档案的行没有它，解析成空名，不做迁移。
+_UP_RE = re.compile(
+    r"^-\s*(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2})\s*(?:@(\S+?))?\s*·\s*"
+    r"([A-Za-z_][\w\-]*)\s*[：:]\s*(.*?)\s*→\s*(.*)$")
+# 无字段行：- 2026-11-01 21:40 @Ldxs · 建档（只说明"此人此刻动过"，没有键值可比）
+_UP_NOTE_RE = re.compile(
+    r"^-\s*(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2})\s*(?:@(\S+?))?\s*·\s*(\S.*)$")
+# 内容指纹：v2.26.3 起，保存行尾带 `sm3:<64位十六进制>`。
+#   - 2026-11-01 23:10 @Ldxs · 保存 sm3:9f8e7d6c1a2b…
+# 老档案的行没有它，解析成空串，**不做迁移**——没有指纹就是没有，不补编一个。
+_UP_SM3_RE = re.compile(r"\bsm3:([0-9a-f]{%d})\b" % md_sm3.HEX_LEN)
 
 # Windows 文件属性位（其它平台静默跳过：Linux/macOS 的点开头文件名本身就是隐藏）
 _FA_READONLY = 0x1
@@ -137,27 +163,94 @@ def _unbacktick(s):
 
 
 def parse_up(text):
-    """up.md → [{at, key, from, to}]。不认识的行直接跳过（人手改坏了不影响读）。"""
+    """up.md → [{at, who, key, from, to, note}]。
+
+    两种行都认：带字段的（key 有值）与只记事件的无字段行（key 为 None）。
+    不认识的行直接跳过（人手改坏了不影响读）。
+    """
     out = []
     for ln in (text or "").split("\n"):
-        m = _UP_RE.match(ln.strip())
-        if not m:
+        s = ln.strip()
+        if not s.startswith("-"):
             continue
-        out.append({"at": m.group(1), "key": m.group(2),
-                    "from": _unbacktick(m.group(3)), "to": _unbacktick(m.group(4))})
+        m = _UP_RE.match(s)
+        if m:
+            out.append({"at": m.group(1), "who": (m.group(2) or "").strip(),
+                        "key": m.group(3),
+                        "from": _unbacktick(m.group(4)), "to": _unbacktick(m.group(5)),
+                        "note": "", "hash": ""})
+            continue
+        if "→" in s:
+            continue        # 带箭头却合不上格式：宁可当坏行跳过，也不猜成无字段行
+        m = _UP_NOTE_RE.match(s)
+        if m:
+            note = m.group(3).strip()
+            h = ""
+            mh = _UP_SM3_RE.search(note)
+            if mh:
+                h = mh.group(1)
+                # 去掉指纹后剩下的才是人写的说明；只剩指纹（手写坏了）就当「保存」
+                note = (note[:mh.start()] + note[mh.end():]).strip() or "保存"
+            out.append({"at": m.group(1), "who": (m.group(2) or "").strip(),
+                        "key": None, "from": "", "to": "",
+                        "note": note, "hash": h})
     return out
 
 
 def _fmt_up(entry):
-    return "- %s · %s：`%s` → `%s`" % (entry["at"], entry["key"],
-                                       entry.get("from", ""), entry.get("to", ""))
+    who = (entry.get("who") or "").strip()
+    head = "- %s%s · " % (entry["at"], (" @" + who) if who else "")
+    if entry.get("key"):
+        return head + "%s：`%s` → `%s`" % (entry["key"], entry.get("from", ""),
+                                           entry.get("to", ""))
+    body = entry.get("note") or "修改"
+    h = (entry.get("hash") or "").strip()
+    if h:
+        body += " sm3:" + h
+    return head + body
 
 
-def read(assets_dir):
-    """读档案 → {zero, up, fields} 。档案不存在返回 None（不是空对象）。
+def _build_authors(base_author, up):
+    """创建者（永远第一）+ up 里出现过的操作者，按时间序去重。
 
-    None 与"存在但字段全空"是两回事：前者根本没建档，后者建了档还没填。
-    渲染侧一律按"没数据就不出区域"处理，但面板要区分（前者显示未建档）。
+    老档案的履历行没有 @who，但改 author 那条的 `to` 就是当时的作者名，
+    拿它兜底——否则老文档的作者链永远只有创建者一个人。
+    """
+    out = [(base_author or "").strip() or DEFAULT_AUTHOR]
+    for e in up:
+        w = (e.get("who") or "").strip()
+        if not w and e.get("key") == "author":
+            w = (e.get("to") or "").strip()
+        if w and w not in out:
+            out.append(w)
+    return out
+
+
+def _last_hash(up):
+    """up 里最后一条带指纹的 hash。
+
+    不能直接取 up[-1]：字段变更行（`title：旧 → 新`）不带指纹，若它恰好是
+    最后一条，取它就等于拿空值去比，stale 会永远算不出来。
+    """
+    for e in reversed(up or ()):
+        h = (e.get("hash") or "").strip()
+        if h:
+            return h
+    return ""
+
+
+def read(assets_dir, content=None):
+    """读档案 → {zero, up, fields, authors, created, last, hash, stale}。
+
+    档案不存在返回 None。None 与"存在但字段全空"是两回事：前者根本没建档，
+    后者建了档还没填。渲染侧一律按"没数据就不出区域"处理，但面板要区分。
+
+    authors / created / last 三个派生值只在这里算：前端拿到就能直接画，
+    不必把 zero+up 的合成规则再实现一遍（两处各算一套必然分叉）。
+
+    content 传入正文原文时顺带算 stale（磁盘正文的指纹是否等于 up 末条）：
+      False 一致    True 有未记录的改动    None 无从判断（老档案没有指纹、
+      或没传 content）——三者不能合并，None 表示"不知道"，不该报成"正常"。
     """
     md = meta_dir(assets_dir)
     zp = os.path.join(md, ZERO_NAME)
@@ -181,7 +274,20 @@ def read(assets_dir):
         except Exception:
             up_list = []
     base = _clean(zero.get("fields"))
-    return {"zero": zero, "up": up_list, "fields": _apply_up(base, up_list)}
+    created = zero.get("created")
+    created = str(created).strip() if created is not None else ""
+    h_last = _last_hash(up_list)
+    stale = None
+    if content is not None and h_last:
+        try:
+            stale = (md_sm3.text_digest(content) != h_last)
+        except Exception:
+            stale = None
+    return {"zero": zero, "up": up_list, "fields": _apply_up(base, up_list),
+            "authors": _build_authors(base.get("author", ""), up_list),
+            "created": created or CREATED_UNKNOWN,
+            "last": (up_list[-1]["at"] if up_list else ""),
+            "hash": h_last, "stale": stale}
 
 
 def relax(assets_dir):
@@ -195,12 +301,16 @@ def relax(assets_dir):
     _set_attrs(md, hidden=False)
 
 
-def ensure(assets_dir, fields=None, lock=True):
+def ensure(assets_dir, fields=None, lock=True, created=None):
     """建档：zero.json + up.md。已存在则原样返回（**绝不覆盖创建者快照**）。
 
     lock=False 专供 `.smd` 的解包目录：那里的档案只是临时副本，原件在包内。
     副本一旦被设成只读+隐藏，临时目录就删不干净（rmtree 静默留残骸），
     下次解包撞上只读同名文件直接 PermissionError。只读只给磁盘上的真档案。
+
+    created=None 用当前时刻；传字符串则原样写（`none` = 接手别人的文件，
+    不知道也不编造创建时间）。author 空就给 DEFAULT_AUTHOR——档案里必须
+    有人，哪怕这个人是 default。
 
     返回 (档案 dict, 是否本次新建)。
     """
@@ -213,11 +323,15 @@ def ensure(assets_dir, fields=None, lock=True):
     os.makedirs(md, exist_ok=True)
     if lock:
         _set_attrs(md, hidden=True)      # 目录隐藏
+    f = _clean(fields)
+    if not (f.get("author") or "").strip():
+        f["author"] = DEFAULT_AUTHOR
     zero = {
         "format": FORMAT,
-        "created": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
+        "created": (str(created).strip() if created else
+                    time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime())),
         "creator": {"by": "MDEditor"},
-        "fields": _clean(fields),
+        "fields": f,
     }
     zp = os.path.join(md, ZERO_NAME)
     _clear_readonly(zp)
@@ -233,12 +347,22 @@ def ensure(assets_dir, fields=None, lock=True):
     return read(assets_dir) or {"zero": zero, "up": [], "fields": _clean(fields)}, True
 
 
-def update(assets_dir, fields, lock=True):
+def _append(assets_dir, entries):
+    up = os.path.join(meta_dir(assets_dir), UP_NAME)
+    with io.open(up, "a", encoding="utf-8", newline="\n") as f:
+        for c in entries:
+            f.write(_fmt_up(c) + "\n")
+
+
+def update(assets_dir, fields, lock=True, who=""):
     """改档案：逐字段 diff，变更追加进 up.md。**永不改 zero.json**。
+
+    who 是本次操作者（本机排版设置里的作者），写进履历行的 `@who`。
+    空字符串就省略 @，老行为不变。
 
     lock 透传给 ensure：`.smd` 的解包副本一律不锁（见 ensure 的说明）。
 
-    返回 (档案 dict, 本次变更条数)。没变就一条都不写（幂等：重复点应用不刷履历）。
+    返回 (档案 dict, 本次变更条数)。没变就一条都不写（幂等：重复保存不刷履历）。
     """
     cur = read(assets_dir)
     if cur is None:
@@ -246,6 +370,8 @@ def update(assets_dir, fields, lock=True):
         return cur, 0
     old = cur.get("fields") or {}
     new = _clean(fields)
+    at = _now()
+    w = (who or "").strip()
     changes = []
     for k in FIELD_KEYS:
         if k not in new:
@@ -253,11 +379,69 @@ def update(assets_dir, fields, lock=True):
         a = old.get(k, "")
         b = new.get(k, "")
         if a != b:
-            changes.append({"at": _now(), "key": k, "from": a, "to": b})
+            changes.append({"at": at, "who": w, "key": k, "from": a, "to": b})
     if not changes:
         return cur, 0
-    up = os.path.join(meta_dir(assets_dir), UP_NAME)
-    with io.open(up, "a", encoding="utf-8", newline="\n") as f:
-        for c in changes:
-            f.write(_fmt_up(c) + "\n")
+    _append(assets_dir, changes)
     return read(assets_dir), len(changes)
+
+
+def sync(assets_dir, fields=None, who="", created=None, lock=True, baseline=None,
+         touch=False, content=None):
+    """保存时的统一入口：该建档就建档，该记履历就记履历（v2.26.3）。
+
+    「应用」只改排版设置，「保存」才落到这篇文档——所有档案写操作都从这里走，
+    前端不需要知道 ensure / update 的先后。
+
+    created=None   本次会话新建（含另存为）：
+                   zero.fields = baseline（缺省用 fields），创建时间 = 现在
+    created="none" 接手别人已有内容的文件：
+                   zero 只写 author=default、创建时间 none，并**立刻记一条
+                   「建档」行**写明这次是谁开始留痕的——目的是证明现在这位
+                   不是创建人，而不是假装知道它是哪年建的
+
+    touch=True     这是一次真正的保存：**字段一个都没变也要留一条痕**
+                   （`- 时间 @who · 保存`）。up 是忠实追加的流水账——每 save
+                   一行，去重与取最新都是**渲染时**的事（read 的 authors 去重、
+                   last 取末条）。以前写不写由 update 的逐字段 diff 决定，结果
+                   「改了正文、元数据没动」的保存一个字都不留、修改时间也不动，
+                   与「up 记录每一次 save」这条口径相违（2026-11-01 定）。
+                   接手建档那次已有「建档」行，不再叠一条同秒的「保存」。
+
+    content        正文原文（落盘后的）。给了就把 SM3 指纹写进履历行，并与上
+                   一条指纹比：**一模一样就不追加**——内容没变说明这次保存
+                   没产生任何变化，"最近修改"也就不该往前走。忠实追加的是
+                   "每一次内容变化"，不是每一个 Ctrl+S（2026-11-01 定）。
+
+    baseline 与 fields 分开是为了第二种来历：那时 fields 只应含「本次会话
+    显式改过的字段」，绝不能把本机面板里的标题/标签灌进别人的文档（那是
+    污染，不是留痕），所以建档底稿必须另行说明成空。
+
+    返回 (档案 dict, 本次变更条数, 是否本次建档)。
+    """
+    h = ""
+    if content is not None:
+        try:
+            h = md_sm3.text_digest(content)
+        except Exception:
+            h = ""      # OpenSSL 不带 SM3 或是极端编码问题：退化成不带指纹的老行为
+    cur = read(assets_dir)
+    born = False
+    if cur is None:
+        base = (baseline if baseline is not None else fields) if created is None else {}
+        cur, born = ensure(assets_dir, base, lock=lock, created=created)
+        if created is not None:
+            _append(assets_dir, [{
+                "at": _now(), "who": (who or "").strip() or DEFAULT_AUTHOR,
+                "key": None, "note": "建档", "from": "", "to": "", "hash": h}])
+            cur = read(assets_dir)
+    changed = 0
+    if fields:
+        cur, changed = update(assets_dir, fields, lock=lock, who=who)
+    if touch and not changed and not (born and created is not None):
+        prev = _last_hash(cur.get("up") if cur else None)
+        if not (h and prev and h == prev):
+            _append(assets_dir, [{
+                "at": _now(), "who": (who or "").strip() or DEFAULT_AUTHOR,
+                "key": None, "note": "保存", "from": "", "to": "", "hash": h}])
+    return read(assets_dir, content), changed, born
