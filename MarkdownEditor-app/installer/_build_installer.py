@@ -47,7 +47,7 @@ DIST_FILES = ["md_launch.pyw", "_md_run.py", "md_server.py", "markdown-editor.ht
               "md-editor.ico", "uninstall-md.ico", "llm_client.py", "web_search.py",
               "rag_client.py", "_smd.py", "md_assets.py", "_splash.py",
               "_pickdir_modern.py", "_pickfile.py", "_picksave.py",
-              "docx_export.py", "md_meta.py", "md_convert.py",
+              "docx_export.py", "md_meta.py", "md_sm3.py", "md_convert.py",
               "md_app.pyw", "LICENSE", "COPYRIGHT", "README.md",
               "install.cmd", "MarkdownEditor.cs", "_mklnk.ps1",
               "uninstall.cmd", "UninstallMDEditor.cs", "desktop-shortcut.cmd", "md_stop.cmd"]
@@ -199,6 +199,13 @@ def make_staging(ver):
     _docx_must = [
         os.path.join(STAGING, "docx_export.py"),
         os.path.join(STAGING, "_picksave.py"),
+        # 服务端运行时模块（v2.26.3 起集中断言）：md_server 顶层/请求路径会
+        # import 的本目录模块，缺一个装出来就是坏功能。新增模块必须同时进
+        # DIST_FILES 与这里（refs/14 坑 13②：两处只改一处时测试仍全绿）。
+        os.path.join(STAGING, "md_meta.py"),
+        os.path.join(STAGING, "md_sm3.py"),
+        os.path.join(STAGING, "md_assets.py"),
+        os.path.join(STAGING, "_smd.py"),
         os.path.join(STAGING, "docxdeps", "docx"),
         os.path.join(STAGING, "docxdeps", "lxml"),
         os.path.join(STAGING, "docxdeps", "PIL"),
