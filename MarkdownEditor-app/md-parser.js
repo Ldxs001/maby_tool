@@ -354,9 +354,62 @@ function _wrapTabCap(tbl,c){
     +'" data-tab-gap="'+gap+'" style="--tabgap:'+gap+';">'
     +(side==='b'?tbl+capEl:capEl+tbl)+'</div>';
 }
+/* 围栏行判定：行首连续反引号 ≧3 才算围栏，返回其个数（否则 0）。
+   个数参与配对——开 N 个，收尾行个数必须 ≧N。于是「外层 4 包内层 3」成立
+   （内层那行 3 个 < 4，不构成收尾，按内容原样保留），想嵌多深就多写几个。 */
+function _fenceLen(line){
+  var m=/^(`{3,})/.exec(line);
+  return m?m[1].length:0;
+}
+/* v2.25.0 反引号「整串读 + 按长度配对」，取代原来的「看见下一个反引号就抓」。
+   连续反引号串先整串读出来记长度 N，再决定身份：
+     N=1  行内代码定界，找下一个 N=1 收尾
+     N=2  自闭合（一个开、一个闭，内容为空），不需要搭档
+     N≧3  定界，找下一个「长度恰好等于 N」的串收尾；找不到则整串按字面文字
+   整串读是关键：``` 不会再被拆成 `` + `，于是行中间的 ``` 只是三个普通字符，
+   既进不了代码块身份、也抢不走后面 $…$ 的开引号。
+   返回已配对区间 [{a,an,b}]：a=开串起点、an=长度、b=收串起点（自闭合时 b=-1），
+   按 a 升序且互不重叠。未配对的串不出现在结果里，调用方按原样保留即可。 */
+function _tickScan(text){
+  var re=/`+/g,m,toks=[];
+  while((m=re.exec(text)))toks.push({i:m.index,n:m[0].length});
+  var used={},pairs=[],k,q,j,n;
+  for(k=0;k<toks.length;k++){
+    if(used[k])continue;
+    n=toks[k].n;
+    if(n===2){used[k]=1;pairs.push({a:toks[k].i,an:2,b:-1});continue;}
+    j=-1;
+    for(q=k+1;q<toks.length;q++){if(toks[q].n===n){j=q;break;}}
+    if(j<0)continue;            /* 配不上 → 整串字面，且不消耗后面的串 */
+    used[j]=1;
+    pairs.push({a:toks[k].i,an:n,b:toks[j].i});
+    k=j;
+  }
+  return pairs;
+}
 function parseInline(text,noMde){
   var codes=[];
-  text=text.replace(/`([^`]+)`/g,function(m,c){codes.push(c);return '@@C'+(codes.length-1)+'@@';});
+  /* 反斜杠转义的反引号（\`）不参与配对：先换私用区字符，配对完还原成字面反引号。
+     否则 `- 时间 · 键：\`旧\` → \`新`` 这种写法里的 \` 会被当成定界符，
+     整串配对从第一个 \` 起就错位（实测：@@C 占位漏出、后半段掉出代码）。
+     必须放在 _tickScan 之前——后面统一的 \X 转义在配对之后才跑，来不及。 */
+  var _escTick=text.indexOf('\\`')>=0;
+  if(_escTick)text=text.replace(/\\`/g,'\uE005');
+  var _tks=_tickScan(text);
+  if(_tks.length){
+    var _tb='',_tl=0,_ti,_tp;
+    for(_ti=0;_ti<_tks.length;_ti++){
+      _tp=_tks[_ti];
+      _tb+=text.slice(_tl,_tp.a)+'@@C'
+        +(codes.push(_tp.b<0?'':text.slice(_tp.a+_tp.an,_tp.b))-1)+'@@';
+      _tl=_tp.b<0?(_tp.a+_tp.an):(_tp.b+_tp.an);
+    }
+    text=_tb+text.slice(_tl);
+  }
+  if(_escTick){
+    text=text.replace(/\uE005/g,'`');
+    for(var _ci=0;_ci<codes.length;_ci++)codes[_ci]=codes[_ci].replace(/\uE005/g,'`');
+  }
   /* 反斜杠转义（CommonMark 口径）：\X（X 为 ASCII 标点）→ 占位符，行内语法全部
      处理完再还原为字面 X。文档里展示 \!\[示例\](路径) 这类语法原文必须走这里，
      否则 \! 原样漏出、且 \[..\](..) 仍会被链接正则吃成真 <a>。
@@ -543,7 +596,7 @@ function parseInline(text,noMde){
       if(cur===null){break;}
       /* 硬块白名单先判：<<< 去空格后是三个同字符，会被 _isHrLine 当分隔线，
          顺序颠倒就会把包围块吞成 li 内的两条横线（实测过） */
-      if(/^```/.test(line)||/^(#{1,6})[ ]+/.test(line)||/^[ ]*>/.test(line)||
+      if(_fenceLen(line)||/^(#{1,6})[ ]+/.test(line)||/^[ ]*>/.test(line)||
          /^[ ]{0,3}<<</.test(line)||/^[ ]{0,3}@@\s*(begin|end|blank|caption|meta)\b/.test(line)||
          /^@@ MDE(_{1,2})?[\w\u4e00-\u9fff.-]*(:[23])?(\([^()]*\))?\{/.test(line)||
          (line.indexOf('|')>=0&&i+1<lines.length&&/^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1])&&lines[i+1].indexOf('-')>=0)){
@@ -743,9 +796,32 @@ function _scanBeginBlock(lines,startIdx,teams){
   }
   return {inner:inner,closed:closed,next:k};
 }
-function parseMarkdown(src,_lv,opts,_base){
+/* v2.26.0 <<< 分层配对的「跳过一整棵子树」：从 from 起找个数恰为 M 的收口行。
+   块内遇到更大个数 K>M 递归跳过（它自己的子树），遇到更小个数 K<M 直接作废
+   ——按「不对等就不收口」的规矩，本层没等到自己的收尾，开符要降级成文本。
+   返回收口行下标，找不到返回 -1。 */
+function _findIndentClose(lines,from,M){
+  var j=from;
+  while(j<lines.length){
+    var m=/^[ ]{0,3}(<{3,})[ ]*$/.exec(lines[j]);
+    if(m){
+      var K=m[1].length;
+      if(K===M)return j;
+      if(K>M){
+        var c=_findIndentClose(lines,j+1,K);
+        if(c<0)return -1;
+        j=c+1;continue;
+      }
+      return -1;
+    }
+    j++;
+  }
+  return -1;
+}
+function parseMarkdown(src,_lv,opts,_base,_lv3){
   _lv=_lv|0;
   _base=_base||0;
+  _lv3=_lv3|0;   /* v2.26.0 当前所在的 <<< 层级：0＝最外层（只认 3 个），N＝已进到第 N 个符号的块里 */
   var lines=src.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
   var html='';
   var i=0;
@@ -936,14 +1012,26 @@ function parseMarkdown(src,_lv,opts,_base){
       }
       i++;curInd=0;continue;
     }
-    if(/^```/.test(line)){
+    var _fL=_fenceLen(line);
+    /* 反引号侧：最外围不限个数，≥3 即成围栏，开 N 个只由 N 个收尾。
+       与 <<< 的差别是必然的，不是规则不统一：
+         <<< 的数字是「层级编号」（3=最外层，4=第 1 层…），所以最外层锚定 3、
+             向内只能递增，读源码即知深度；
+         反引号的数字是「转义手段」，只表示比内容里最长的反引号串更长，不表示层。
+       所以围栏不能锁死 3——要在一个代码块里展示三个反引号本身，只能写 4 包 3
+       （3 包 3 会被内容里的 3 提前收尾，无解）。锁死 3 等于封死这条需求。
+       统一的是核心判据「开 N 收 N」，不是 N 的取值。 */
+    if(_fL>=3){
       var _fenceAt=i;
-      var rawLang=line.slice(3).trim();
+      var rawLang=line.slice(_fL).trim();
        var fl=parseFenceLang(rawLang);   /* 图表围栏支持 ```mermaid {30} 版面百分比宽度 + c/l/r 对齐；v2.10.0 再加 "题注"{图参:题参} */
        var lang=fl.lang, fW=fl.width, fA=fl.align;
       i++;
       var code='';
-      while(i<lines.length && !/^```/.test(lines[i])){code+=lines[i]+'\n';i++;}
+      /* 收尾条件按个数「严格相等」：只有行首反引号个数恰等于开头的才收尾。
+         v2.26.0 起与 <<< 同一套（先小后大）——内层写更多，就不会被外层当收尾，
+         于是「3 包 4」成立；内层写得比外层少时它只是内容，行为与旧版一致。 */
+      while(i<lines.length && _fenceLen(lines[i])!==_fL){code+=lines[i]+'\n';i++;}
       if(i>=lines.length)_dgE(_fenceAt,'D103','代码围栏未闭合：文末缺收尾 ```','warn');
       i++;
       code=code.replace(/\n$/,'');
@@ -990,19 +1078,42 @@ function parseMarkdown(src,_lv,opts,_base){
       html+='<h'+lvl+'>'+parseInline(hm[2].trim())+'</h'+lvl+'>';
       i++;curInd=0;continue;
     }
-    /* <<< 缩进包围块（开闭同符号，状态翻转；不支持嵌套）。
+    /* <<< 缩进包围块（v2.26.0 按个数分层：最外层恒 3 个，嵌套只能递增）。
        必须在 hr 判定之前：<<< 去空格后为三连字符，会被 hr 规则吃掉。
-       冻结 curInd 为块内左边界；块内递归渲染（天然封闭，内层 curInd 独立）；
-       闭合后 curInd = 块边界 + 块内容器级子块叠加（列表/引用档取 max）。
-       未闭合 fail-closed：标记行按普通文本渲染（字面保留）。 */
-    if(/^[ ]{0,3}<<<\s*$/.test(line)){
+       起点仍冻结 curInd（继承上一段的容器级缩进，空行打断归零），块内递归渲染。
+       配对规矩与 ``` 同一套（先小后大）：
+         最外层只认 3 个；进了块只能写更大的个数（3 里 4、4 里 5…，跳级也认）；
+         严格相等才收口——个数不对等一律不收，未闭合的开符按文本露出（不兜底）。
+       闭合后 curInd = 块边界 + 块内容器级子块叠加（列表/引用档取 max）。 */
+    var _im=/^[ ]{0,3}(<{3,})[ ]*$/.exec(line);
+    if(_im){
+      var _iN=_im[1].length;
+      var _iOk=(_lv3===0)?(_iN===3):(_iN>_lv3);
+      if(!_iOk){
+        if(_lv3===0)_dgE(i,'D104','最外层缩进包围块只能是 <<<（3 个）：写了 '+_iN+' 个，本行按普通文本渲染','warn');
+        html+='<p>'+parseInline(line)+'</p>';
+        i++;curInd=0;continue;
+      }
       var inner=[],closed=false,j=i+1;
       while(j<lines.length){
-        if(/^[ ]{0,3}<<<\s*$/.test(lines[j])){closed=true;j++;break;}
+        var _jm=/^[ ]{0,3}(<{3,})[ ]*$/.exec(lines[j]);
+        if(_jm){
+          var _jN=_jm[1].length;
+          if(_jN===_iN){closed=true;j++;break;}
+          if(_jN>_iN){
+            /* 更大的个数＝内层子树，整棵跳过（内层自己配自己的对） */
+            var _c=_findIndentClose(lines,j+1,_jN);
+            if(_c>=0){for(var _q=j;_q<=_c;_q++)inner.push(lines[_q]);j=_c+1;continue;}
+            /* 内层没闭合 → 按「不兜底」当文本。加零宽前缀挡住下层递归再认它
+               （与 _scanBeginBlock 同一手法），否则内层会重试一次、多报一条 D101 */
+            inner.push('\u200b'+lines[j]);j++;continue;
+          }
+          inner.push(lines[j]);j++;continue;   /* 更小的个数不是本层的收口 */
+        }
         inner.push(lines[j]);j++;
       }
       if(!closed){
-        _dgE(i,'D101','<<< 未闭合：到文末没有第二个 <<<（开与闭用同一个符号）');
+        _dgE(i,'D101','<<< 未闭合：到文末没有同个数的收尾（开闭个数必须相等）');
         html+='<p>'+parseInline(line)+'</p>';
         i++;curInd=0;continue;
       }
@@ -1017,13 +1128,13 @@ function parseMarkdown(src,_lv,opts,_base){
          em 时基准随容器字号漂移（继承链 15px 环境下 2em 渲染 30px，
          与正文首行 37.3px 不齐）。 */
       var left=curInd;
-      html+='<div class="ind-blk" style="margin-left:'+left+'px">'+parseMarkdown(inner.join('\n'),_lv,opts,_base+i+1)+'</div>';
+      html+='<div class="ind-blk" style="margin-left:'+left+'px">'+parseMarkdown(inner.join('\n'),_lv,opts,_base+i+1,_iN)+'</div>';
       curInd=left+Math.max(hasList?IPX.li:0,hasQuote?IPX.quote:0);
       i=j;
       continue;
     }
     /* v2.22.0 <<< 须独占一行：行尾带内容不构成包围块（fail-closed 按普通文本） */
-    if(/^[ ]{0,3}<<</.test(line)&&!/^[ ]{0,3}<<<\s*$/.test(line)){
+    if(/^[ ]{0,3}<{3,}/.test(line)){
       _dgE(i,'D102','<<< 须独占一行：行尾还有内容，本行按普通文本渲染','warn');
     }
     /* @@ fill 分栏（v2.3 图片语法，v2.13 泛化为文字/图片任意组合）：
@@ -1095,7 +1206,7 @@ function parseMarkdown(src,_lv,opts,_base){
              内层 fill 相对容器左边界即 0，故不写 margin-left。 */
           var fh='<div class="fill-row">';
           for(var ci=0;ci<cols.length;ci++){
-            fh+='<div class="fill-col" style="width:'+ratios[ci]+'%">'+parseMarkdown(cols[ci],_LV.fill,opts,_base+i+1+colAt[ci])+'</div>';
+            fh+='<div class="fill-col" style="width:'+ratios[ci]+'%">'+parseMarkdown(cols[ci],_LV.fill,opts,_base+i+1+colAt[ci],_lv3)+'</div>';
           }
           fh+='</div>';
           html+=fh;
@@ -1125,7 +1236,7 @@ function parseMarkdown(src,_lv,opts,_base){
         }
         html+='<p>'+parseInline(line)+'</p>';
         var ftxt=finner.join('\n');
-        if(ftxt.trim()){html+=parseMarkdown(ftxt,_lv,opts,_base+i+1);}
+        if(ftxt.trim()){html+=parseMarkdown(ftxt,_lv,opts,_base+i+1,_lv3);}
         i=fj;curInd=0;
         continue;
       }
@@ -1153,7 +1264,7 @@ function parseMarkdown(src,_lv,opts,_base){
            @@ begin color 由 _scanBeginBlock 整对零宽露出（禁同族，
            行内 @@ color 就是就近覆盖，块级自嵌套无意义）。 */
         html+='<div class="mde-color" style="color:'+cval+'">'+
-          parseMarkdown(cinner.join('\n'),_lv,opts,_base+i+1)+'</div>';
+          parseMarkdown(cinner.join('\n'),_lv,opts,_base+i+1,_lv3)+'</div>';
         i=cj;
         continue;
       }
@@ -1161,7 +1272,7 @@ function parseMarkdown(src,_lv,opts,_base){
         if(!cval)_dgE(i,'D211','color 色值非法：{X} 须为颜色名或 #rgb / #rrggbb');
         html+='<p>'+parseInline(line)+'</p>';
         var ctxt=cinner.join('\n');
-        if(ctxt.trim()){html+=parseMarkdown(ctxt,_lv,opts,_base+i+1);}
+        if(ctxt.trim()){html+=parseMarkdown(ctxt,_lv,opts,_base+i+1,_lv3);}
         i=cj;
         continue;
       }
@@ -1194,7 +1305,7 @@ function parseMarkdown(src,_lv,opts,_base){
       _dgZw(uinner);
       if(uclosed){
         html+='<div class="full-page" data-full-pos="'+(um[1]||'m')+'">'+
-          parseMarkdown(uinner.join('\n'),_LV.full,opts,_base+i+1)+'</div>';
+          parseMarkdown(uinner.join('\n'),_LV.full,opts,_base+i+1,_lv3)+'</div>';
         i=uj;
         continue;
       }
@@ -1237,7 +1348,7 @@ function parseMarkdown(src,_lv,opts,_base){
         if(pgclosed){
           _pgRegSeq++;
           html+='<div class="page-region" data-pn="'+_pgn+'" data-pr-id="pr'+_pgRegSeq+'">'+
-            parseMarkdown(pginner.join('\n'),_LV.page,opts,_base+i+1)+'</div>';
+            parseMarkdown(pginner.join('\n'),_LV.page,opts,_base+i+1,_lv3)+'</div>';
           i=pgj;
           continue;
         }
@@ -1381,7 +1492,7 @@ function parseMarkdown(src,_lv,opts,_base){
                   _mgHtml+='<div class="mde-color" style="color:'+_mgA.color+'">';
                 }
               }
-              if(_mgSegs[_ms].c.length){_mgHtml+=parseMarkdown(_mgSegs[_ms].c.join('\n'),_mgLv,opts,_base+_mgSegs[_ms].at);}
+              if(_mgSegs[_ms].c.length){_mgHtml+=parseMarkdown(_mgSegs[_ms].c.join('\n'),_mgLv,opts,_base+_mgSegs[_ms].at,_lv3);}
               _mgPrev=_so;
             }
             for(var _cl3=_mgPrev.length-1;_cl3>=0;_cl3--){_mgHtml+='</div>';}
@@ -1430,7 +1541,7 @@ function parseMarkdown(src,_lv,opts,_base){
                }else{
                  /* 显性（v2.6.12）：表格原文照原样渲染成真表格。行列裁剪
                     (RxC) 只作用于 data-dp-val，屏幕显示整张原表 */
-                 dsp='<div class="mde-dp mde-dp-block"'+dattrs+'>'+parseMarkdown(_dpTableSrc(dmm[5]),_lv,null,0)+'</div>';
+                 dsp='<div class="mde-dp mde-dp-block"'+dattrs+'>'+parseMarkdown(_dpTableSrc(dmm[5]),_lv,null,0,_lv3)+'</div>';
                  dspBlock=true;
                }
              }
@@ -1468,7 +1579,7 @@ function parseMarkdown(src,_lv,opts,_base){
       var _qAt=i;
       var quote=[];
       while(i<lines.length && /^[ ]*>/.test(lines[i])){quote.push(lines[i].replace(/^[ ]*>[ ]?/,''));i++;}
-      html+='<blockquote>'+parseMarkdown(quote.join('\n'),_lv,opts,_base+_qAt)+'</blockquote>';
+      html+='<blockquote>'+parseMarkdown(quote.join('\n'),_lv,opts,_base+_qAt,_lv3)+'</blockquote>';
       curInd=IPX.quote;
       continue;
     }
@@ -1485,7 +1596,7 @@ function parseMarkdown(src,_lv,opts,_base){
       html+=lst[0];i=lst[1];olSeq=lst[2];curInd=IPX.li;continue;
     }
     var para=[];
-    while(i<lines.length && !/^[ ]*$/.test(lines[i]) && !/^```/.test(lines[i]) && !/^(#{1,6})[ ]+/.test(lines[i]) && !/^[ ]*>/.test(lines[i]) && !/^[ ]*([-+]|[0-9]+\.)[ ]+/.test(lines[i]) && !/^[ ]{0,3}<<<\s*$/.test(lines[i])
+    while(i<lines.length && !/^[ ]*$/.test(lines[i]) && !_fenceLen(lines[i]) && !/^(#{1,6})[ ]+/.test(lines[i]) && !/^[ ]*>/.test(lines[i]) && !/^[ ]*([-+]|[0-9]+\.)[ ]+/.test(lines[i]) && !/^[ ]{0,3}<{3,}[ ]*$/.test(lines[i])
       /* v2.13.2 @@ 家族块（begin/end/caption/blank/meta）紧贴上一行文字时同样终断
          段落——否则"必须独占一行"的块被段落收集器整条吞进 <p>，标记原样
          露出（@@ blank{1} 紧贴正文即中此招）。行内 @@ color / @@ MDE 不在此列

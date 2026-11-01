@@ -65,7 +65,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 119  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 120  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 # MSIX 商城版判定（微软商店政策 11.16 的"报告 AI 生成内容"入口用）：
 # 商城包与侧载包恒落在 WindowsApps 之下，Release 安装包/便携形态不会。
@@ -217,6 +217,38 @@ except Exception as _e:
             _f.write(repr(_e))
     except Exception:
         pass
+
+
+# 外部 Markdown → 本方言 转换器（v2.26.0）。纯函数、无 IO，导入失败不影响编辑器本体，
+# 只让「导入」入口报错。函数名加下划线：打包时与 _smd / md_meta 同一套白名单。
+try:
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    import md_convert as _conv
+except Exception as _e:
+    _conv = None
+    try:
+        os.makedirs(RUNTIME_DIR, exist_ok=True)
+        with io.open(os.path.join(RUNTIME_DIR, "_conv.err"), "w", encoding="utf-8") as _f:
+            _f.write(repr(_e))
+    except Exception:
+        pass
+
+
+def _read_text_any(path):
+    """按常见编码读文本文件，读不干净也不抛：最后一步 errors=replace。
+
+    外部 Markdown 来源杂（网页复制、Windows 记事本、老编辑器），BOM 与 GBK
+    都遇得到。宁可个别字符变形，也不让导入直接失败。
+    """
+    for enc in ("utf-8-sig", "utf-8", "gb18030"):
+        try:
+            with io.open(path, "r", encoding=enc, newline="") as f:
+                return f.read()
+        except (UnicodeDecodeError, LookupError):
+            continue
+    with io.open(path, "r", encoding="utf-8", errors="replace", newline="") as f:
+        return f.read()
 
 
 def _rewrite_assets_ref(text, old, new):
@@ -1361,6 +1393,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, html, "text/html; charset=utf-8",
                        {"Cache-Control": "no-store"})
             return
+        if u.path == "/api/convert-mapping":
+            # 「导入」界面的默认映射表。左边可改、右边只读——右边是方言标记
+            # 和它的呈现形式，属于方言本体，不许用户动。
+            try:
+                if _conv is None:
+                    self._send(200, json.dumps({"ok": False, "groups": [],
+                                                "error": "转换模块不可用"},
+                                               ensure_ascii=False))
+                    return
+                self._send(200, json.dumps({"ok": True, "groups": _conv.mapping_table()},
+                                           ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
+            return
         if u.path == "/api/version":
             # sessions：当前活跃页面会话数（页面加载完成即发首个 ping 登记）。
             # 启动画面据此判断"窗口真正加载出来了"再淡出（v1.11.1）。
@@ -1927,6 +1974,39 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if u.path in ("/api/ping", "/api/bye"):
             # sendBeacon 走 POST（pagehide 心跳/卸载通知），路由与 GET 同一实现
             self.do_GET()
+            return
+        if u.path == "/api/convert" or u.path == "/api/convert-file":
+            # 外部 Markdown → 本方言。两种来源同一个核心：
+            #   /api/convert       body={text, config?}  粘贴进来的文本
+            #   /api/convert-file  body={path, config?}  文件（与「打开」同一套路径）
+            # 只做语法映射，不改解析器、不碰排版面板（见 Temp/_taskmap_mdconv.md 红线）。
+            try:
+                raw = self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0)
+                obj = json.loads(raw.decode("utf-8")) if raw else {}
+                if _conv is None:
+                    self._send(200, json.dumps({"ok": False, "error": "转换模块不可用"},
+                                               ensure_ascii=False))
+                    return
+                cfg = obj.get("config") or None
+                p = ""
+                if u.path == "/api/convert-file":
+                    p = (obj.get("path") or "").strip()
+                    if not p or not os.path.isfile(p):
+                        self._send(400, json.dumps({"ok": False, "error": "文件不存在"},
+                                                   ensure_ascii=False))
+                        return
+                    text = _read_text_any(p)
+                else:
+                    text = obj.get("text", "")
+                out = _conv.convert(text, cfg)
+                res = {"ok": True, "text": out, "srcBytes": len(text), "outBytes": len(out)}
+                if p:
+                    res["path"] = p
+                    res["name"] = os.path.basename(p)
+                self._send(200, json.dumps(res, ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
             return
         if u.path == "/api/ui-settings":
             # UI 状态增量合并写入：body={key:value}，value=null 表示删除该键。

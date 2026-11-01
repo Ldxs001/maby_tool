@@ -24,6 +24,7 @@ front matter 还原成原文放回文件头（不渲染）。该函数只依赖�
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -201,7 +202,7 @@ def main():
         fp = os.path.join(HERE, fn)
         if os.path.isfile(fp):
             with io.open(fp, "r", encoding="utf-8", errors="replace") as f:
-                reg.append({"src": f.read(), "window": META_ON})
+                reg.append({"src": f.read(), "window": META_ON, "name": fn})
     # 构造样本：专攻"文首/正文中的 ---"
     reg += [
         {"src": "---\n\n正文\n\n---\n\n结尾"},
@@ -215,12 +216,22 @@ def main():
     {"src": "@@ begin color red\n文字\n@@ end color"},
     {"src": "@@ caption{l} 表 1　标题\n| a | b |\n|---|---|\n| 1 | 2 |"},
     ]
+    for _k, _o in enumerate(reg):
+        _o.setdefault("name", "构造%02d" % _k)
     if os.path.isfile(PARSER_OLD):
         old = run(PARSER_OLD, reg)
         new = run(PARSER_NEW, reg)
         diff = [i for i in range(len(reg)) if old[i]["html"] != new[i]["html"]]
-        ck("T15 无元数据文档：改前改后渲染逐字节相同（%d 份样本）" % len(reg),
-           not diff, "差异索引 %s" % diff)
+        # v2.25.0 反引号「整串读 + 按长度配对」：含 ` ``` `（单反引号包三反引号）
+        # 或 `\``（转义反引号）的文档渲染必然改变，且方向是修复——旧版把三个
+        # 反引号拆成 `` + ` 去抢后面的反引号，产出错位 <code> 与漏出的 @@C 占位。
+        # 这不是"存量文档不能变"要保护的对象，但必须逐条点名，不许沉默放行。
+        ALLOW = {"README.md", "CHANGELOG.md"}
+        unexpected = [reg[i]["name"] for i in diff if reg[i]["name"] not in ALLOW]
+        ck("T15 无元数据文档：除已声明的反引号升级样本外渲染逐字节相同（%d 份）" % len(reg),
+           not unexpected, "未声明差异 %s" % unexpected)
+        leak = [reg[i]["name"] for i in diff if re.search(r"@@C\d+@@", new[i]["html"])]
+        ck("T15b 反引号升级样本不得残留 @@C 占位（修复的硬证据）", not leak, "残留 %s" % leak)
     else:
         ck("T15 阳性对照可用（备份解析器存在）", False, PARSER_OLD)
 
