@@ -47,14 +47,24 @@ MSIX_EXCLUDE_DIRS = {
 }
 
 # 商城徽标（PIL 从 md-editor.ico 派生）。
+# 注意：tile 内**不要再缩边**。Windows 绘制 tile 时会自己加 padding，
+# 图标自己在内部再缩一圈，结果是文件/开始菜单里只剩中间一小块
+# （v2.26.0 及之前的 0.88 就吃了这个亏）。
 LOGOS = [
-    # (文件名, 宽, 高) —— 高为 0 表示按宽等比放中间（wide tile 用）
+    # (文件名, 宽, 高)
     ("Square44x44Logo.png", 44, 44),
     ("Square150x150Logo.png", 150, 150),
     ("Wide310x150Logo.png", 310, 150),
     ("LargeTile.png", 310, 310),
     ("StoreLogo.png", 50, 50),
 ]
+
+# 文件类型图标：清单里 FileTypeAssociation 若不给 Logo，Windows 会拿
+# Square44x44Logo 顶替，于是 .md 在资源管理器里显示成「应用图标」而非
+# 「文件图标」。这里单独派生一套，且必须多尺寸 targetsize 变体——
+# 只给一张大图，小视图（16/24/32）会被硬缩，点阵字必糊。
+FILE_TYPE_ICON = "MdFileIcon"
+FILE_TYPE_ICON_SIZES = [16, 24, 32, 48, 64, 128, 256]
 
 MANIFEST_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
 <Package
@@ -95,9 +105,10 @@ MANIFEST_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
       <Extensions>
         <uap3:Extension Category="windows.fileTypeAssociation">
           <uap3:FileTypeAssociation Name="mddoc">
+            <uap:Logo>assets\\MdFileIcon.png</uap:Logo>
             <uap:SupportedFileTypes>
-              <uap:FileType>.md</uap:FileType>
-              <uap:FileType>.smd</uap:FileType>
+            <uap:FileType>.md</uap:FileType>
+            <uap:FileType>.smd</uap:FileType>
             </uap:SupportedFileTypes>
           </uap3:FileTypeAssociation>
         </uap3:Extension>
@@ -142,13 +153,48 @@ def make_logos(dst_dir):
     os.makedirs(dst_dir, exist_ok=True)
     for name, w, h in LOGOS:
         canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        # 图标按 88% 缩放留呼吸边（商城规范建议 tile 内留边）
-        inner_w, inner_h = int(w * 0.88), int(h * 0.88)
-        scale = min(inner_w / best.size[0], inner_h / best.size[1])
+        # 铺满：不再乘系数。见 LOGOS 上方注释。
+        scale = min(w / best.size[0], h / best.size[1])
         nw, nh = max(1, int(best.size[0] * scale)), max(1, int(best.size[1] * scale))
         im = best.resize((nw, nh), Image.LANCZOS)
         canvas.paste(im, ((w - nw) // 2, (h - nh) // 2), im)
         canvas.save(os.path.join(dst_dir, name))
+
+
+def make_file_type_icons(dst_dir):
+    """派生文件类型图标（.md / .smd 在资源管理器里显示的那一枚）。
+
+    直接从 ico 取对应尺寸的**原始档**，不缩放——ico 里 16/24/32 是单独
+    画的点阵字形，缩放会糊。基名给 256 档，各 targetsize 给对应档。
+    """
+    from PIL import Image
+    ico_path = os.path.join(SRC, "md-editor.ico")
+    ico = Image.open(ico_path)
+    have = sorted(ico.info.get("sizes") or {(256, 256)})
+    have_px = sorted({s[0] for s in have}) or [256]
+    os.makedirs(dst_dir, exist_ok=True)
+
+    def pick(px):
+        cand = [s for s in have_px if s >= px]
+        return cand[0] if cand else have_px[-1]
+
+    written = 0
+    for px in FILE_TYPE_ICON_SIZES:
+        real = pick(px)
+        try:
+            # IcoImageFile.getimage 直接解出该档原始位图，不经过缩放
+            im = ico.ico.getimage((real, real)).convert("RGBA")
+        except Exception:
+            probe = Image.open(ico_path)
+            probe.size = (real, real)
+            im = probe.convert("RGBA")
+        if im.size != (px, px):
+            im = im.resize((px, px), Image.LANCZOS)
+        name = ("%s.png" % FILE_TYPE_ICON) if px == 256 else \
+               ("%s.targetsize-%d.png" % (FILE_TYPE_ICON, px))
+        im.save(os.path.join(dst_dir, name))
+        written += 1
+    return written
 
 
 def _clear_win_attrs(root):
@@ -205,7 +251,9 @@ def stage_msix(ver):
             n += 1
     _clear_win_attrs(dst)          # 隐藏文件会被 makeappx 丢弃，见函数注释
     make_logos(os.path.join(dst, "assets"))
-    print("msix staging: %d files + 5 logos" % n)
+    n_fti = make_file_type_icons(os.path.join(dst, "assets"))
+    print("msix staging: %d files + %d logos + %d file-type icons"
+          % (n, len(LOGOS), n_fti))
     return dst
 
 
