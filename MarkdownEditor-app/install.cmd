@@ -121,6 +121,17 @@ reg add "HKCU\Software\Classes\MDViewer.smd\DefaultIcon" /ve /t REG_SZ /d "%HERE
 reg add "HKCU\Software\Classes\MDViewer.smd\shell\open\command" /ve /t REG_SZ /d "%HERE%\MarkdownEditor.exe \"%%1\"" /f
 reg add "HKCU\Software\Classes\.smd\OpenWithProgids" /v MDViewer.smd /t REG_SZ /d "" /f >nul 2>&1
 
+REM ---- Master/template (.smdm) file association ----
+REM Same container as .smd, different identity: 双击 = 打开母版本身（改完 Ctrl+S 写回包）。
+reg add "HKCU\Software\Classes\.smdm" /ve /t REG_SZ /d "MDViewer.smdm" /f
+reg add "HKCU\Software\Classes\.smdm\shell\MDViewer" /ve /t REG_SZ /d "Open with Markdown Editor" /f
+reg add "HKCU\Software\Classes\.smdm\shell\MDViewer\command" /ve /t REG_SZ /d "%HERE%\MarkdownEditor.exe \"%%1\"" /f
+reg add "HKCU\Software\Classes\MDViewer.smdm" /ve /t REG_SZ /d "Markdown Editor Template" /f
+reg add "HKCU\Software\Classes\MDViewer.smdm" /v FriendlyTypeName /t REG_EXPAND_SZ /d "Markdown Editor" /f
+reg add "HKCU\Software\Classes\MDViewer.smdm\DefaultIcon" /ve /t REG_SZ /d "%HERE%\md-editor.ico" /f
+reg add "HKCU\Software\Classes\MDViewer.smdm\shell\open\command" /ve /t REG_SZ /d "%HERE%\MarkdownEditor.exe \"%%1\"" /f
+reg add "HKCU\Software\Classes\.smdm\OpenWithProgids" /v MDViewer.smdm /t REG_SZ /d "" /f >nul 2>&1
+
 echo [3/5] Create Desktop / Start Menu shortcuts...
 "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%HERE%\_mklnk.ps1" -Here "%HERE%"
 

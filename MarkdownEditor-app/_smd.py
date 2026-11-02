@@ -229,7 +229,9 @@ def write_doc(base_dir, text):
 
 
 def is_smd(path):
-    return str(path).lower().endswith(".smd")
+    """自包含容器判定：.smd（普通自包含文档）与 .smdm（母版）同一容器、
+    同一套读写代码，身份只由扩展名决定。改扩展名即改身份，不做校验。"""
+    return str(path).lower().endswith((".smd", ".smdm"))
 
 
 def _safe_entry(name):

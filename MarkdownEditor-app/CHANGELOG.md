@@ -11,6 +11,172 @@
 
 ---
 
+## v2.28.0（2026-11-02）
+
+**本次变更：预览页边参考线；`.smdm` 母版与「存为母版」；表格题注与表同宽同边；图表操作菜单与 WaveDrom 偶发空白**
+
+**新增**
+
+- **页边参考线（预览，默认关闭）**：排版面板「页面 · 纸张与边距」里纸张底色下一行，「页边参考线」开关。开启后 `#preview` 从「版心」放大成「一张纸」——宽 = 纸宽、四边 padding = 四个页边距，`box-sizing:border-box` 保证内容区宽逐像素不变（A4 实测 657.62px，关闭态 657.64px，差 0.02px 属浮点）；纸边界用 `outline` 1px 实线（浅纸 `#8d949b`、深纸 `#9aa0a6`），版心用 `::before` 的 `outline:1px dashed #e5484d` + `outline-offset:2px` 画（用 `border` 会正好压在段首第一个字上，实测如此）；`::after` 在顶边距带里写四边距实测值（`上 25 · 右 18 · 下 25 · 左 18 mm`），顶边距 < 7mm 时提到纸外上方。呼吸留白加在 `#preview` 自己的 `margin` 上而非 `#previewPane` 的 `padding`——后者会缩小 pane 的 content box，居中基准跟着移，实测正文横移 10px。
+  **参考线是标尺，不是版面**：只改 `#preview` 的宽与 padding，切换不重排（首字符相对内容盒偏移 0.0003px 以内）、不进 `ts-style`、不进导出 payload（`page.guide` 在导出前 `delete`），打印页盒仍 793.7×1122.5。
+- **`.smdm` 母版格式**：与 `.smd` **同一个 ZIP 容器**，只换扩展名即换身份（`_smd.is_smd` 接受两者，全部读写路径零分支复用）。从母版新建、或直接打开库里的母版时，`Ctrl+S` 写回包内而不是导出——状态栏标「母版：X」/「母版：X（未保存）」两态，不靠文件名猜。
+- **母版库**：`<RUNTIME_DIR>/templates/`，与 `runtime/ui-settings.json` 同源可写性——MSIX 落在 `WindowsApps` 只读时自动继承 `%LOCALAPPDATA%\MDEditor\runtime` 回退，不需要第二套判据。接口：`GET /api/templates`（列表 + `dir` + `writable`）、`POST /api/template/{new,delete,rename,import,export}`。库随卸载消失，因此「导出母版」是把库带走的手段。
+- **存为母版（另存为 ▾）**：`[另存为][▾]` 的 ▾ 里只有一项「存为母版」——库位置固定，这条路**不问目录、只取名**，点了就写进库并按 `.smdm` 打包（图片随正文进包）。没有同名时静默入库并 toast；撞名才弹框，预填原名、写明「直接确认将覆盖它」，改名即另存成新母版（不自动加序号——那会攒出一堆看不出区别的副本）。当前文档本身就是母版时，该项变「保存母版」，走 `Ctrl+S` 同一条写回路径，不派生副本。另存为模态因此**不再提供 `.smdm`**：母版库既然位置固定，就不该允许从别处塞进去。
+- **新建 split 按钮**：`[新建][▾]`，▾ 列出母版（名称 + 修改时间）+「管理母版…」，点条目按母版新建。左半边与 `Ctrl+N` 仍是空白文档。
+- **母版管理面板**：名称 / 图片数 / 大小 / 修改时间 + 五个行内动作（新建、编辑、改名、导出、删除）与底部三项（导入…、刷新、关闭）；删除走「点两次」确认（不用原生 `confirm`），落进库内 `.trash/` 带时间戳，不直删。
+- **文件关联**：`install.cmd` 注册 `.smdm`（ProgID `MDViewer.smdm`，右键菜单 + 默认关联 + 图标），`uninstall.cmd` 对应清理；MSIX `FileTypeAssociation` 增加 `.smdm`。
+- **图表操作菜单（⋯）**：四引擎（Mermaid / Graphviz / WaveDrom / Vega-Lite）右上角统一一个 ⋯，三项：另存为 SVG、另存为 PNG、复制源码。SVG 走克隆 + `foreignObject`→纯文本 + 计算样式内联（单文件打开不掉色），PNG 同一条 SVG 走 canvas 2x（与文档导出同口径），文件名取 `<文档名>-图<N>.svg`。按钮随**纸**的明暗翻转而非界面皮肤：深纸的 `--code-bg` 是 `#2a2a30`，与深色按钮底几乎同色会隐形。菜单是挂 `body` 下的单例，不吃文档色调（`md-tone-*` 在 `#preview` 子树改写 `--text`/`--border`/`--accent`，留在图内即「黑底深字」），顺带躲开 `.diagram` 的 `overflow-x:auto` 裁剪；滚动时菜单跟随按钮重定位而不是关闭。
+
+**变更**
+
+- 另存为的格式只剩 `.md` / `.smd`；母版不再走这条路，也就不再有「选 `.smdm` 时目录该切到哪」的问题（原 `_svSyncDir()` / `_svAutoDir` 一套目录推断随之删除）。从母版另存出来时预选 `.smd`——同为单文件容器，图片不必另建同名目录。
+- **vega-embed 自带 actions 关闭**：`vegaEmbed(el, spec, {renderer:'svg', actions:false})`。原先 vega 一家自带 ⋯（Save as SVG/PNG、View Source、View Compiled Vega、Open in Vega Editor），与另外三家风格不一、导出项也不受控；收进统一菜单后不再渲染 `.vega-actions`，图表宽度也不再被 `has-actions` 的 38px 右内边距占去。
+
+**修复**
+
+- **WaveDrom 偶发整块空白**：分块增量渲染里 `mountDiagrams(div)` 排在 `if(fresh) preview.insertBefore(div,…)` 之前，而 `WaveDrom.RenderWaveForm(index, src, prefix)` 内部用 `document.getElementById(prefix+index)` 取容器——容器尚未入文档即拿到 `null`，抛 `Cannot read properties of null (reading 'childNodes')`。vendor 冷启动时回调走异步脚本队列、执行时 div 早已插入，所以只有「已加载 + 新块」这一组合必挂：编辑中新起 `##` 章节并在里面写波形图、或同一会话打开第二个含波形图的文档。改为先入文档再渲染。对照实测：冷启动 1/1、已加载 + 新增章 0/1（报错）、同一块内加图 2/2、回单块 1/1。与「作图耗时长」无关——`wavedrom.min.js` 仅 55KB，`RenderWaveForm` 为同步 DOM 拼装。
+- **表格题注与表格不同边**：`@@ table{50l:…}` 的宽与对齐写在 `<table>` 上，而 `.mde-tblwrap` 恒占满版心，题注跟着版心居中——居中表两中心恰好重合所以看不出来，左对齐实测偏 **+164px**、右对齐偏 **−132px**（329/658、395/658）。改为「宽与对齐归包裹层、`<table>` 填满包裹层」，与图片的 `figure`/`figcaption` 同构；三表实测中心差全部归零、题注宽 = 表宽。代价是窄表上的长题注会多折一行（51 字：41px → 62px）。打印侧不受影响：列宽走 `colgroup` + `data-mde-cols` 百分比重建，跨页续片实测仍为 329px（未弹回版心宽）。
+- **图表 ⋯ 的「另存为」点了毫无反应**：原先用 `<a download>` 触发浏览器下载，而内嵌窗口是 pywebview，`ALLOW_DOWNLOADS` 默认 `False`，`on_download_starting` 里直接 `args.Cancel = True`——文件不落盘、不弹框、不报错，等于什么都没发生（浏览器模式则悄悄进「下载」文件夹）。改为与导出 `.docx`／`.html` 同一条通道：先 `GET /api/pick-save` 让服务端弹原生另存为框取路径，再 `POST /api/fig-save` 写字节（`tmp` + `os.replace` 原子落盘），toast 回报完整路径。
+- **`#tplSaveOverlay` 隐藏态仍吃点击**：内联 `display:flex` 压过 `[hidden]` 的默认样式，遮罩「隐藏」时仍铺满全屏，工具栏整排点不动（实测 `#btnExportPaged` 被拦截）。补 `#tplSaveOverlay[hidden]{display:none !important;}`。
+- **`/api/template/export` 静默写错位置**：`os.path.abspath("")` 返回**当前工作目录**（一个看似合法的目录），`if not dst` 永不成立，导出件被写到进程 cwd 旁边而不是目标目录。改为先判空串再 `abspath`。
+- **母版身份在状态栏不可见**：打开或从母版新建时状态栏与标题一律显示文件名，容易误以为在改普通文档。改为 `母版：X`（直接打开母版，Ctrl+S 写回包）与 `母版：X（未保存）`（从母版新建或存为母版后还没落盘）两态。
+- **预览里 `@@ begin full` 的整页背景图被压扁**：拟页块高度取的是「版心高」`ph−mt−mb`，左右用负边距补到了纸宽、上下却没人补，背景图按 `background-size:100% 100%` 铺上去等于把纸的上下页边距砍掉。A4 实测块 **210×247mm**（r=0.8502）对纸面 **210×297mm**（r=0.7071），图被横向拉宽 **20%**。改为 `min-height`=**纸高**、上下 `padding`=页边距，块比例恒等于纸面比例：A4 210×297、A5 148×210、A3 297×420、B2 500×707、Letter 215.9×279.4、自定义逐档实测 r 与纸面一致（误差 0.0000–0.0002）。打印/PDF 不受影响——那边本就把背景图从块上剥下来贴 `.pagedjs_page` 整页。换纸后图是否变形只取决于图片自身比例：A/B 全系同为 √2，一张 A4 封面在 A5/B2 上偏 0.3% 内；Letter（0.7725）、Legal（0.6069）这类须改 `c` 裁切或 `o` 原始尺寸。
+
+**测试**
+
+- 新增 `_test_v228_guide.py` 29/29（关闭态几何、开启态纸宽/版心宽/四边 padding、版心线与 padding 内沿逐边相等、开关不重排、导出无参考线、打印页盒、深纸对比度 4.44/6.58）。
+- 新增 `_test_v228_template.py` 33/33（库可写、另存为落库、列表摘要、从母版取正文与图、另存 `.md` 图片跟随且引用改写、`.smdm` 不降级、改名撞名 409、删除进 `.trash`、导入导出往返字节一致、非法名 fail-closed）。
+- 新增 `_test_v228_tpl_ui.py` 28/28（双按钮与默认收起、菜单列母版、从母版新建后保存禁用、管理面板行列与目录行、编辑母版、另存为只剩两项、参考线与母版共存、**编辑母版后点保存真的写回包内 `doc.md` 且不旁生 `.md`**、**另存为 ▾ 只有「存为母版」一项 / 未命名直接入库 / 撞名才弹框 / 改名存成第二份 / 开着母版时该项变「保存母版」**）。
+- 新增 `_test_v228_cap.py` 15/15（50c/50l/60r 三表题注中心差 ≤1px、题注宽 = 表宽、长题注折行、无题注时宽度仍在 `<table>` 上、`100c` 不被缩窄、wrap 承载 width+margin、打印纸面表宽 ∈ {50%,60%,100%}、**跨页续片未弹回版心宽**、续片列宽与首片一致）。
+- 新增 `_test_v229_figacts.py` 11/11（四图都渲出 SVG 且都带 ⋯、vega 无 `.vega-actions`/`details`、菜单三项齐全、**SVG 经 pick-save → fig-save 真落盘到所选路径且含 `xmlns` 与内联 `fill`、无 `.part` 残渣、toast 回报路径**、**PNG 真落盘 + 魔数正确 + 2x 尺寸**、剪贴板内容 == `data-code`、切主题重渲后按钮仍齐全、**已加载 + 新增章的波形图不再挂**、分页产物无按钮且图已栅格化为 PNG）。
+- 顺带修正 `_rasterOne` 的取图口径：改用 `_diagSvg()` 跳过 ⋯ 按钮里的 14px 图标 svg（渲染失败只剩按钮时会把图标当图栅格化）。
+- 回归全绿：`_test_v227_table.py` 8/8、`_test_v227_table_print.py` 4/4、`_test_v227_after.py` 3/3、`_test_v2271_tone.py` 15/15、`_test_full_bg.py` 6/6、`_test_paged_embed_ui.py` 6/6、`_test_metadata.py` 70/70。
+- `_test_full_bg.py` T4 口径随修正改为「拟页块 = 一整张纸」：断言 `min-height`≈297mm、上下 `padding`≈25mm、块宽高比 ≈ 210:297，替掉原来「min-height≈247mm（页心高）」的旧期望（旧期望本身就是被修掉的缺陷）。多纸张对照另跑 A4/A5/A3/B2/Letter 五档，逐档块比例与 `PAPER_W_MM/PAPER_H_MM` 同值。
+- `_test_guide.py` 11/11：块级色那条改为只认示范段本身（`textContent` 含「块级第一段」），封面那行 `color w` 另挂的白字 `div.mde-color` 不再算进计数。
+
+---
+
+## v2.27.0（2026-11-02）
+
+**本次变更：移除预览分页提示；全文背景图与纸张底色；表格列宽指令 `@@ table`**
+
+**移除**
+
+- **预览分页提示（虚线）整体移除**：预览栏不再推演打印分页、不画横向虚线、排版面板不再有该开关。根因是路线错误——在预览 DOM 上反推 Paged.js 的断页决策属仿真，52 页标本逐页对照可测 19 页、均值偏差 66.6px、最大 +463.5/−317.0px（约半页），三轮规则补丁只把偏差从上百 px 收敛到 67px，无法收敛到可信区间。虚线状态机 281 行、覆盖层样式、开关与 i18n 一并删除；**对齐资产全部保留**（版心宽 = 纸宽 − 左右边距、15px/1.7 字体基准、`img` 与 `p:has(>img)` 版面规则、打印侧四条断页规则、表格预拆分），并在 `#preview` 基础规则处留下「预览与 `PAGED_BASE_CSS` 是同一份事实的两处落地」的维护纪律。
+
+**修复**
+
+- **`PagedConfig.after` 从未被调用（页码 / 目录 / 孤表头 / 背景贴图一起静默失效）**：v2.26.8 把分页器改成 `auto:false` + 手动 `preview()`，而 `after` 只在自动启动路径里触发。页码实测修前 0/12、修后 12/12 连续无叠加；目录页码、孤表头兜底、整页背景贴图同源同修。
+- **整页背景图三处断点**：① `{m:xxxxx}` 裸路径被解析器判非法 → fail-closed 整行露出（图未进渲染链）；② 相对路径不按文档目录解析，`/img` 只按工具目录找 → 404（正文图有前端 `fixLocalImages` 兜底，背景图没有，表现为「同样的相对路径正文图能显示、背景图不能」）；③ HTML 导出的背景代理 bug——整串 `path=...` 被当路径拼成 `file:////img?path=...` 死链，且 `style` 里的引号序列化成 `&quot;` 后正则匹配不到，该函数自引入起从未生效。修法：解析器支持裸路径、新增 `fixLocalBgs` 与导出链的 base 补全、背景代理先取 `path` 参数再按文档目录补全并兼容三种引号形态。实测预览 / 打印 / HTML 三出口 8/8。
+- **打印贴图竞态**：原实现挂在 `after` 内一次遍历，页盒未就位时 `closest` 为 null 就跳过且永不重试（同一文档连跑两次，一次贴上、一次全无）。改为逐轮重试至超时。
+- **深色纸下的背景图被盖住**：Paged.js 结构为 `page > sheet > content`，纸色若上给 `sheet`（铺满整页、page 的后代）会压住贴在 `page` 上的背景图；内容容器又带着 `!important` 背景色。纸色只上给 `page`，`sheet` 与内容层置透明——注意 Paged.js 克隆内容层时**不带 id**，选择器必须按类写。
+
+**新增**
+
+- **纸张底色（浅色 / 深色）**：作用于预览、HTML 导出、打印/PDF，**与界面深浅色解耦**——界面暗色时纸仍可是白的，因为纸是产出物。色值取现有两套主题；深色纸同时换表头 / 首列 / 代码块 / 引用块底色与边框色，用户自定义过表头颜色则不覆盖。规则写进 `ts-style`（导出链把同一份 CSS 送进两侧），三出口不可能配色不一致；页眉页脚等 margin box 单独上色，避免深色纸漏白条。
+- **表格列宽指令 `@@ table{表参:列宽方案}`**：`@@ table` 写在表格上方、`@@ caption` 紧随其下，两行独立不互相影响（不改动既有 `@@ caption` 语义）。表参 `50l` 与图片 `{40c}` 同构（`fill` 栏内失效）；列宽两式——`r(50|30|20)` 全列、项数须等于列数且合计 100；`s(1x30,5x10)` 指定列、未写列自适应、合计上限 85%（留 15%）、列号越界自动忽略。全部失败路径 fail-closed：规格行原文露出、表格按原样。
+- **打印侧列宽保全**：Paged.js 拆表不复制 `colgroup`，续片列宽会退化成等分。改为把列宽规格写进 table 属性，分页后按属性重建 `colgroup`。
+
+**测试**
+
+- 新增 `_test_v2271_bgpath.py` 8/8（三出口背景图）、`_test_v2271_tone.py` 15/15（两态纸 × 三出口）、`_test_v227_full.py` 8/8、`_test_v227_table.py` 8/8、`_test_v227_table_print.py` 4/4、`_test_v227_after.py` 3/3。
+- 回归全绿：`_test_full_bg.py` 6/6、`_test_paged_embed_ui.py` 6/6、`_test_lineno_ui.py` 7/7。
+- 实测数据：`r()` 三列 164/98/66px = 50/30/20（误差 0.2%）；`s()` 第 1 列 29.8%、第 5 列 10.0%；深色纸打印页盒 `#1a1a1c`、正文 `#e6e6e8`。
+
+---
+
+## v2.26.8（2026-11-02）
+
+**本次变更：打印表格预拆分（表头跨页重复 + colgroup 钉列宽 + 孤表头消灭）+ 预览/打印行高失配根因修复**
+
+**修复**
+
+- **预览/打印行高 1.21 倍失配（根因确认）**：打印容器 CSS 的 `overflow-wrap:anywhere`（容器与 `td` 两处）改变浏览器自动列宽算法的 min-content 计算 → 列宽分布不同 → 换行位置不同 → 同一表格行高实测全表 895 vs 1061（1.21 倍）。移除两处声明、换行规则逐字对齐预览后，行高逐行相等（预览全表 895 vs 打印拆片前 8 行 502 完全吻合）。此前 v2.26.6 的字体链/字号同步只对齐了字体，未对齐换行策略，属漏项。
+- **Paged.js 拆表三宗罪（规范欠账补齐）**：排版规范 §6.2 要求 `table{break-inside:auto}` 且 thead 跨页重复表头，Paged.js 实际行为实测三项全欠：① 拆片是全新 table，列宽按片内行重算（实测 col2 551→595px）；② 续页片不带表头（实测 51 页全部续片 theadH=0）；③ 表头可单独孤占一页。修法：打印前预拆分（见下），拆片列宽由 colgroup 钉死，续片克隆表头，规范行为落地。
+
+**新增**
+
+- **打印侧表格预拆分架构**（`md_server.py` 新模板 `PAGED_SPLIT_TMPL`，插在分页器启动之前）：① 等图片就绪（8s 兜底放行，图片高度影响推演）；② 钉版心宽（裸文档宽度=视口宽会全错，按纸宽钉 px）；③ 单元流推演（`.pblk` 下钻、包裹层当原子、续页扣表头高）；④ 遇未拆表跨页即按「表头 + 行子集」预拆——本页片留 fit 行并插 colgroup 钉列宽，剩余行装进克隆片（克隆 thead + colgroup），续片用 `div` 包裹层承载断页（实测 Paged.js 对内联 break-before 与 table 元素上的 break-before 一律无视，仅样式表中 div 上的生效）。⑤ 表头孤片双保险：预拆时 fit=0 走孤儿包裹整体推页；分页后钩子再兜底移除零行孤表头。
+
+**测试**
+
+- 实测（52 页打印标本）：输出 32 个表格碎片，6 张跨页表全部干净拆分——每片带表头、列宽两侧一致、行高与预览逐行相等；孤表头实测 2→1→0（兜底清除）。
+- 回归三套全绿：`_test_full_bg.py` 6/6、`_test_paged_embed_ui.py` 6/6、`_test_lineno_ui.py` 7/7。
+
+**说明**
+
+- 残余：预拆推演的 P/PRE 行级近似在代码块密集区存在累积漂移（实测约 200px 级），致个别未预拆表由 Paged.js 自然断页、续片无表头（52 页中 4 处），待推演精度专项处理。
+
+---
+
+## v2.26.7（2026-11-02）
+
+**本次变更：字体默认链零指定（版权专项）+ 字体下拉改本机真枚举 + 打印侧断页规则补全**
+
+**变更**
+
+- **打印侧断页规则补全四条**（`PAGED_BASE_CSS` 补齐排版规范要求，此前只落了部分规则）：① `blockquote{break-inside:avoid}`——引用块整块原子，放不下整体推下页；② `h2,h3,h4{break-after:avoid}` + `hr{break-after:avoid}`——小节标题与分隔线不落页末，落末时随下一块整体推页（链式 h2→h3 逐级回推）；③ `p{orphans:2;widows:2}`——跨页段断口两侧各保 2 行，断后不足 2 行上移、整段装不下 2 行则整段推页（单行 `li` 保持 1/1，否则会持续推页留白）；④ 超页长原子块（整块高于页心）整块起新页、逐页溢出到块底。落点：`md_server.py` `PAGED_BASE_CSS`。
+- **默认字体链去除全部显式字体点名**：四出口默认链统一为 `-apple-system,BlinkMacSystemFont,sans-serif`（macOS 命中系统字体、Windows 经 `sans-serif` 命中系统默认），渲染结果由用户机器自带字体决定，产品默认不指定任何具体字体。落点五处逐字同步：`markdown-editor.html` `--sans` 变量、HTML 单页导出、`md_server.py` `PAGED_BASE_CSS`、standalone HTML、克隆按钮 font 简写；docx 零改动（字体族取自 computed style 自动跟随）。背景：微软雅黑为北大方正设计，产品默认指定即进入授权区，打印/PDF 输出物商用传播同风险。
+- **字体下拉删硬编码清单**：删除 `FONT_OPTS`/`FONT_VALS` 硬编码 11 项（宋体/黑体/楷体等，含本机不存在的字体名与授权区点名）；下拉只剩「(默认)」+「本机字体」分组，分组由 `/api/fonts` 读 Windows 注册表 HKLM+HKCU 真枚举（实测 779 项，机制此前已有，本次去冗余）。
+- **旧存档值兼容**：旧硬编码时代的存档字体链（如 `SimSun,serif`）在新选项集无匹配时，`tsOpen` 回填注入「(存档) 首字体名」保留项——值不丢、不静默改写，改选后自然规范化。
+- **默认链两轮收敛**：首轮改为开源字体堆叠（Source Han Sans SC 等 8 项），终版简化为纯系统回落——产品不分发字体时，默认链列出用户机器上多半不存在的字体名没有意义。
+
+**测试**
+
+- UI 专项（无头浏览器）：下拉仅「(默认)」+「本机字体」779 项；旧存档值注入保留项可见且 `value` 保持 `SimSun,serif`。测试写 `localStorage` 会被服务端设置桥反向覆盖，旧值用例改走 `POST /api/ui-settings` 写共享设置库。
+- 回归：`_test_full_bg.py` 6/6、`_test_paged_embed_ui.py` 6/6、`_test_lineno_ui.py` 7/7。共享设置库测试值已清理。
+
+**说明**
+
+- 未安装中文字体的 Windows 经 `sans-serif` 隐式回落雅黑渲染——浏览器回落行为非产品指定；彻底闭环需随应用分发开源中文字体（OFL 可再分发，包体 +4~8MB），尚未定。
+
+---
+
+## v2.26.6（2026-11-02）
+
+**本次变更：`@@ begin full` 整页背景图（四出口）+ 预览/打印几何对齐校准**
+
+**新增**
+
+- **`@@ begin full` 整页背景图语法**：参数 `{[tmb]:![](图) [o|c|f] [九宫lt~rb]}`——`:` 为新旧文法判别器（无 `:` 只认 v2.13 老单字符 `t/m/b`，逐字兼容）；`o/c/f` = 原始尺寸/撑满（cover）/填充（100% 100%）；九宫两字母（`l/c/r × t/m/b`）定背景图在页面的位置，与内容位置 `t/m/b` 分属两个槽位；图片走正文图片同一条 `/img?path=` 管线；参数非法 fail-closed，标记行按原文露出。四出口落地：预览拟页块（flex 三档定位 + `min-height` = 页心高，`applyPaperWidth` 按「排版→页面」纸高−上下边距写入）；HTML 导出块衬（内联 `background-image` 单独正则代理为 `file:///`）；打印页盒后处理（`PagedConfig.after` 对 `closest('.pagedjs_page')` 贴背景 + 块内联清 none 防双画；`PAGED_BASE_CSS` 加 `print-color-adjust:exact` 防 Chromium 打印 economy 模式丢背景）；docx 出骨架不出背景（full 独占一页 = 节分隔 NEW_PAGE，上/中/下 = 节 `w:vAlign` oxml 插 docGrid 前）。验证：`_test_full_bg.py` 6/6、`_test_docx_full.py` 8/8。
+
+**修复**
+
+- **预览与打印不同构（三层根因，实测 56 页标本 52/54 页错位）**，三层叠加：① 预览 `#preview` 遗留 `padding:24px 32px` 老留白，预览栏宽未真正收进纸张版心口径（64px 级根因）；② 打印侧 `PAGED_BASE_CSS` 缺 15px 基准字号，回落 16px 致全块高度 ×16/15；③ 打印字体链回落 Times New Roman，表格行高实测 871→1173px——`PAGED_BASE_CSS` 与预览字体链/字号逐字同步（源码注释锚定同步关系）。收敛：预览正文宽逐像素=版心宽，块级 computed style 全文档对账零差异（table margin 差为 Paged.js 拆页伪影）。
+- **img 不同构**：预览 inline、打印 block——预览改 `display:block;margin:0 auto` + 补 `p:has(>img){margin:0}`（缺则每张图差一个段落 margin）。
+
+**测试**
+
+- 新增：`_test_full_bg.py` 6 条、`_test_docx_full.py` 8 条，合计 14/14。
+- 回归：`_test_paged_embed_ui.py` 6/6、`_test_meta_shell.py` 4/4、`_test_lineno_ui.py` 7/7。
+
+**说明**
+
+- 已知残差：run 渲染块（Mermaid/KaTeX 在打印 iframe 重新渲染，高度与预览独立）附近页边界可偏数百 px；代码块密集区断口存在渐偏，未定案。
+- `docs/MDEditor 使用指南.md`：十一章（一）背景图完整文档。
+
+---
+
+## v2.26.5（2026-11-02）
+
+**本次变更：分页预览内置（打印不再出外部浏览器）+ 编辑区行号 + 元数据空壳修复**
+
+**新增**
+
+- **分页预览内置**：打印按钮改为预览栏内嵌 iframe 装载 `document.paged.html`，顶部固定「打印」「退出分页」两按钮，打印 = `iframe.contentWindow.print()`；`@page` 纸张尺寸被系统打印对话框采纳（WebView2 实测：43 页标本纸张自动选 A4、缩放实际大小 100%；打印服务冷启动首次 14~36 秒预热，热状态约 1 秒）；Esc 退出。md_server.py 零改动。「移植 DOM 到编辑器再打印」路线废弃（屏幕态正常、print 媒体态 3481 页爆炸——Paged.js CSSOM 注入 × 变量作用域 × 打印媒体环境三重干扰）。验证：`_test_paged_embed_ui.py` 6 条（进入/分页页数/退出/仅编辑自动切分屏/Esc/冒烟）。
+- **编辑区行号**：排版面板「编辑区行号」开关（`tsCfg.lineno`，默认关）。gutter 复用分屏联动镜像层的 `mirrorTops[]`（逐逻辑行顶像素，软折行零近似，不另起测量管线），视口 ±100px 窗口渲染 + rAF，滚动仅平移重画可见窗；点击行号跳行（树走文本偏移）。`#editor.ln-on` 左 padding 72px。验证：`_test_lineno_ui.py` 7 条。
+
+**修复**
+
+- **元数据空壳致打印空白首页**：`@@ meta`/YAML front matter 区被剥离后残留空 `pblk`，空壳占第 1 页 + `h1{break-before:page}` 把首个标题顶到第 2 页，打印首页全空白。修法：删 zone 后清理无元素子节点且无文本的空块；YAML 区（打印/docx 整删）同口径；HTML 导出 zone 换 pre 不产生空壳，不受影响。验证：`_test_meta_shell.py` 4 条。
+- **行号开关读到未初始化设置**：渲染管线（镜像层）在 `tsCfg` 初始化前已跑（首轮 render 判据），行号开关改 localStorage 直读 + 缓存（`applyLineNo` 内失效）。
+
+**测试**
+
+- 新增 `_test_lineno_ui.py` 7 条、`_test_meta_shell.py` 4 条、`_test_paged_embed_ui.py` 6 条；设置类用例改走服务端设置桥（`POST /api/ui-settings`）并恢复默认态。
+
+---
+
 ## v2.26.4（2026-11-02）
 
 **本次变更：修复「题注在上」的长图打印时内容乱序与叠印**

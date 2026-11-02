@@ -13,7 +13,12 @@
     --accent-soft:rgba(122,162,247,.14); --code-bg:#2a2a30; --shadow:0 2px 12px rgba(0,0,0,.4);
     --quote-border:#3a3a44; --table-border:#3a3a44; --radius:10px;
     --mono:Consolas,Menlo,Monaco,"Courier New",monospace;
-    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    /* 默认字体零指定：纯系统回落（mac 命中 SF/苹方、Windows 经
+       sans-serif 命中系统默认中文——渲染什么由用户机器自带的字体决定，
+       产品不点名任何字体。微软雅黑系方正版权，产品默认指定即授权区；
+       用户想用从字体下拉「本机字体」分组自选，那是他自己的系统授权。
+       产品不分发任何字体文件，链里写一堆不存在的名字没有意义。 */
+    --sans:-apple-system,BlinkMacSystemFont,sans-serif;
   }
   body.light{
     --bg:#f7f6f3; --panel:#ffffff; --editor-bg:#fbfaf8; --preview-bg:#f7f6f3;
@@ -61,7 +66,18 @@
   #outline .lvl-2{padding-left:18px;}
   #outline .lvl-3{padding-left:30px; font-size:12px;}
   #editorPane{flex:1 1 0; border-right:1px solid var(--border);}
-  #previewPane{flex:1 1 0;}
+  #previewPane{flex:1 1 0; position:relative;}
+  /* 分页预览（内置）：iframe 承载 document.paged.html，工具条属编辑器 DOM，
+     不在任何打印管线内，绝无被印到纸面的可能 */
+  #pagedWrap{position:absolute; inset:0; display:flex; flex-direction:column;
+    background:var(--preview-bg); z-index:5;}
+  #pagedWrap[hidden]{display:none !important;}
+  #pagedBar{flex:0 0 auto; display:flex; align-items:center; gap:8px;
+    padding:6px 10px; border-bottom:1px solid var(--border); background:var(--panel);}
+  #pagedStat{color:var(--muted); font-size:12px;}
+  #pagedBar .pg-sp{flex:1;}
+  #pagedBar .tb-btn{padding:3px 12px; font-size:12px;}
+  #pagedFrame{flex:1 1 auto; width:100%; border:0; background:#fff;}
   #editor{
     display:block; width:100%; height:100%; border:none; outline:none; resize:none;
     background:var(--editor-bg); color:var(--text);
@@ -99,6 +115,30 @@
     tab-size:2; white-space:pre-wrap; word-wrap:break-word; box-sizing:border-box;
   }
   #mirror .ml{min-height:1.8em;}
+  /* v2.26.5 编辑区行号：gutter 盖在 #editorPane 左缘，行号只画视口内的行。
+     数据复用 #mirror 的 mirrorTops[]（逐逻辑行顶像素，软折行零近似），
+     不另起测量管线；滚动只平移 + 重画可见窗，大文档无忧。 */
+  #editorPane{position:relative;}
+  #edGutter{
+    position:absolute; left:0; top:0; bottom:0; width:44px; z-index:5;
+    overflow:hidden; background:var(--editor-bg);
+    border-right:1px solid var(--border); cursor:pointer;
+  }
+  #edGutterIn{position:absolute; left:0; top:0; width:100%; will-change:transform;}
+  #edGutterIn .gln{
+    position:absolute; right:9px; white-space:nowrap;
+    font-family:var(--mono); font-size:12px; line-height:1.8;
+    color:var(--muted); user-select:none;
+  }
+  #edGutterIn .gln:hover{color:var(--text);}
+  /* 行号开着：编辑器左让位（44 gutter + 28 原 padding）；镜像按新宽重测 */
+  #editor.ln-on{padding-left:72px;}
+  /* 版心几何与打印同构：本表里影响占位的规则（字体链、基准字号 15px、
+     行高 1.7、块间距、img 与 p:has(>img)）与 md_server.py 的 PAGED_BASE_CSS
+     是同一份事实的两处落地，改一侧必须同改另一侧——任一侧单独改，
+     预览与打印的同块高度即失配，实测表格行高差过 1.21 倍。
+     下面 24px 32px 只是窗口里的观感留白，applyPaperWidth 会在纸张模式下
+     覆写为 padding:0 并钉宽度=版心宽（纸宽−左右边距）。 */
   #preview{padding:24px 32px; max-width:820px; margin:0 auto;}
   body.view-edit #previewPane{display:none;}
   body.view-edit #editorPane{border-right:none;}
@@ -151,6 +191,49 @@
     background:none; border:none; padding:0; margin:0; text-align:left;
     color:#e06c75; font-size:12px; white-space:pre-wrap;
   }
+  /* v2.29.0 图表操作菜单：四引擎共用一套自建 ⋯（另存为 SVG/PNG、复制源码），
+     替代 vega-embed 自带 actions。.diagram 有 overflow-x:auto，菜单用 fixed
+     定位由脚本算坐标，避免被滚动容器裁掉。按钮默认半隐，免得压住图内容。 */
+  .markdown-body .diagram{position:relative;}
+  .mde-fig-acts{position:absolute; top:5px; right:5px; z-index:6;}
+  .mde-fig-btn{
+    width:22px; height:22px; padding:0; line-height:1; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    /* 颜色写死不用变量：按钮在图内，文档色调（md-tone-*）会在 #preview
+       子树改写 --text/--border/--accent，「暗 UI + 浅文档」时就成深底深字 */
+    border:1px solid rgba(255,255,255,.24); background:rgba(36,36,42,.92);
+    color:#d2d2da; font-size:14px; font-family:var(--sans);
+    box-shadow:0 1px 4px rgba(0,0,0,.20);
+    cursor:pointer; opacity:.55;
+    transition:opacity .12s, color .12s, border-color .12s, background .12s;
+  }
+  /* 纸张深色时翻转成浅色按钮。判据是**纸**的明暗而不是界面皮肤：
+     暗界面 + 白纸、浅界面 + 深纸都真实存在，按钮压在纸上，得跟纸走
+     （深纸的 --code-bg 是 #2a2a30，与深色按钮底几乎同色 = 隐形）。 */
+  .markdown-body.md-tone-dark .mde-fig-btn{
+    border-color:rgba(255,255,255,.32); background:rgba(255,255,255,.14);
+    color:#ececf2; box-shadow:0 1px 4px rgba(0,0,0,.45);
+  }
+  .markdown-body .diagram:hover .mde-fig-btn{opacity:1;}
+  .mde-fig-btn:hover{opacity:1; color:#fff; border-color:rgba(122,162,247,.85);}
+  .markdown-body.md-tone-dark .mde-fig-btn:hover{
+    background:rgba(255,255,255,.24); border-color:rgba(122,162,247,.9); color:#fff;
+  }
+  .mde-fig-acts[data-open] .mde-fig-btn{opacity:1;}
+  .mde-fig-menu{
+    position:fixed; z-index:60; min-width:124px; padding:4px;
+    display:flex; flex-direction:column; gap:1px;
+    background:var(--panel,#fff); border:1px solid var(--border); border-radius:8px;
+    box-shadow:0 10px 28px rgba(0,0,0,.22);
+  }
+  .mde-fig-menu[hidden]{display:none !important;}
+  .mde-fig-menu button{
+    display:block; width:100%; text-align:left; padding:6px 10px;
+    background:none; border:0; border-radius:5px; cursor:pointer;
+    color:var(--text); font-size:12.5px; font-family:inherit; white-space:nowrap;
+  }
+  .mde-fig-menu button:hover{background:var(--accent-soft);}
+  @media print{.mde-fig-acts{display:none !important;}}
   .markdown-body blockquote{
     margin:.9em 0; padding:.4em 1em; border-left:3px solid var(--accent);
     background:var(--accent-soft); border-radius:0 var(--radius) var(--radius) 0; color:var(--text);
@@ -175,11 +258,16 @@
     border:1px solid var(--table-border); padding:7px 12px; text-align:left;
   }
   .markdown-body th{background:var(--code-bg); font-weight:650;}
-  .markdown-body img{max-width:100%; border-radius:var(--radius); margin:.5em 0;}
-  /* 图片段不参与正文首行缩进（与 .diagram 块级容器口径统一锚定版心左边；
-     历史缺陷：真实图是 p 内行内 img 被 text-indent 推开两字符，图表块
-     却贴左边距——同为图却两种起点） */
-  .markdown-body p:has(>img){text-indent:0 !important;}
+  /* img 与打印 PAGED_BASE_CSS 同构：display:block + margin:0 auto（独占
+     块、版心居中）。两侧不一致则同一张图在预览与打印里占位不同：inline 的
+     上下 margin 不占布局、block 独占推流。max-height 打印侧有（cap+切片），
+     预览不设——长图预览全高。 */
+  .markdown-body img{display:block;margin:0 auto;max-width:100%; border-radius:var(--radius);}
+  /* 图片段不参与正文首行缩进，且段 margin 清零（与打印 PAGED_BASE_CSS
+     的 p:has(>img){margin:0} 同构——缺这条则图段两边各差一个 p margin，
+     预览与打印的图段占位不同；历史缺陷：真实图是 p 内行内 img 被
+     text-indent 推开两字符，图表块却贴左边距——同为图却两种起点） */
+  .markdown-body p:has(>img){text-indent:0 !important;margin:0;}
   /* 图片单图对齐（语法 {N c/l/r} 覆盖面板全局档；优先级高于 ts-style） */
   .markdown-body p:has(>img[data-img-align="center"]){text-align:center !important;}
   .markdown-body p:has(>img[data-img-align="left"]){text-align:left !important;}
@@ -241,9 +329,15 @@
      就是宽度参数（版心百分比已经"付过费"），栏内不再二次百分比，小图
      同样放大到栏宽。跨栏防断裂（打印/分页） */
   .markdown-body .fill-row{display:flex;gap:1em;margin:.6em 0;break-inside:avoid;}
-  /* v2.13 @@ begin full 独占一页块：预览无页概念，按普通块渲染
-     （分页导出时由 .full-page 分页规则撑满页心并垂直定位） */
-  .markdown-body .full-page{margin:1.5em 0;}
+  /* v2.13 @@ begin full 独占一页块。v2.26.6 预览升级为「拟页块」：flex 纵向
+     三档定位（data-full-pos，与分页导出/HTML 导出同源）+ min-height=页心高
+     （applyPaperWidth 按 排版→页面 纸高−上下边距 写入，预览栏宽=版心宽同源）；
+     背景图内联在块上（预览/HTML 导出块衬），打印由页盒后处理接管 */
+  .markdown-body .full-page{margin:1.5em 0;display:flex;flex-direction:column;
+    min-height:var(--mde-pgch,auto);}
+  .markdown-body .full-page[data-full-pos="t"]{justify-content:flex-start;}
+  .markdown-body .full-page[data-full-pos="m"]{justify-content:center;}
+  .markdown-body .full-page[data-full-pos="b"]{justify-content:flex-end;}
   /* v2.17.0 @@ begin page{…} 页区：预览无页概念，按普通块渲染
      （分页导出时由 .page-region 分页规则断页，页码由填充脚本按 data-pn 改写） */
   .markdown-body .page-region{margin:1.5em 0;}
@@ -328,6 +422,49 @@
     #openMoreMenu button{display:block;width:100%;text-align:left;padding:7px 14px;border:none;
       background:none;color:inherit;font:inherit;font-size:13px;cursor:pointer;border-radius:5px;}
     #openMoreMenu button:hover{background:var(--accent-soft);}
+    /* v2.28.0 新建▾（母版菜单）与管理模态。菜单样式与「打开▾」同源，
+       只是宽一些：条目里要放名称 + 修改时间两段。 */
+    /* 左半边「新建」的右内边距留下了十几像素空隙，三角看着像漂在外面；
+       负外边距把它拉回按钮边上（只动这一个按钮，不改共用的 .tb-btn） */
+    #btnNewMore,#btnSaveAsMore{margin-left:-5px;}
+    /* 「新建▾」与「另存为▾」共用一套下拉外观：两者都是 split 按钮的右半，
+       宽度与左右留白必须一致，否则两个三角看起来一大一小 */
+    #newMoreMenu,#saveAsMenu{position:fixed;z-index:120;min-width:240px;max-height:70vh;overflow:auto;
+      padding:4px;border-radius:8px;background:#23272f;
+      border:1px solid rgba(128,128,128,.34);box-shadow:0 10px 28px rgba(0,0,0,.42);}
+    body.light #newMoreMenu,body.light #saveAsMenu{background:#fff;}
+    #newMoreMenu[hidden],#saveAsMenu[hidden]{display:none !important;}
+    #newMoreMenu button,#saveAsMenu button{display:block;width:100%;text-align:left;padding:7px 14px;border:none;
+      background:none;color:inherit;font:inherit;font-size:13px;cursor:pointer;border-radius:5px;}
+    #newMoreMenu button:hover,#saveAsMenu button:hover{background:var(--accent-soft);}
+    #newMoreMenu .nmm-when{float:right;opacity:.5;font-size:11px;margin-left:18px;}
+    #newMoreMenu .nmm-sep,#saveAsMenu .nmm-sep{height:1px;background:rgba(128,128,128,.26);margin:4px 6px;}
+    #newMoreMenu .nmm-empty,#saveAsMenu .nmm-empty{padding:8px 14px;font-size:12px;opacity:.6;line-height:1.5;}
+    #tplOverlay[hidden]{display:none !important;}
+    /* 内联 display:flex 会压过 [hidden] 的默认样式——没有这条，隐藏中的遮罩仍然
+       铺满全屏并吃掉所有点击（实测工具栏整排点不动） */
+    #tplSaveOverlay[hidden]{display:none !important;}
+    #tplOverlay .tpl-wrap{width:760px;max-width:94vw;background:#23272f;border-radius:14px;
+      padding:24px 28px;box-shadow:0 24px 70px rgba(0,0,0,.55);}
+    #tplOverlay h3{margin:0 0 4px;font-size:21px;}
+    #tplOverlay .tpl-sub{font-size:12px;color:#8a93a6;line-height:1.6;margin-bottom:14px;word-break:break-all;}
+    #tplList{max-height:52vh;overflow:auto;border:1px solid rgba(128,128,128,.24);border-radius:8px;}
+    #tplList table{width:100%;border-collapse:collapse;font-size:13px;}
+    #tplList th{text-align:left;font-weight:600;color:#8a93a6;font-size:12px;
+      padding:8px 10px;position:sticky;top:0;background:#23272f;}
+    body.light #tplList th{background:#fff;}
+    #tplList td{padding:7px 10px;border-top:1px solid rgba(128,128,128,.16);vertical-align:middle;}
+    #tplList .tpl-name{font-weight:600;cursor:pointer;}
+    #tplList .tpl-name:hover{text-decoration:underline;}
+    #tplList .tpl-act{display:flex;gap:6px;flex-wrap:wrap;}
+    #tplList .tpl-btn{font-size:12px;padding:3px 9px;border-radius:5px;cursor:pointer;
+      border:1px solid rgba(128,128,128,.34);background:none;color:inherit;}
+    #tplList .tpl-btn:hover{border-color:var(--accent);}
+    #tplList .tpl-btn.danger:hover{border-color:#e5484d;color:#e5484d;}
+    #tplList .tpl-empty{padding:26px 12px;text-align:center;color:#8a93a6;font-size:13px;line-height:1.7;}
+    /* 底部沿用 .sv-btn 的结构（同色同交互），只是压到与行内按钮同一档字号：
+       17px 那是「另存为」那种大表单的量级，放在这张 13px 的表旁边像两个秤砣 */
+    #tplOverlay .sv-btn{padding:6px 16px;font-size:13px;border-radius:6px;}
 
     #importOverlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;
       align-items:flex-start;justify-content:center;overflow:auto;padding:18px 0;}
@@ -697,7 +834,7 @@
 <header id="toolbar">
   <div class="tb-group brand" title="本工具由 AI 辅助生成 (AI-assisted)">MDEditor</div>
   <div class="tb-group" id="fmtBtns"></div>
-  <div class="tb-group"><button id="btnNew" class="tb-btn" title="新建文档 (Ctrl+N)">新建</button></div>
+  <div class="tb-group"><span class="tb-split"><button id="btnNew" class="tb-btn" title="新建文档 (Ctrl+N)">新建</button><button id="btnNewMore" class="tb-btn tb-caret" title="从母版新建 / 管理母版">▾</button></span></div>
   <div class="tb-group right">
     <button id="btnView" class="tb-btn" title="视图切换">分屏</button>
     <button id="btnFollow" class="tb-btn" title="预览跟随编辑区滚动（仅分屏模式生效），点击开/关">跟随</button>
@@ -706,12 +843,12 @@
     <span class="tb-split"><button id="btnOpen" class="tb-btn" title="打开 .md 文件">打开</button><button id="btnOpenMore" class="tb-btn tb-caret" title="导入外部 Markdown：按本方言映射转换后放进编辑器">▾</button></span>
     
     
-    <button id="btnExportPaged" class="tb-btn" title="打印：生成分页版 HTML（纸张/页码/目录）并在浏览器打开，Ctrl+P 即可打印或存为 PDF">打印</button><button id="btnExportHtml" class="tb-btn" title="导出 HTML">.html</button><button id="btnExportDocx" class="tb-btn" title="导出 Word(.docx)：保留样式与可编辑公式">.docx</button>
+    <button id="btnExportPaged" class="tb-btn" title="打印：在预览栏生成分页预览（纸张/页码/目录），可直接打印或存为 PDF">打印</button><button id="btnExportHtml" class="tb-btn" title="导出 HTML">.html</button><button id="btnExportDocx" class="tb-btn" title="导出 Word(.docx)：保留样式与可编辑公式">.docx</button>
     <button id="btnLLM" class="tb-btn" title="AI 设置：润色 / 智能备注的后端与模型">AI</button>
     <button id="btnTypeset" class="tb-btn" title="排版设置：字体/表格/缩进/自动落盘">排版</button>
     <button id="btnRun" class="tb-btn" title="low runner：写/生成 Python run，供 @@ MDE 数据点与执行点调用">run</button>
     <button id="btnSave" class="tb-btn" title="保存（Ctrl+S）">保存</button>
-    <button id="btnSaveAs" class="tb-btn" title="另存为…">另存为</button>
+    <span class="tb-split"><button id="btnSaveAs" class="tb-btn" title="另存为…">另存为</button><button id="btnSaveAsMore" class="tb-btn tb-caret" title="存为母版">▾</button></span>
   </div>
 </header>
 <main id="main">
@@ -740,6 +877,15 @@
   </section>
   <section id="previewPane" class="pane">
     <article id="preview" class="markdown-body"></article>
+    <div id="pagedWrap" hidden>
+      <div id="pagedBar">
+        <span id="pagedStat"></span>
+        <span class="pg-sp"></span>
+        <button id="pagedPrintBtn" class="tb-btn" title="打印这份分页文档（纸张/页码在「排版」面板配置）">打印</button>
+        <button id="pagedExitBtn" class="tb-btn" title="退出分页预览，回到普通预览">退出分页</button>
+      </div>
+      <iframe id="pagedFrame" title="分页预览"></iframe>
+    </div>
   </section>
 </main>
 <footer id="status">
@@ -783,6 +929,38 @@
     </div>
   </div>
   <div id="openMoreMenu" hidden><button id="openMoreImport">导入…</button></div>
+  <div id="newMoreMenu" hidden></div>
+  <div id="saveAsMenu" hidden></div>
+  <!-- v2.28.0 存为母版：只有撞名时才弹。母版库位置固定、无人可选，
+       所以这里问的是「叫什么」，不问「存哪」——存哪是库的事。 -->
+  <div id="tplSaveOverlay" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:75;display:flex;align-items:center;justify-content:center;">
+    <div style="width:460px;max-width:92vw;background:#23272f;border-radius:14px;padding:22px 24px;box-shadow:0 24px 70px rgba(0,0,0,.55);">
+      <div style="font-size:20px;font-weight:700;margin-bottom:12px;">存为母版</div>
+      <div id="tplSaveHint" style="font-size:14px;line-height:1.6;color:#8a93a6;margin-bottom:12px;"></div>
+      <div style="font-size:14px;color:#8a93a6;margin-bottom:6px;">母版名称</div>
+      <input id="tplSaveName" type="text" style="width:100%;box-sizing:border-box;background:#1a1d24;color:#e8eaed;border:1px solid #3a4358;border-radius:8px;padding:9px 12px;font-size:16px;">
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px;">
+        <div id="tplSaveCancel" class="sv-btn">取消</div>
+        <div id="tplSaveGo" class="sv-btn sv-primary">存为母版</div>
+      </div>
+    </div>
+  </div>
+  <div id="tplOverlay" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:70;display:flex;align-items:center;justify-content:center;">
+    <div class="tpl-wrap">
+      <h3>母版</h3>
+      <div class="tpl-sub" id="tplDirLine"></div>
+      <div id="tplList"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:16px;">
+        <div style="display:flex;gap:8px;">
+          <div id="tplImport" class="sv-btn">导入…</div>
+          <div id="tplRefresh" class="sv-btn">刷新</div>
+        </div>
+        <div style="display:flex;gap:10px;">
+          <div id="tplClose" class="sv-btn sv-primary">关闭</div>
+        </div>
+      </div>
+    </div>
+  </div>
   <div id="importOverlay" hidden>
    <div id="importPanel">
     <div class="ts-head"><span>导入 · 外部 Markdown 转换</span><span class="ts-head-r"><button id="importClose" title="关闭">×</button></span></div>
@@ -875,6 +1053,8 @@
      <div class="ts-row"><label>纸张</label><span class="ts-ctl"><select id="tsPaper"><option>A4</option><option>A3</option><option>A5</option><option>B5</option><option>B4</option><option>Letter</option><option>Legal</option><option>Ledger</option><option>A0</option><option>A1</option><option>A2</option><option>B0</option><option>B1</option><option>B2</option><option>B3</option><option value="custom">自定义</option></select></span></div>
      <div class="ts-row" id="tsCustomRow" hidden><label>自定义宽 × 高</label><span class="ts-ctl"><span class="ts-num"><input id="tsPw" type="number" min="50" max="3000" step="1" placeholder="宽"></span><span class="ts-num"><input id="tsPh" type="number" min="50" max="3000" step="1" placeholder="高"><i>mm</i></span></span></div>
      <div class="ts-row"><label title="页边距 上/右/下/左（mm）">页边距</label><span class="ts-ctl"><span class="ts-num"><input id="tsMt" type="number" min="0" max="100" step="0.5" value="25"></span><span class="ts-num"><input id="tsMr" type="number" min="0" max="100" step="0.5" value="18"></span><span class="ts-num"><input id="tsMb" type="number" min="0" max="100" step="0.5" value="25"></span><span class="ts-num"><input id="tsMl" type="number" min="0" max="100" step="0.5" value="18"><i>mm</i></span></span></div>
+     <div class="ts-row"><label title="纸张底色：纸面本身的浅/深两态。作用于预览、HTML 导出、打印/PDF（Word 不动，由 Word 主题管）。与界面深浅色**无关**——界面暗色时纸也可以是浅色，因为纸是产出物、不是界面">纸张底色</label><span class="ts-ctl"><select id="tsTone"><option value="light">浅色 · 白纸黑字</option><option value="dark">深色 · 深底浅字</option></select></span></div>
+     <div class="ts-row"><label title="页边参考线：在预览里画出这张纸的四边与版心。纸边界=灰实线，版心=红虚线，顶边距带里标注四边距实测值。**只作用于预览**——打印、HTML、Word 导出都不含参考线。开启后预览栏按整张纸显示（会出横向滚动条），文字位置一个像素不动">页边参考线</label><span class="ts-ctl"><input id="tsGuide" class="ts-sw" type="checkbox"></span></div>
      </div>
      <div class="ts-card">
      <div class="ts-card-h">页面 · 页码</div>
@@ -897,6 +1077,7 @@
      <div class="ts-card">
      <div class="ts-card-h">保存</div>
      <div class="ts-row"><label title="自动落盘间隔（分钟，0=仅手动）">自动落盘间隔</label><span class="ts-ctl"><span class="ts-num"><input id="tsAuto" type="number" min="0" max="60" step="1"><i>分</i></span></span></div>
+     <div class="ts-row"><label title="在编辑区左缘显示行号（按视觉行标在逻辑行首行上，长行折叠不重复计号）；点行号跳到该行">编辑区行号</label><span class="ts-ctl"><input id="tsLineNo" class="ts-sw" type="checkbox"></span></div>
      </div>
      <div class="ts-card">
      <div class="ts-card-h">段间距</div>
@@ -1099,6 +1280,180 @@
    填充脚本靠它区分「同一个区的续页」与「另一个区」（两个相邻 {1} 区各自
    从 1 起）。只增不复位——同一次渲染内唯一即可，多处递归解析也不会撞号。 */
 var _pgRegSeq=0;
+/* v2.26.6 full 背景参数解析：{[tmb]:![](图) [o|c|f] [九宫]}。
+   返回 {pos:'t'|'m'|'b', bg:null|{img,mode,pos}}；参数非法返回 null（fail-closed，
+   标记行按原文露出）。':' 是新旧文法判别器：无 ':' 只认老单字符 t/m/b（逐字
+   兼容 v2.13）。mode 短写 o=原始尺寸 c=撑满(cover) f=填充(100% 100%)，长名
+   同义；九宫两字母 l/c/r × t/m/b（背景图在页上的位置，与内容位置 t/m/b 分属
+   两个槽位，勿混）。图片走正文图片同一条 /img?path= 管线。 */
+var FULL_BG_SIZE={o:'auto',c:'cover',f:'100% 100%'};
+var FULL_BG_POS={lt:'left top',ct:'center top',rt:'right top',
+  lc:'left center',cc:'center center',rc:'right center',
+  lb:'left bottom',cb:'center bottom',rb:'right bottom'};
+function _fullParseParam(raw){
+  if(raw===null||raw===undefined){return {pos:'m',bg:null};}
+  var s=String(raw);
+  var ci=s.indexOf(':');
+  if(ci<0){
+    var t0=s.trim();
+    if(!t0){return {pos:'m',bg:null};}
+    if(!/^[tmb]$/.test(t0)){return null;}
+    return {pos:t0,bg:null};
+  }
+  var lp=s.slice(0,ci).trim(),rp=s.slice(ci+1).trim();
+  if(lp&&!/^[tmb]$/.test(lp)){return null;}
+  /* v2.27.0 两种写法并存：
+     ① 完整图片语法 m:![](C:/a/b.png) [o|c|f] [九宫]
+     ② 裸路径       m:C:/a/b.png      [o|c|f] [九宫]
+     裸路径必须先于参数剥离判定，且剥离后剩余段必须仍像路径（含 \ / .），
+     否则 "c" 这种文件名会被误当成 cover 参数剥空。 */
+  var m=rp.match(/^!\[[^\]]*\]\(([^()]*)\)(?:[ \t]+([^ \t]+))?(?:[ \t]+([^ \t]+))?[ \t]*$/);
+  var imgPath=null,tokMode=null,tokPos=null;
+  if(m&&m[1]){
+    imgPath=m[1];tokMode=m[2]||null;tokPos=m[3]||null;
+  }else{
+    var toks=rp.split(/[ \t]+/);
+    if(toks.length>1&&FULL_BG_POS[toks[toks.length-1]]){
+      tokPos=toks.pop();
+    }
+    if(toks.length>1&&/^(o|origin|c|cover|f|fill)$/i.test(toks[toks.length-1])){
+      var restPath=toks.slice(0,-1).join(' ');
+      if(/[\\/.]/.test(restPath)){tokMode=toks.pop();}
+    }
+    imgPath=toks.join(' ').replace(/^["']|["']$/g,'');
+    if(!imgPath){return null;}
+  }
+  var mode='c',pos='cc';
+  if(tokMode){
+    if(/^(o|origin)$/i.test(tokMode)){mode='o';}
+    else if(/^(c|cover)$/i.test(tokMode)){mode='c';}
+    else if(/^(f|fill)$/i.test(tokMode)){mode='f';}
+    else{return null;}
+  }
+  if(tokPos){
+    if(FULL_BG_POS[tokPos]){pos=tokPos;}
+    else{return null;}
+  }
+  return {pos:(lp||'m'),bg:{img:imgPath,mode:mode,pos:pos}};
+}
+/* full 背景属性 + 内联样式：预览/HTML 导出走块衬（同一份内联样式随克隆走）；
+   打印/分页由 Paged.js 后处理读 data-bg-* 贴到页盒（整页含边距），块内联背景
+   在后处理里清 none 防双画。 */
+function _fullBgHtml(bg){
+  if(!bg){return '';}
+  var url='/img?path='+encodeURIComponent(bg.img).replace(/'/g,'%27');
+  return ' data-bg-img="'+url+'" data-bg-mode="'+bg.mode+'" data-bg-pos="'+bg.pos+'"'+
+    ' style="background-image:url(\''+url+'\');background-size:'+FULL_BG_SIZE[bg.mode]+
+    ';background-position:'+FULL_BG_POS[bg.pos]+';background-repeat:no-repeat;"';
+}
+/* ── v2.27.0 @@ table{表参:列宽方案} ──────────────────────────────
+   新增的独立指令，与 @@ caption 同一个记账方式（只作用于紧随其后的那一个
+   表格），但位置相反：table 行在前、caption 行在后，两者可只写其一。
+
+     @@ table{50l:r(50|30|20)}          表宽 50% 左对齐；三列依次 50/30/20
+     @@ table{50l:s(1x30,5x10)}         表宽 50% 左对齐；第 1 列 30%、第 5 列 10%，其余自适应
+     @@ caption{c t s0.3} 表 1 标题
+     | 表头 | … |
+     |------|…|
+
+   表参 = [1..100 的数字][l|c|r]，两段都可省；列宽方案二选一：
+     r(...)  全列方案：按列序每列一项，项数必须 = 表格列数，合计必须 = 100
+     s(...)  指定列方案：第 N 列占表宽 P%；未列出的列自适应；生效列合计 ≤ 85
+   两条硬规矩：任何非法形态 fail-closed（整行按原文露出、表格按原样渲染，
+   不猜不补）；r 与 s 同时出现、或出现其他形态，同样整体作废。
+   为什么 s 的上限是 85：表宽可以小到 30%~50%，留白不足时自适应列会被压成
+   一条缝。按版心 657.6px 折算，15% ≈ 98.6px ≈ 6 个中文字；表宽一半时
+   仍有约 3 字，是"还用得了"的下限。1% 在窄表上只剩 3px，等于删列。 */
+function _tabSpec(raw){
+  if(raw===null||raw===undefined){return null;}
+  var s=String(raw).trim();
+  if(!s){return null;}
+  var w=100,align='',plan=null;
+  var ci=s.indexOf(':');
+  var head=s,body=null;
+  if(ci>=0){head=s.slice(0,ci).trim();body=s.slice(ci+1).trim();}
+  /* 省略表参、直接写方案：{r(50|30|20)} */
+  if(body===null&&/^[rs]\(/.test(head)){body=head;head='';}
+  if(head){
+    var hm=head.match(/^(\d{1,3})?([lcr])?$/);
+    if(!hm||(!hm[1]&&!hm[2])){return null;}
+    if(hm[1]){
+      w=parseInt(hm[1],10);
+      if(!(w>=1&&w<=100)){return null;}
+    }
+    if(hm[2]){align=hm[2];}
+  }
+  if(body!==null){
+    var rm=body.match(/^r\(([^()]*)\)$/);
+    var sm=body.match(/^s\(([^()]*)\)$/);
+    if(rm&&sm){return null;}
+    if(rm){
+      var parts=rm[1].split('|'),cols=[];
+      for(var i=0;i<parts.length;i++){
+        var t=parts[i].trim();
+        if(!/^\d+(\.\d+)?$/.test(t)){return null;}
+        cols.push(parseFloat(t));
+      }
+      if(!cols.length){return null;}
+      plan={mode:'r',cols:cols};
+    }else if(sm){
+      var segs=sm[1].split(','),map=[];
+      for(var j=0;j<segs.length;j++){
+        var t2=segs[j].trim();
+        if(!t2){continue;}
+        var mm=t2.match(/^(\d+)x(\d+(?:\.\d+)?)$/);
+        if(!mm){return null;}
+        var c=parseInt(mm[1],10),pv=parseFloat(mm[2]);
+        if(c<1||!(pv>0&&pv<=100)){return null;}
+        map.push({col:c,pct:pv});
+      }
+      if(!map.length){return null;}
+      plan={mode:'s',map:map};
+    }else{
+      return null;
+    }
+  }
+  return {w:w,align:align,plan:plan};
+}
+/* 把 spec 落成具体列宽。返回 null = 这一处作废（列数不符/合计不合规），
+   调用方负责原文露出。越界的 s 列直接忽略，不计入合计。
+   r 走 table-layout:fixed（全列都有宽度，fixed 才能逐像素兑现）；
+   s 保持 auto——未列出的列要按内容自适应，fixed 会把它们等分掉。 */
+function _tabCols(spec,ncol){
+  if(!spec||!ncol){return null;}
+  /* v2.28.0 「占多宽、靠哪边」与「表格自身排版」分家：
+     box  = width + margin（这块表占的横向地盘）
+     style = table-layout 等真正属于 <table> 的属性
+     有题注时 box 挂到 .mde-tblwrap 上、<table> 填满包裹层——题注才会与表同宽
+     同边。之前 box 写在 <table> 上、wrap 恒占版心，实测 50l 的题注中心偏 +164px、
+     60r 偏 −132px；居中时两中心恰好重合，才一直没被发现。 */
+  var out={fixed:false,widths:[],style:'',box:''};
+  if(spec.w!==100){out.box+='width:'+spec.w+'%;';}
+  if(spec.align==='l'){out.box+='margin-left:0;margin-right:auto;';}
+  else if(spec.align==='r'){out.box+='margin-left:auto;margin-right:0;';}
+  else if(spec.align==='c'){out.box+='margin-left:auto;margin-right:auto;';}
+  if(!spec.plan){return out;}
+  if(spec.plan.mode==='r'){
+    if(spec.plan.cols.length!==ncol){return null;}
+    var sum=0;
+    for(var i=0;i<spec.plan.cols.length;i++){sum+=spec.plan.cols[i];}
+    if(Math.abs(sum-100)>0.01){return null;}
+    out.fixed=true;
+    out.widths=spec.plan.cols.slice();
+    out.style+='table-layout:fixed;';
+    return out;
+  }
+  var map={},sum2=0;
+  for(var j=0;j<spec.plan.map.length;j++){
+    var it=spec.plan.map[j];
+    if(it.col>ncol){continue;}
+    map[it.col]=it.pct;
+    sum2+=it.pct;
+  }
+  if(sum2>85.01){return null;}
+  for(var k=1;k<=ncol;k++){out.widths.push(map[k]||0);}
+  return out;
+}
 function escapeHtml(s){
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -1411,15 +1766,17 @@ function _isHrLine(line){
 /* v2.10.0 表格题注包裹：题注与表格装进同一个 div，先后由 t/b 定。
    这里按 side 直接拼 DOM 顺序（不用 flex —— 表格变成 flex item 会被
    压宽），docx 侧再按 data-tab-side 独立决定段落先后，两边一致。 */
-function _wrapTabCap(tbl,c){
+function _wrapTabCap(tbl,c,box){
   var o=_figCap(c.tok);
   var side=o.side||'t';
   var gap=o.gap||'0.3';
   var capSty=o.al?(' style="text-align:'+_alCss(o.al)+' !important"'):'';
   var capEl='<div class="mde-tabcap" data-tab-cap="1"'+capSty+'>'
     +parseInline(c.txt)+'</div>';
+  /* box = 宽度与对齐（原写在 <table> 上，v2.28.0 搬到包裹层）。题注因此与表
+     同宽、同边——图片那边 figure/figcaption 天然就是这个关系。 */
   return '<div class="mde-tblwrap" data-tab-wrap="1" data-tab-side="'+side
-    +'" data-tab-gap="'+gap+'" style="--tabgap:'+gap+';">'
+    +'" data-tab-gap="'+gap+'" style="--tabgap:'+gap+';'+(box||'')+'">'
     +(side==='b'?tbl+capEl:capEl+tbl)+'</div>';
 }
 /* 围栏行判定：行首连续反引号 ≧3 才算围栏，返回其个数（否则 0）。
@@ -1750,8 +2107,15 @@ function splitRow(r){
   if(arr.length>0 && arr[arr.length-1]===''){arr.pop();}
   return arr;
 }
-function parseTable(lines,start){
+function parseTable(lines,start,spec,wrap){
   var head=splitRow(lines[start]);
+  /* v2.27.0 @@ table：先算列宽（列数校验在这一步，不符返回 null 交调用方
+     原文露出），再照旧拼行列 */
+  var calc=null;
+  if(spec){
+    calc=_tabCols(spec,head.length);
+    if(!calc){return null;}
+  }
   var sep=splitRow(lines[start+1]);
   var aligns=sep.map(function(c){
     var l=c.charAt(0)===':', r=c.charAt(c.length-1)===':';
@@ -1777,7 +2141,26 @@ function parseTable(lines,start){
   var thead='<thead><tr>'+head.map(function(c,ci){
     return '<th'+(aligns[ci]?' style="text-align:'+aligns[ci]+'"':'')+'>'+parseInline(c)+'</th>';
   }).join('')+'</tr></thead>';
-  return ['<table>'+thead+'<tbody>'+body+'</tbody></table>',i];
+  var tStyle='',colHtml='',tAttr='';
+  if(calc){
+    /* 会被题注包裹（wrap=true）时，横向地盘归包裹层：表填满它，题注才与表同宽。
+       无题注时保持旧行为——宽度与对齐直接写在表上。 */
+    var own=(wrap?'width:100%;margin-left:0;margin-right:0;':calc.box)+calc.style;
+    if(own){tStyle=' style="'+own+'"';}
+    if(calc.widths.length){
+      colHtml='<colgroup>'+calc.widths.map(function(x){
+        return x?('<col style="width:'+x+'%">'):'<col>';
+      }).join('')+'</colgroup>';
+      /* 列宽签名跟着表格属性走：Paged.js 拆表时用 cloneNode(false) 重建
+         续片——内联 style 会留存，colgroup 子节点却丢了，续片列宽退化成
+         等分（实测 50/30/20 → 33/33/33）。分页后钩子据此属性补齐。 */
+      tAttr=' data-mde-cols="'+calc.widths.map(function(x){
+        return x?(x+'%'):'0';
+      }).join(',')+'"';
+    }
+  }
+  return ['<table'+tStyle+tAttr+'>'+colHtml+thead+'<tbody>'+body+'</tbody></table>',i,
+          calc?calc.box:''];
 }
 /* 围栏语言行解析：```lang {N} —— N=版面百分比，与图片 {N} 同一规矩（空白可选、>100 钳 100）。
    非法形态（{0}/非数字/多余词）→ 整体视为 lang 原样返回、width=0（fail-closed：字面可见不吞错）。
@@ -1919,6 +2302,8 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
   var IPX=(opts&&opts.indents)||(typeof window!=='undefined'&&window.__IND_PX__)||{p:0,quote:0,li:0};
   var curInd=0;
   var pendCap=null;   /* v2.10.0 @@ caption 暂存：只作用于紧随其后的那一个表格 */
+  var pendTab=null;   /* v2.27.0 @@ table 暂存：作用于紧随其后的表格，
+                         中间可隔一行 @@ caption（table 在前、caption 在后） */
   var _dgHit=false;
   /* ── v2.23.0 元数据：两条互斥通道 ────────────────────────────────
      通道 A（兼容模式）：文首 --- … --- 的 YAML 平铺键值，值就在正文里。
@@ -2103,6 +2488,25 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
   while(i<lines.length){
     var line=lines[i];
     _dgHit=false;
+    /* v2.27.0 @@ table{表参:列宽方案}：表格宽度与列宽分配，参数见 _tabSpec。
+       位置契约：本行在 @@ caption 的上一行（table → caption → 表格），
+       也可以直接接表格（table → 表格）。紧贴的下一行既不是表格也不是
+       @@ caption 时，整行按原文露出（fail-closed，不猜意图、不吞字）。 */
+    var _tabM=/^[ ]{0,3}@@\s*table\b[ \t]*(?:\{([^{}\n]*)\})?[ \t]*$/.exec(line);
+    if(_tabM){
+      var _tabSp=_tabSpec(_tabM[1]);
+      var _tn1=lines[i+1]||'',_tn2=lines[i+2]||'';
+      var _isTabLine=(_tn1.indexOf('|')>=0
+        &&/^[ ]*\|?[-|: ]+\|?[ ]*$/.test(_tn2)&&_tn2.indexOf('-')>=0);
+      if(_tabSp&&(_isTabLine||/^[ ]{0,3}@@\s*caption\b/.test(_tn1))){
+        _tabSp.raw=line;
+        pendTab={spec:_tabSp,at:i+1};
+        i++;continue;
+      }
+      _dgE(i,'D407','@@ table 未生效：参数非法，或其后既不是表格也不是 @@ caption');
+      html+='<p>'+parseInline(line)+'</p>';
+      i++;continue;
+    }
     /* v2.10.0 表格题注：@@ caption{l c t n s0.3} 表 1　标题
        必须先于竖线/表格/段落判断消费掉，否则整行会被当普通段落渲染。
        只认「下一行起就是表格」这一种位置——后面不是表格则整行按普通
@@ -2111,8 +2515,18 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
     if(_capM){
       var _t1=lines[i+1]||'',_t2=lines[i+2]||'';
       if(_t1.indexOf('|')>=0&&/^[ ]*\|?[-|: ]+\|?[ ]*$/.test(_t2)&&_t2.indexOf('-')>=0){
-        pendCap={tok:_capM[1]||'',txt:(_capM[2]||'').trim(),at:i+1};
+        /* 上一行若是 @@ table，把规格一并转交（table 在前、caption 在后） */
+        var _capSpec=(pendTab&&pendTab.at===i)?pendTab.spec:null;
+        pendCap={tok:_capM[1]||'',txt:(_capM[2]||'').trim(),at:i+1,spec:_capSpec};
+        pendTab=null;
         i++;continue;
+      }
+      /* @@ table 后面跟了个没接上表格的 caption：table 行原文露出 */
+      if(pendTab&&pendTab.at===i){
+        if(pendTab.spec&&pendTab.spec.raw){
+          html+='<p>'+parseInline(pendTab.spec.raw)+'</p>';
+        }
+        pendTab=null;
       }
     }
     /* v2.13.2 @@ blank{n}：硬控段间空白。n = 正文行数（1 = 一个正文行高，
@@ -2419,16 +2833,20 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
     }
     /* v2.13 @@ begin full{t|m|b} / @@ begin full（缺省 m）… @@ end full：
        独占一页块。t=居上 m=居中 b=居下（页内垂直位置，分页导出生效）；
+       v2.26.6 背景图：full{[tmb]:![](图) [o|c|f] [九宫]}——解析见
+       _fullParseParam，预览拟页块 + HTML 导出块衬 + 分页导出页盒衬底
+       （docx 出背景，出骨架：独占一页 + 上中下）。
        左右不参数化——块内元素按排版面板既有对齐档走。内容按完整
        markdown 渲染（可嵌 fill/图表/表格/列表，空行在其中保留普通
-       打断语义）。预览与 HTML 导出无页概念，按普通块渲染；分页导出
+       打断语义）。预览无页概念但按拟页块渲染（v2.26.6）；分页导出
        由 .full-page CSS 撑满页心并按 data-full-pos 垂直定位。
        curInd 不清零、不写 margin-left（页级块与缩进链解耦，继承语义
        与 color 块同口径）；编号区域不清零（空行才打断）。
-       参数非 t/m/b（正则不匹配）或未闭合 → 标记行按原文、内容照常
+       参数非法（_fullParseParam null）或未闭合 → 标记行按原文、内容照常
        渲染（fail-closed，结束行按文本露出）。 */
-    var um=line.match(/^[ ]{0,3}@@\s*begin\s+full\s*(?:\{([tmb])\})?\s*$/);
-    if(um){
+    var um=line.match(/^[ ]{0,3}@@\s*begin\s+full\s*(?:\{([^}\n]*)\})?\s*$/);
+    var _fp=um?_fullParseParam(um[1]):null;
+    if(um&&_fp){
       if(!(_LV.full>_lv)){
         _dgE(i,'D221','full 不能在这里再开：full 套 full，或 fill 区里开 full（主链层级 page＞full＞fill）');
         /* v2.18.0 越界/同族：full 是主链中层（rank 2），_lv>=2 时不可再开
@@ -2444,7 +2862,7 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
       var uinner=_ur.inner,uclosed=_ur.closed,uj=_ur.next;
       _dgZw(uinner);
       if(uclosed){
-        html+='<div class="full-page" data-full-pos="'+(um[1]||'m')+'">'+
+        html+='<div class="full-page" data-full-pos="'+_fp.pos+'"'+_fullBgHtml(_fp.bg)+'>'+
           parseMarkdown(uinner.join('\n'),_LV.full,opts,_base+i+1,_lv3)+'</div>';
         i=uj;
         continue;
@@ -2557,8 +2975,12 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
             if(!(_ma==='noll'||_ma==='1'||_ma==='i'||_ma==='I')){_mgOk=false;break;}
             _mgA.page=_ma;
           }else if(_mf==='full'){
-            if(!(_ma===null||_ma==='t'||_ma==='m'||_ma==='b')){_mgOk=false;break;}
-            _mgA.full=(_ma||'m');
+            /* v2.26.6 full 参数支持背景文法（与 solo 同一 _fullParseParam）；
+               非法 → 并写整体不成立（D241），fail-closed */
+            var _mfp2=_fullParseParam(_ma);
+            if(!_mfp2){_mgOk=false;break;}
+            _mgA.full=_mfp2.pos;
+            if(_mfp2.bg){_mgA.fullBg=_mfp2.bg;}
           }else{
             var _mcv=_colorVal(_ma);
             if(!_mcv){_mgOk=false;break;}
@@ -2627,7 +3049,7 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
                   _pgRegSeq++;
                   _mgHtml+='<div class="page-region" data-pn="'+_mgA.page+'" data-pr-id="pr'+_pgRegSeq+'">';
                 }else if(_so[_op]==='full'){
-                  _mgHtml+='<div class="full-page" data-full-pos="'+_mgA.full+'">';
+                  _mgHtml+='<div class="full-page" data-full-pos="'+_mgA.full+'"'+_fullBgHtml(_mgA.fullBg)+'>';
                 }else{
                   _mgHtml+='<div class="mde-color" style="color:'+_mgA.color+'">';
                 }
@@ -2724,10 +3146,22 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
       continue;
     }
     if(line.indexOf('|')>=0 && i+1<lines.length && /^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1]) && lines[i+1].indexOf('-')>=0){
-      var t=parseTable(lines,i);
+      /* v2.27.0 本表吃到的 @@ table 规格（可能经 @@ caption 转交） */
+      var _hereSpec=null;
+      var _willWrap=!!(pendCap&&pendCap.at===i);   /* 有题注才有 wrap */
+      if(pendCap&&pendCap.at===i){_hereSpec=pendCap.spec||null;}
+      else if(pendTab&&pendTab.at===i){_hereSpec=pendTab.spec||null;}
+      var t=parseTable(lines,i,_hereSpec,_willWrap);
+      if(!t){
+        /* 列数与 r 项数不符、合计≠100、生效列合计>85 —— 整组作废：
+           规格行按原文露出，表格按原样渲染（fail-closed，不猜不补） */
+        _dgE(i,'D408','@@ table 未生效：列数与表格不符，或百分比合计不合规');
+        if(_hereSpec&&_hereSpec.raw){html+='<p>'+parseInline(_hereSpec.raw)+'</p>';}
+        t=parseTable(lines,i,null,_willWrap);
+      }
       var _tb=t[0];
-      if(pendCap&&pendCap.at===i){_tb=_wrapTabCap(_tb,pendCap);}
-      pendCap=null;
+      if(pendCap&&pendCap.at===i){_tb=_wrapTabCap(_tb,pendCap,t[2]);}
+      pendCap=null;pendTab=null;
       html+=_tb;i=t[1];curInd=0;continue;
     }
     if(/^[ ]*([-+]|[0-9]+\.)[ ]+/.test(line)){
@@ -2778,8 +3212,8 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
 /* 中英双语（v2.15.0）：字典 key = 界面中文原文。默认 zh，切换后只翻 UI 容器，
    预览与编辑区（用户内容）永不触碰。动态节点由 applyLang 的观察器兜住。 */
 var LANG_KEY='md-editor-lang';
-var I18N_EN={"字体 · 正文类":"Fonts · Body","字体 · 块级类":"Fonts · Blocks","段落缩进":"Indent","段间距":"Gap","页面 · 纸张与边距":"Page · Paper","页面 · 页码":"Page · Numbers","编号":"Numbering","图片输出":"Image output","元数据":"Metadata","字":"chars","分":"min","H4~H6 标题（四级到六级标题共用一套字体设置）":"H4–H6 headings (levels 4 to 6 share one font setting)","关闭后 front matter 与 @@ meta 都不出元数据区（元数据区只在预览显示，不打印、不进 Word / HTML 导出）":"Turn off to hide the metadata block for both front matter and @@ meta (preview only: never printed, never in Word / HTML exports)","目录独占一页：其后第一个 ## 与正文强制另起新页，不侵入目录页":"Contents on its own page: the first following ## starts a new page, so the body never flows onto the contents page","三线表：去掉全部竖线，只留顶线、表头线、底线":"Booktabs: no vertical rules, only top, header and bottom rules","段间距（正文块之间的垂直间距，单位 em＝正文字号；@@ blank 逐处硬控可覆盖它）":"Paragraph gap (vertical space between body blocks, em = body size; @@ blank overrides it per spot)","字体 · 公式与题注":"Fonts · Math & captions","目录独占一页":"Contents on its own page","三线表":"Booktabs","列表标记外凸":"Hanging list markers","页边距":"Margins","自动落盘间隔":"Autosave interval","留空则不写":"Blank = not written","如 2026-10-30":"e.g. 2026-10-30","逗号分隔":"Comma-separated","按显示宽度换算像素再降采样：只缩不放，压完没变小就回滚用原图。源文件一个字节都不动。":"Downscaled to the pixels each image's real display width needs: never enlarged, and reverted to the original when the result is not smaller. The file on disk is never touched.","当前：未建档（首次填写并应用时建档）":"Current: no archive yet (created on the first apply)","当前：首行 YAML front matter（兼容模式），写入会改这段原文":"Current: YAML front matter on line 1 (compatible mode); applying rewrites that block","当前：本文档的元数据文件":"Current: this document's metadata file","当前：本文档的元数据文件 · 建档于 {0}":"Current: this document's metadata file, created {0}",
-"设置里的这份值；应用时写入本文档：没有档案就建档（创建快照只写一次、只读），已有档案只在履历里追加":"Applied to this document: a missing archive is created (snapshot written once, read-only); an existing one only gets an appended log","　⚠ 正文缺 @@ meta 行，填写后自动插入":"  ⚠ no @@ meta line in the text; one is added when you apply","正在读取元数据档案，稍后再点「应用」":"Reading the metadata archive, click Apply again in a moment","请先保存文档（Ctrl+S），元数据档案要跟着文件走":"Save the document first (Ctrl+S); the archive travels with the file","元数据写入失败":"Could not write the metadata","元数据无变化":"Metadata unchanged","保存失败：{0}":"Save failed: {0}","已自动落盘 {0}":"Autosaved {0}","自动落盘已跳过：文档还没有保存路径":"Autosave skipped: the document has no path yet","显示元数据区":"Show metadata","文档标题":"Title","作者":"Author","日期":"Date","标签":"Tags","代称":"Alias","位置":"Position","模板与字号":"Template & size","生成目录":"Contents","显示页码":"Show numbers","正文 · 字符数":"Body · chars","引用块 · 字符数":"Quote · chars","列表 · 字符数":"List · chars","不计入目录":"Excluded","标题自动序号":"Headings","自定义宽 × 高":"Custom W × H","页边距 上/右/下/左":"Margins T/R/B/L","公式 KaTeX":"Math KaTeX","新建": "New","分屏": "Split","跟随": "Follow","暗色": "Dark","亮色": "Light","文件": "Files","打开": "Open","打印": "Print","排版": "TS","保存": "Save","另存为": "As…","替换": "Replace","全部": "All","▶ 运行": "▶ Run","运行中…": "Running…","默认文档": "Default doc","已存入缓存": "Cached","编辑中...": "Editing…","本工具由 AI 生成": "AI-generated","本工具由 AI 辅助生成": "Made with AI assistance","本工具由 AI 辅助生成 (AI-assisted)": "Made with AI assistance","文档批注数": "Number of notes","仅编辑": "Editor","仅预览": "Preview","不跟随": "No follow","大纲": "Outline","查找…": "Find…","区分大小写": "Match case","正则表达式": "Regular expression","全字匹配": "Whole word","上一个（Shift+Enter）": "Previous (Shift+Enter)","下一个（Enter）": "Next (Enter)","展开/收起替换（Ctrl+H）": "Toggle replace (Ctrl+H)","关闭（Esc）": "Close (Esc)","替换为（\\n 换行、\\t 制表；正则模式支持 $1 引用）": "Replace with (\\n newline, \\t tab; $1 backreference in regex mode)","替换当前命中（Ctrl+Z 可撤销）": "Replace this match (Ctrl+Z to undo)","全部替换（整体一步，Ctrl+Z 一次撤销）": "Replace all (one step, undo once with Ctrl+Z)","运行全部 @@ MDE 执行点（手动模式）": "Run all @@ MDE exec points (manual mode)","视图切换": "Switch view","主题切换": "Switch theme","最近文件与切换": "Recent files","打开 .md 文件": "Open a .md file","新建文档 (Ctrl+N)": "New document (Ctrl+N)","保存（Ctrl+S）": "Save (Ctrl+S)","另存为…": "Save as…","导出 HTML": "Export HTML","导出 Word(.docx)：保留样式与可编辑公式": "Export Word (.docx): styles and editable formulas preserved","AI 设置：润色 / 智能备注的后端与模型": "AI settings: backend and model for polish / smart notes","排版设置：字体/表格/缩进/自动落盘": "Typesetting: fonts / tables / indent / autosave","low runner：写/生成 Python run，供 @@ MDE 数据点与执行点调用": "low runner: write/generate Python runs for @@ MDE data and exec points","预览跟随编辑区滚动（仅分屏模式生效），点击开/关": "Preview follows editor scroll (split view only). Click to toggle","打印：生成分页版 HTML（纸张/页码/目录）并在浏览器打开，Ctrl+P 即可打印或存为 PDF": "Print: build a paged HTML (paper, page numbers, contents) and open it; Ctrl+P to print or save as PDF","在这里写 Markdown...": "Write Markdown here…","Markdown 源码编辑区": "Markdown source editor","关闭": "Close","取消": "Cancel","应用": "Apply","保存文档": "Save document","文件名": "File name","格式": "Format","未命名": "Untitled","保存目录": "Folder","浏览…": "Browse…","Markdown 文档（.md，图片存同名 .assets 目录）": "Markdown (.md, images in a sibling .assets folder)","自包含文档（.smd，单文件含全部图片）": "Self-contained (.smd, all images in one file)","可直接粘贴路径，或点「浏览…」": "Paste a path, or click Browse…","排版设置": "Typesetting","自动落盘间隔（分钟，0=仅手动）": "Autosave interval (min, 0 = manual only)","字体 / 字号 / 对齐（字号留空 = 保持默认，单位磅；本机字体由后端自动枚举）": "Font / size / align (blank size keeps default, unit pt; local fonts listed by backend)","正文": "Body","H1 标题": "H1","H2 标题": "H2","H3 标题": "H3","H4~H6 标题": "H4–H6","引用块": "Quote","列表": "List","表格": "Table","代码": "Code","公式（KaTeX，字体固定）": "Math (KaTeX, fixed font)","图片": "Image","图题": "Figure caption","表题": "Table caption","本机字体": "Local fonts","(默认)": "(default)","默认": "Default","左对齐": "Left","居中": "Center","右对齐": "Right","两端对齐": "Justify","无": "None","首行缩进": "First line","悬挂缩进": "Hanging","整体缩进": "Block","磅": "pt","段落缩进（按元素独立，字符数 × 当前字号自动换算）": "Paragraph indent (per element; chars × current size)","列表标记外凸（续行悬挂）": "Hanging list markers","编号/圆点站到文字块外面，多行项的续行与首行文字左沿对齐；关闭则续行顶格（v2.13.5 及更早的口径）": "Markers sit outside the text block, wrapped lines align with the first line. Off = wrapped lines flush left (behaviour before v2.14)","段间距（正文块之间的垂直间距，单位 em＝正文字号；@@ blank{n} 逐处硬控可覆盖它）": "Paragraph gap (em = body size; @@ blank{n} overrides per spot)","统一段间距": "Uniform paragraph gap","表格样式": "Table style","三线表（去竖线，三条横线）": "Booktabs (no vertical rules, three rules)","表头底色": "Header shading","首列底色": "First column shading","页面（作用于「打印」导出）": "Page (used by the Print export)","纸张": "Paper","自定义": "Custom","自定义宽 × 高（mm）": "Custom width × height (mm)","宽": "W","高": "H","页边距 上/右/下/左（mm）": "Margins top/right/bottom/left (mm)","页码（打印导出时渲染）": "Page numbers (rendered on Print export)","页码": "Page number","显示": "Show","外侧（奇右偶左）": "Outside (right odd, left even)","底部居中": "Bottom center","底部右侧": "Bottom right","底部左侧": "Bottom left","顶部居中": "Top center","顶部右侧": "Top right","页码模板与字号（{p}=页码，{P}=全文总页数，{N}=本区总页数）": "Template and size ({p} = page, {P} = total pages, {N} = pages in this region)","目录（打印导出时自动生成，条目带页码）": "Contents (built on Print export, entries carry page numbers)","目录": "Contents","不生成": "None","生成": "Generate","置于文首": "At the start","第一个 # 之下": "After the first #","目录独占一页（后续 ## 与正文强制新页，不得侵入）": "Contents on its own page (following ## and body start a new page)","不计入目录（勾选的级别照常渲染、只是不进目录）": "Excluded from contents (checked levels still render, just not listed)","标题自动序号（只作用于预览与导出，不改源文；范围 ## ~ #####）": "Auto-number headings (preview and export only, source untouched; ## to #####)","自动序号": "Numbering","中文体　一、（一）1.（1）": "Chinese  一、 1.","层级体　1 / 1.1 / 1.1.1": "Decimal  1 / 1.1 / 1.1.1","图 / 表编号": "Fig. / table","全篇连续　图 1 / 表 1": "Whole doc  Fig. 1 / Tab. 1","按章重编　图 1-1 / 表 2-1": "Per chapter  Fig. 1-1","编号章级": "Chapter level","##　二级标题为章（默认）": "##  (default)","#　一级标题为章": "#","###　三级标题为章": "###","第 {p} 页 / 共 {P} 页": "Page {p} of {P}","low runner · run 库（编辑器级，全文档共用）": "low runner · run library (editor-wide, shared by all documents)","已保存": "Saved","运行": "Run","立即": "Immediately","等待": "Wait","秒": "s","手动": "Manual","名称": "Name","依赖目录": "Deps folder","AI 生成": "AI generate","报告 AI 生成内容": "Report AI content","保存入库": "Save to library","清空编辑区，另写一个新 run": "Clear the editor and start a new run","渲染完成后 0.4 秒自动运行（原行为）": "Run 0.4s after rendering (previous behaviour)","停止输入 N 秒后自动运行": "Run N seconds after typing stops","等待秒数": "Wait seconds","不自动运行：执行点旁 ▶ 单点运行，或左下角「▶ 运行」全部运行": "Never auto-run: use ▶ beside a point, or ▶ Run in the status bar","如 dark、统计（即文件名，@@ MDE import 用它）": "e.g. dark, stats (also the file name used by @@ MDE import)","打开 runtime/pylibs 目录，pip --target 装三方包": "Open runtime/pylibs to pip install --target third-party packages","对 AI 说出需求，如：求数据点里所有数字之和 / 统计某词出现次数 / 画折线图…（生成后需人工查阅）": "Describe what you need, e.g. sum all numbers in the data points / count a word / draw a line chart… (review the result)","向开发者报告不当的 AI 生成内容（微软商店政策 11.16）": "Report inappropriate AI-generated content (Microsoft Store policy 11.16)","先在下方输入框说出需求": "Describe what you need in the box below","AI 生成中（约 10~60 秒，取决于后端），完成后自动填入代码框…": "Generating (about 10–60 s depending on the backend); it will fill the code box…","AI 已生成——人工查阅后再「保存入库」": "Generated. Review it, then Save to library","（AI 未给名字，请手动命名）": " (no name from AI, please name it)","AI 生成失败：": "AI generation failed: ","\n可在工具栏「AI」里检查后端配置。": "\nCheck the backend in AI settings.","代码为空": "Code is empty","请先命名（@@ MDE import 的名字就是它）": "Name it first (this is the name used by @@ MDE import)","尚无文件路径，请先「另存为」": "No file path yet, use Save as first","未另存为": "Not saved yet","已覆盖 ": "Overwrote ","已保存 ": "Saved ","已覆盖": "Overwrote","（pip 名 ": " (pip name ","——运行将失败，请先安装：</div>": " — the run will fail, install it first:</div>","留空则按名称": "Blank uses the name","上一次生成": "Previous output","删": "Del","删除 ": "Delete ","（点两次确认）": " (click twice to confirm)","确定后删不掉": "Cannot be undone","确认删": "Confirm","只显示一次": "Shown only once","已载入 ": "Loaded ","——修改后「保存」即覆盖": " — Save overwrites it","读取失败：": "Read failed: ","run 库读取失败：": "Run library unreadable: ","待运行": "pending","▶ 待运行": "▶ Pending","全部运行": "Run all","打开就自动跑": "Runs on open","切手动不一定显示 ▶": "Manual mode may hide ▶","改别处 = 白跑一次": "Editing elsewhere wastes a run"," · 全局 ": " · global ","运行此执行点": "Run this point","文件改了但数没变": "File changed, data did not","有未完成": "Unfinished","外部改了文件 → 复位后仍命中旧结果": "File changed outside, reset still hits the old result","全局执行点须返回列表（得到 ": "Global points must return a list (got ","返回 ": "Returned "," 项 ≠ 标记 ": " items ≠ "," 个": " markers","执行失败": "Run failed","网络错误": "Network error","缺少包 ": "Missing package ","重试": "Retry","数据没变": "Data unchanged","数据变了": "Data changed","已替 data 运行": "Ran on data"," 个执行点未运行": " exec points not run"," 个执行点运行失败（红色错误信息就在执行点旁，▶ 可重试）": " exec points failed (the red message sits beside the point; ▶ retries)"," 个执行点已置为待运行": " exec points set back to pending","AI 设置（润色 / 智能备注）": "AI settings (polish / smart notes)","后端": "Backend","LM Studio（本地 :1234）": "LM Studio (local :1234)","Ollama（本地 :11434）": "Ollama (local :11434)","OpenAI 兼容（外部 API）": "OpenAI-compatible (external API)","服务地址（留空按后端默认端口）": "Endpoint (blank = backend default port)","API Key（OpenAI 兼容后端必填）": "API Key (required for OpenAI-compatible)","模型（下拉为后端实加载的模型）": "Model (list comes from the backend)","刷新": "Refresh","超时（秒）": "Timeout (s)","最大输出 tokens": "Max output tokens","温度 temperature（0~2）": "Temperature (0–2)","联网查询（润色 / AI 解释时检索网络资料）": "Web search (for polish / explain)","启用联网查询（关闭则 AI 仅凭自身润色/解释）": "Enable web search (off = model knowledge only)","搜索源": "Search provider","DuckDuckGo（免费，无需 Key）": "DuckDuckGo (free, no key)","Tavily（需 API Key）": "Tavily (needs an API key)","Google Custom Search（需 Key + CX）": "Google Custom Search (needs key + CX)","Bing Search（需 API Key）": "Bing Search (needs an API key)","自定义 API": "Custom API","API Key（Tavily / 自定义 API 用）": "API Key (Tavily / custom API)","自定义 API URL（{q} 与 {key} 占位）": "Custom API URL ({q} and {key} placeholders)","结果条数（1~10）": "Results (1–10)","RAG 知识库（检索增强润色 / 解释）": "RAG knowledge base (retrieval-augmented)","rag-assistant 路径（含 main.py 的目录）": "rag-assistant path (the folder holding main.py)","知识库（空 = 自动路由）": "Knowledge base (blank = auto)","RAG 服务（端口 8767）": "RAG service (port 8767)","探测中…": "Probing…","启动": "Start","停止": "Stop","测试连接": "Test connection","本地推理需先启动 LM Studio / Ollama 并加载模型；OpenAI 兼容后端填外部 API 地址与 Key（DeepSeek、硅基流动等均可用）；润色与「AI 解释」都走此配置。": "Local inference needs LM Studio / Ollama running with a model loaded; for OpenAI-compatible backends fill in the endpoint and key (DeepSeek, SiliconFlow and others work). Polish and Explain both use this config.","联网查询开启后，润色 / AI 解释先检索网络资料注入提示词，搜索失败自动降级为纯模型结果；与 RAG 相互独立。": "With web search on, polish / explain first pull web results into the prompt; failures fall back to the model alone. Independent of RAG.","「RAG润色 / RAG解释」在上述基础上检索 rag-assistant 知识库作为参考资料，需先在下方填写路径并启动 RAG 服务；启动/停止仅手动触发，退出编辑器不影响其运行。": "RAG polish / RAG explain also retrieve from the rag-assistant knowledge base. Set the path below and start the service first; start and stop are manual, and quitting the editor leaves it running.","重新探测 RAG 服务与知识库列表": "Re-probe the RAG service and knowledge bases","（点「刷新」拉取模型列表）": " (click Refresh to list models)","（列表外）": " (not listed)","已获取 ": "Loaded "," 个模型。": " models.","模型列表获取失败：": "Could not list models: ","读取 AI 配置失败": "Could not read the AI config","读取 AI 配置失败：": "Could not read the AI config: ","测试中…": "Testing…","连接成功": "Connected","连接失败": "Connection failed","测试失败：": "Test failed: ","AI 配置已保存": "AI settings saved","（自动路由）": " (auto)","在线（": "Online ("," 个知识库）": " knowledge bases)","启动中…（冷加载需数十秒）": "Starting… (cold start can take tens of seconds)","启动中…": "Starting…","RAG 启动失败：": "RAG failed to start: ","RAG 服务已停止": "RAG service stopped","RAG 停止失败：": "Could not stop the RAG service: "," 个结果": " results","无结果": "No results","离线": "Offline","还活着": "Reachable","批注": "Annotate","标注片段（跟文本内容走，原文编辑后自动同步；删光自动失效）": "Anchor text (follows the content and re-syncs after edits; gone when deleted)","AI 解释": "AI explain","RAG 解释": "RAG explain","删除标注": "Delete note","完成": "Done","备注": "Note","润色": "Polish","RAG润色": "RAG polish","AI 润色预览": "AI polish preview","原文": "Original","润色后（可先手动微调）": "Polished (tweak before applying)","替换原文": "Replace","写点备注…": "Add a note…","需 RAG 服务在线（AI 设置中启动）": "Requires the RAG service (start it in AI settings)","给选中片段加批注": "Add a note to the selection","AI 润色选中片段": "Polish the selection with AI","基于 RAG 知识库检索增强润色（需 RAG 服务在线）": "Retrieval-augmented polish (requires the RAG service)","解释中…": "Explaining…","已结合联网资料解释": "Explained with web results","联网搜索失败，已用纯模型结果": "Web search failed, used the model alone","AI 解释失败：": "Explain failed: ","RAG 解释失败：": "RAG explain failed: ","\n可在工具栏「AI」里检查 RAG 服务状态。": "\nCheck the RAG service in AI settings.","选中内容为空": "Nothing selected","无法标注该选区（跨元素边界）": "Cannot anchor this selection (crosses element boundaries)","润色中…（本地模型可能需要一些时间）": "Polishing… (a local model can take a while)","已结合联网资料润色": "Polished with web results","润色失败：": "Polish failed: ","检索知识库并润色中…（RAG 冷启动或本地模型可能需要一些时间）": "Retrieving and polishing… (RAG cold start or a local model can take a while)","RAG 润色失败：": "RAG polish failed: ","原文已变化，无法定位选区，请重新选择后重试。": "The text changed and the selection could not be located. Select again and retry.","报告将发送给开发者（": "The report goes to the developer (","）。未配置邮件客户端时，可复制下方内容自行粘贴发送。": "). With no mail client configured, copy the text below and send it yourself.","问题描述（可留空）": "Problem description (optional)","自动附带的报告内容（只读）": "Attached report (read-only)","复制报告内容": "Copy report","打开邮件客户端": "Open mail client","例如：内容与事实不符 / 出现不当表述 / 代码无法运行…": "e.g. factually wrong / inappropriate wording / code does not run…","报告内容已复制，请粘贴发送给开发者": "Report copied, paste it to the developer","报告内容已复制，请粘贴发送到 ": "Report copied, paste it to ","复制失败，请手动全选复制": "Copy failed, select all and copy manually","可复制下方内容发送给开发者。": "Copy the text below and send it to the developer.","（无）": "(none)","新标签页": "New tab","打开失败：": "Open failed: ","读取失败": "Read failed","读取文件失败：": "Could not read the file: ","已保存到原文件": "Saved to the original file","保存失败：": "Save failed: ","已载入原文件": "Loaded the original file","已打开：": "Opened: ","已载入": "Loaded","载入内置文档失败：": "Could not load the built-in document: ","使用指南": "User guide","版权与开源组件声明": "Copyright and open-source notices","通过「打开」按钮选择（浏览器不提供完整路径）": "Chosen with the Open button (the browser hides the full path)","该文件通过「打开」按钮选择，浏览器不提供完整路径，无法自动重载。\n请通过右键菜单打开它，或再次用「打开」选择。": "This file was picked with the Open button, so the browser hides its path and it cannot reload automatically.\nOpen it from the context menu, or pick it again with Open.","文档尚未保存，无法打开副本": "Save the document before opening a copy","已用系统程序打开副本": "Opened a copy with the system default app","用系统关联程序打开这份副本": "Open this copy with the system default app","选择保存位置失败：": "Could not choose a save location: ","粘贴图片前请先保存文档（Ctrl+S），图片将存入同名 .assets 目录。": "Save the document before pasting images (Ctrl+S); they go into a sibling .assets folder.","图片保存失败：": "Could not save the image: ","粘贴文件前请先保存文档（Ctrl+S），文件将存入同名 .assets 目录。": "Save the document before pasting files (Ctrl+S); they go into a sibling .assets folder.","文件超过 20MB 上限（当前 ": "File exceeds the 20 MB limit (currently ","正在写入 ": "Writing ","已插入数据点：": "Data point inserted: ","文件写入失败：": "Write failed: ","排版已更新（缓存）": "Typesetting updated (cached)","已落盘 ": "Written ","(未命名)": "(untitled)","文档": "Documents","桌面": "Desktop","下载": "Downloads","用户目录": "Home","上次目录": "Last folder","请先选择保存目录（点「浏览…」）": "Choose a folder first (click Browse…)","未命名.md": "Untitled.md","未命名文档": "Untitled document","预览不存在": "Preview not found","已导出：": "Exported: ","导出失败：": "Export failed: ","未知错误": "Unknown error","无法导出：": "Cannot export: ","。请先运行并确认全部执行点结果后再导出": ". Run the exec points and confirm their results before exporting","（状态栏「▶ 运行」一次跑全部）": "(▶ Run in the status bar runs them all)","正在生成打印版，请稍候…": "Building the print version…","打印导出失败（数据序列化错误）：": "Print export failed (data serialisation): ","导出 Word 文档": "Export Word","后台静默落盘 + 浏览器下载": "Saved in the background and downloaded by the browser","运行错误或失败静默导出": "Export silently on errors or failures","来源：": "Source: ","\n时间：": "\nTime: ","构建：": "Build: ","— AI 输出内容（自动附带，最多 1000 字）—\n": "— AI output (attached automatically, up to 1000 chars) —\n","— 问题描述 —\n": "— Problem description —\n","MDEditor AI 生成内容报告（": "MDEditor AI content report (","已恢复未落盘草稿": "Recovered an unsaved draft","检测到未落盘的本地草稿，已为你恢复（磁盘版本未被覆盖）": "An unsaved local draft was found and restored (the file on disk was not overwritten)","用磁盘版本": "Use the file on disk","恢复": "Restore","发现未完成的保存备份（": "Found an unfinished save backup (","），是否用它恢复本文档？": "). Restore this document from it?","恢复失败：": "Restore failed: ","已从保存备份恢复": "Restored from the save backup","就近": "Nearby","已到文末，从头继续": "Reached the end, continuing from the top","替换失败": "Replace failed","无命中": "No match","替换后与原文相同": "Replacement is identical to the original","已替换 ": "Replaced "," 处（Ctrl+Z 一步撤销）": " occurrences (Ctrl+Z undoes in one step)","正则表达式无效": "Invalid regular expression","已撤销全部替换": "Undid all replacements","渲染失败": "Render failed","<h2>请使用正确方式打开</h2>": "<h2>Please open this page properly</h2>","<p>本页面被直接双击打开（file://），此方式<b>没有后端服务</b>，公式、图片、保存、导出均不可用。</p>": "<p>This page was opened directly from disk (file://). <b>There is no backend</b>, so formulas, images, saving and exporting are unavailable.</p>","<p>正确打开方式（任选其一）：</p>": "<p>Open it one of these ways:</p>","<ol><li>右键任意 .md 文件 →「Open with Markdown Editor」</li>": "<ol><li>Right-click any .md file and choose Open with Markdown Editor</li>","<li>双击工具目录中的 <b>MarkdownEditor.exe</b></li>": "<li>Run <b>MarkdownEditor.exe</b> from the tool folder</li>","<li>双击 .md 文件（已关联本编辑器）</li></ol>": "<li>Double-click a .md file already associated with this editor</li></ol>","<p>若点下方按钮无反应，说明后端服务未运行——先做上面第 2 步。</p>": "<p>If the button below does nothing, the backend is not running. Do step 2 above first.</p>","一级标题": "H1","二级标题": "H2","标题": "Heading","加粗": "Bold","粗体": "Bold","斜体": "Italic","删除线": "Strikethrough","删除": "Strike","行内代码": "Code","引用": "Quote","无序列表": "Bullets","列表项": "List item","序号": "Numbering","有序列表": "Numbered list","任务": "Task","任务列表": "Task list","链接": "Link","插入链接": "Insert link","链接文字": "Link text","插入表格": "Insert table","图表自动编号（图、表各自计数；只作用于预览与导出，不改源文）": "Auto-number figures and tables (each counted separately; preview and export only, source untouched)","内置文档": "Built-in documents","内置文档 · 点击载入（可编辑/另存为）": "Built-in · click to load (editable, save as copy)","回到初始示例状态": "Reset to the initial sample","最近文件": "Recent files","暂无标题": "No headings","默认文档（使用指南）": "Default document (user guide)","切换界面语言：中文 / English": "Switch the interface language: 中文 / English","语法提示开关：开启后光标所在行弹出方言速查（语法检查不受影响）": "Syntax hint toggle: shows the dialect cheat-sheet at the cursor when on (lint checks unaffected)","提示": "Hints","保存到 ": "Save to ","图": "Figure","表": "Table","图片输出（「打印」与导出；预览始终按栏宽缩略，不受此项影响）": "Image output (Print and exports; the preview always uses a column-width thumbnail and is unaffected)","像素": "Pixels","原图输出（不压缩）": "Original (no compression)","实图输出 · 300dpi（印刷）": "Fit to display · 300 dpi (print)","实图输出 · 150dpi（电子交付）": "Fit to display · 150 dpi (screen)","说明": "Note","按每张图的实际显示宽度换算目标像素再降采样：只缩不放、压完不变小就回滚用原图；源文件与磁盘上的图一个字节都不动。150dpi 下含小字的截图会发糊，慎用。": "Each image is downscaled to the pixels its real display width needs: never enlarged, and reverted to the original when the result is not smaller. The source files on disk are never touched. At 150 dpi screenshots with small text lose sharpness, so use with care.","def run(data):\n    # data['kv'] = {'键': '值'}（框架按第一个 == 剥离）\n    # data['raw'] = 数据点原文列表（== 不够用时自行解析）\n    return str(...)  # 返回 str 替换执行点；作图存当前目录返回 ![](文件名)": "def run(data):\n    # data['kv'] = {'key': 'value'} (the framework strips the first ==)\n    # data['raw'] = raw text of this data point (parse it yourself if == is not enough)\n    return str(...)  # return a str to replace the exec point; to draw a chart, save the file and return ![](file name)"};
+var I18N_EN={"字体 · 正文类":"Fonts · Body","字体 · 块级类":"Fonts · Blocks","段落缩进":"Indent","段间距":"Gap","页面 · 纸张与边距":"Page · Paper","纸张底色":"Paper tone","浅色 · 白纸黑字":"Light · dark ink on white","深色 · 深底浅字":"Dark · light ink on dark","纸面本身的浅/深两态。作用于预览、HTML 导出、打印/PDF（Word 不动，由 Word 主题管）。与界面深浅色**无关**——界面暗色时纸也可以是浅色，因为纸是产出物、不是界面":"The paper's own light/dark state. Applies to preview, HTML export and Print/PDF (Word is untouched — Word handles its own theme). Independent of the UI light/dark mode: with a dark UI the paper can still be light, because the paper is the output, not the interface","页面 · 页码":"Page · Numbers","编号":"Numbering","图片输出":"Image output","元数据":"Metadata","字":"chars","分":"min","H4~H6 标题（四级到六级标题共用一套字体设置）":"H4–H6 headings (levels 4 to 6 share one font setting)","关闭后 front matter 与 @@ meta 都不出元数据区（元数据区只在预览显示，不打印、不进 Word / HTML 导出）":"Turn off to hide the metadata block for both front matter and @@ meta (preview only: never printed, never in Word / HTML exports)","目录独占一页：其后第一个 ## 与正文强制另起新页，不侵入目录页":"Contents on its own page: the first following ## starts a new page, so the body never flows onto the contents page","三线表：去掉全部竖线，只留顶线、表头线、底线":"Booktabs: no vertical rules, only top, header and bottom rules","段间距（正文块之间的垂直间距，单位 em＝正文字号；@@ blank 逐处硬控可覆盖它）":"Paragraph gap (vertical space between body blocks, em = body size; @@ blank overrides it per spot)","字体 · 公式与题注":"Fonts · Math & captions","目录独占一页":"Contents on its own page","三线表":"Booktabs","列表标记外凸":"Hanging list markers","页边距":"Margins","自动落盘间隔":"Autosave interval","编辑区行号":"Editor line numbers","在编辑区左缘显示行号（按视觉行标在逻辑行首行上，长行折叠不重复计号）；点行号跳到该行":"Show line numbers along the editor's left edge (numbered at the first visual row of each logical line; wrapped lines are not counted twice). Click a number to jump to that line","留空则不写":"Blank = not written","如 2026-10-30":"e.g. 2026-10-30","逗号分隔":"Comma-separated","按显示宽度换算像素再降采样：只缩不放，压完没变小就回滚用原图。源文件一个字节都不动。":"Downscaled to the pixels each image's real display width needs: never enlarged, and reverted to the original when the result is not smaller. The file on disk is never touched.","当前：未建档（首次填写并应用时建档）":"Current: no archive yet (created on the first apply)","当前：首行 YAML front matter（兼容模式），写入会改这段原文":"Current: YAML front matter on line 1 (compatible mode); applying rewrites that block","当前：本文档的元数据文件":"Current: this document's metadata file","当前：本文档的元数据文件 · 建档于 {0}":"Current: this document's metadata file, created {0}",
+"设置里的这份值；应用时写入本文档：没有档案就建档（创建快照只写一次、只读），已有档案只在履历里追加":"Applied to this document: a missing archive is created (snapshot written once, read-only); an existing one only gets an appended log","　⚠ 正文缺 @@ meta 行，填写后自动插入":"  ⚠ no @@ meta line in the text; one is added when you apply","正在读取元数据档案，稍后再点「应用」":"Reading the metadata archive, click Apply again in a moment","请先保存文档（Ctrl+S），元数据档案要跟着文件走":"Save the document first (Ctrl+S); the archive travels with the file","元数据写入失败":"Could not write the metadata","元数据无变化":"Metadata unchanged","保存失败：{0}":"Save failed: {0}","已自动落盘 {0}":"Autosaved {0}","自动落盘已跳过：文档还没有保存路径":"Autosave skipped: the document has no path yet","显示元数据区":"Show metadata","文档标题":"Title","作者":"Author","日期":"Date","标签":"Tags","代称":"Alias","位置":"Position","模板与字号":"Template & size","生成目录":"Contents","显示页码":"Show numbers","正文 · 字符数":"Body · chars","引用块 · 字符数":"Quote · chars","列表 · 字符数":"List · chars","不计入目录":"Excluded","标题自动序号":"Headings","自定义宽 × 高":"Custom W × H","页边距 上/右/下/左":"Margins T/R/B/L","公式 KaTeX":"Math KaTeX","新建": "New","分屏": "Split","跟随": "Follow","暗色": "Dark","亮色": "Light","文件": "Files","打开": "Open","打印": "Print","排版": "TS","保存": "Save","另存为": "As…","替换": "Replace","全部": "All","▶ 运行": "▶ Run","运行中…": "Running…","默认文档": "Default doc","已存入缓存": "Cached","编辑中...": "Editing…","本工具由 AI 生成": "AI-generated","本工具由 AI 辅助生成": "Made with AI assistance","本工具由 AI 辅助生成 (AI-assisted)": "Made with AI assistance","文档批注数": "Number of notes","仅编辑": "Editor","仅预览": "Preview","不跟随": "No follow","大纲": "Outline","查找…": "Find…","区分大小写": "Match case","正则表达式": "Regular expression","全字匹配": "Whole word","上一个（Shift+Enter）": "Previous (Shift+Enter)","下一个（Enter）": "Next (Enter)","展开/收起替换（Ctrl+H）": "Toggle replace (Ctrl+H)","关闭（Esc）": "Close (Esc)","替换为（\\n 换行、\\t 制表；正则模式支持 $1 引用）": "Replace with (\\n newline, \\t tab; $1 backreference in regex mode)","替换当前命中（Ctrl+Z 可撤销）": "Replace this match (Ctrl+Z to undo)","全部替换（整体一步，Ctrl+Z 一次撤销）": "Replace all (one step, undo once with Ctrl+Z)","运行全部 @@ MDE 执行点（手动模式）": "Run all @@ MDE exec points (manual mode)","视图切换": "Switch view","主题切换": "Switch theme","最近文件与切换": "Recent files","打开 .md 文件": "Open a .md file","新建文档 (Ctrl+N)": "New document (Ctrl+N)","保存（Ctrl+S）": "Save (Ctrl+S)","另存为…": "Save as…","导出 HTML": "Export HTML","导出 Word(.docx)：保留样式与可编辑公式": "Export Word (.docx): styles and editable formulas preserved","AI 设置：润色 / 智能备注的后端与模型": "AI settings: backend and model for polish / smart notes","排版设置：字体/表格/缩进/自动落盘": "Typesetting: fonts / tables / indent / autosave","low runner：写/生成 Python run，供 @@ MDE 数据点与执行点调用": "low runner: write/generate Python runs for @@ MDE data and exec points","预览跟随编辑区滚动（仅分屏模式生效），点击开/关": "Preview follows editor scroll (split view only). Click to toggle","打印：在预览栏生成分页预览（纸张/页码/目录），可直接打印或存为 PDF": "Print: build a paged preview in the preview pane (paper, page numbers, contents); print or save as PDF directly","在这里写 Markdown...": "Write Markdown here…","Markdown 源码编辑区": "Markdown source editor","关闭": "Close","取消": "Cancel","应用": "Apply","保存文档": "Save document","文件名": "File name","格式": "Format","未命名": "Untitled","保存目录": "Folder","浏览…": "Browse…","Markdown 文档（.md，图片存同名 .assets 目录）": "Markdown (.md, images in a sibling .assets folder)","自包含文档（.smd，单文件含全部图片）": "Self-contained (.smd, all images in one file)","可直接粘贴路径，或点「浏览…」": "Paste a path, or click Browse…","排版设置": "Typesetting","自动落盘间隔（分钟，0=仅手动）": "Autosave interval (min, 0 = manual only)","字体 / 字号 / 对齐（字号留空 = 保持默认，单位磅；本机字体由后端自动枚举）": "Font / size / align (blank size keeps default, unit pt; local fonts listed by backend)","正文": "Body","H1 标题": "H1","H2 标题": "H2","H3 标题": "H3","H4~H6 标题": "H4–H6","引用块": "Quote","列表": "List","表格": "Table","代码": "Code","公式（KaTeX，字体固定）": "Math (KaTeX, fixed font)","图片": "Image","图题": "Figure caption","表题": "Table caption","本机字体": "Local fonts","(默认)": "(default)","默认": "Default","左对齐": "Left","居中": "Center","右对齐": "Right","两端对齐": "Justify","无": "None","首行缩进": "First line","悬挂缩进": "Hanging","整体缩进": "Block","磅": "pt","段落缩进（按元素独立，字符数 × 当前字号自动换算）": "Paragraph indent (per element; chars × current size)","列表标记外凸（续行悬挂）": "Hanging list markers","编号/圆点站到文字块外面，多行项的续行与首行文字左沿对齐；关闭则续行顶格（v2.13.5 及更早的口径）": "Markers sit outside the text block, wrapped lines align with the first line. Off = wrapped lines flush left (behaviour before v2.14)","段间距（正文块之间的垂直间距，单位 em＝正文字号；@@ blank{n} 逐处硬控可覆盖它）": "Paragraph gap (em = body size; @@ blank{n} overrides per spot)","统一段间距": "Uniform paragraph gap","表格样式": "Table style","三线表（去竖线，三条横线）": "Booktabs (no vertical rules, three rules)","表头底色": "Header shading","首列底色": "First column shading","页面（作用于「打印」导出）": "Page (used by the Print export)","纸张": "Paper","自定义": "Custom","自定义宽 × 高（mm）": "Custom width × height (mm)","宽": "W","高": "H","页边距 上/右/下/左（mm）": "Margins top/right/bottom/left (mm)","页码（打印导出时渲染）": "Page numbers (rendered on Print export)","页码": "Page number","显示": "Show","外侧（奇右偶左）": "Outside (right odd, left even)","底部居中": "Bottom center","底部右侧": "Bottom right","底部左侧": "Bottom left","顶部居中": "Top center","顶部右侧": "Top right","页码模板与字号（{p}=页码，{P}=全文总页数，{N}=本区总页数）": "Template and size ({p} = page, {P} = total pages, {N} = pages in this region)","目录（打印导出时自动生成，条目带页码）": "Contents (built on Print export, entries carry page numbers)","目录": "Contents","不生成": "None","生成": "Generate","置于文首": "At the start","第一个 # 之下": "After the first #","目录独占一页（后续 ## 与正文强制新页，不得侵入）": "Contents on its own page (following ## and body start a new page)","不计入目录（勾选的级别照常渲染、只是不进目录）": "Excluded from contents (checked levels still render, just not listed)","标题自动序号（只作用于预览与导出，不改源文；范围 ## ~ #####）": "Auto-number headings (preview and export only, source untouched; ## to #####)","自动序号": "Numbering","中文体　一、（一）1.（1）": "Chinese  一、 1.","层级体　1 / 1.1 / 1.1.1": "Decimal  1 / 1.1 / 1.1.1","图 / 表编号": "Fig. / table","全篇连续　图 1 / 表 1": "Whole doc  Fig. 1 / Tab. 1","按章重编　图 1-1 / 表 2-1": "Per chapter  Fig. 1-1","编号章级": "Chapter level","##　二级标题为章（默认）": "##  (default)","#　一级标题为章": "#","###　三级标题为章": "###","第 {p} 页 / 共 {P} 页": "Page {p} of {P}","low runner · run 库（编辑器级，全文档共用）": "low runner · run library (editor-wide, shared by all documents)","已保存": "Saved","运行": "Run","立即": "Immediately","等待": "Wait","秒": "s","手动": "Manual","名称": "Name","依赖目录": "Deps folder","AI 生成": "AI generate","报告 AI 生成内容": "Report AI content","保存入库": "Save to library","清空编辑区，另写一个新 run": "Clear the editor and start a new run","渲染完成后 0.4 秒自动运行（原行为）": "Run 0.4s after rendering (previous behaviour)","停止输入 N 秒后自动运行": "Run N seconds after typing stops","等待秒数": "Wait seconds","不自动运行：执行点旁 ▶ 单点运行，或左下角「▶ 运行」全部运行": "Never auto-run: use ▶ beside a point, or ▶ Run in the status bar","如 dark、统计（即文件名，@@ MDE import 用它）": "e.g. dark, stats (also the file name used by @@ MDE import)","打开 runtime/pylibs 目录，pip --target 装三方包": "Open runtime/pylibs to pip install --target third-party packages","对 AI 说出需求，如：求数据点里所有数字之和 / 统计某词出现次数 / 画折线图…（生成后需人工查阅）": "Describe what you need, e.g. sum all numbers in the data points / count a word / draw a line chart… (review the result)","向开发者报告不当的 AI 生成内容（微软商店政策 11.16）": "Report inappropriate AI-generated content (Microsoft Store policy 11.16)","先在下方输入框说出需求": "Describe what you need in the box below","AI 生成中（约 10~60 秒，取决于后端），完成后自动填入代码框…": "Generating (about 10–60 s depending on the backend); it will fill the code box…","AI 已生成——人工查阅后再「保存入库」": "Generated. Review it, then Save to library","（AI 未给名字，请手动命名）": " (no name from AI, please name it)","AI 生成失败：": "AI generation failed: ","\n可在工具栏「AI」里检查后端配置。": "\nCheck the backend in AI settings.","代码为空": "Code is empty","请先命名（@@ MDE import 的名字就是它）": "Name it first (this is the name used by @@ MDE import)","尚无文件路径，请先「另存为」": "No file path yet, use Save as first","未另存为": "Not saved yet","已覆盖 ": "Overwrote ","已保存 ": "Saved ","已覆盖": "Overwrote","（pip 名 ": " (pip name ","——运行将失败，请先安装：</div>": " — the run will fail, install it first:</div>","留空则按名称": "Blank uses the name","上一次生成": "Previous output","删": "Del","删除 ": "Delete ","（点两次确认）": " (click twice to confirm)","确定后删不掉": "Cannot be undone","确认删": "Confirm","只显示一次": "Shown only once","已载入 ": "Loaded ","——修改后「保存」即覆盖": " — Save overwrites it","读取失败：": "Read failed: ","run 库读取失败：": "Run library unreadable: ","待运行": "pending","▶ 待运行": "▶ Pending","全部运行": "Run all","打开就自动跑": "Runs on open","切手动不一定显示 ▶": "Manual mode may hide ▶","改别处 = 白跑一次": "Editing elsewhere wastes a run"," · 全局 ": " · global ","运行此执行点": "Run this point","文件改了但数没变": "File changed, data did not","有未完成": "Unfinished","外部改了文件 → 复位后仍命中旧结果": "File changed outside, reset still hits the old result","全局执行点须返回列表（得到 ": "Global points must return a list (got ","返回 ": "Returned "," 项 ≠ 标记 ": " items ≠ "," 个": " markers","执行失败": "Run failed","网络错误": "Network error","缺少包 ": "Missing package ","重试": "Retry","数据没变": "Data unchanged","数据变了": "Data changed","已替 data 运行": "Ran on data"," 个执行点未运行": " exec points not run"," 个执行点运行失败（红色错误信息就在执行点旁，▶ 可重试）": " exec points failed (the red message sits beside the point; ▶ retries)"," 个执行点已置为待运行": " exec points set back to pending","AI 设置（润色 / 智能备注）": "AI settings (polish / smart notes)","后端": "Backend","LM Studio（本地 :1234）": "LM Studio (local :1234)","Ollama（本地 :11434）": "Ollama (local :11434)","OpenAI 兼容（外部 API）": "OpenAI-compatible (external API)","服务地址（留空按后端默认端口）": "Endpoint (blank = backend default port)","API Key（OpenAI 兼容后端必填）": "API Key (required for OpenAI-compatible)","模型（下拉为后端实加载的模型）": "Model (list comes from the backend)","刷新": "Refresh","超时（秒）": "Timeout (s)","最大输出 tokens": "Max output tokens","温度 temperature（0~2）": "Temperature (0–2)","联网查询（润色 / AI 解释时检索网络资料）": "Web search (for polish / explain)","启用联网查询（关闭则 AI 仅凭自身润色/解释）": "Enable web search (off = model knowledge only)","搜索源": "Search provider","DuckDuckGo（免费，无需 Key）": "DuckDuckGo (free, no key)","Tavily（需 API Key）": "Tavily (needs an API key)","Google Custom Search（需 Key + CX）": "Google Custom Search (needs key + CX)","Bing Search（需 API Key）": "Bing Search (needs an API key)","自定义 API": "Custom API","API Key（Tavily / 自定义 API 用）": "API Key (Tavily / custom API)","自定义 API URL（{q} 与 {key} 占位）": "Custom API URL ({q} and {key} placeholders)","结果条数（1~10）": "Results (1–10)","RAG 知识库（检索增强润色 / 解释）": "RAG knowledge base (retrieval-augmented)","rag-assistant 路径（含 main.py 的目录）": "rag-assistant path (the folder holding main.py)","知识库（空 = 自动路由）": "Knowledge base (blank = auto)","RAG 服务（端口 8767）": "RAG service (port 8767)","探测中…": "Probing…","启动": "Start","停止": "Stop","测试连接": "Test connection","本地推理需先启动 LM Studio / Ollama 并加载模型；OpenAI 兼容后端填外部 API 地址与 Key（DeepSeek、硅基流动等均可用）；润色与「AI 解释」都走此配置。": "Local inference needs LM Studio / Ollama running with a model loaded; for OpenAI-compatible backends fill in the endpoint and key (DeepSeek, SiliconFlow and others work). Polish and Explain both use this config.","联网查询开启后，润色 / AI 解释先检索网络资料注入提示词，搜索失败自动降级为纯模型结果；与 RAG 相互独立。": "With web search on, polish / explain first pull web results into the prompt; failures fall back to the model alone. Independent of RAG.","「RAG润色 / RAG解释」在上述基础上检索 rag-assistant 知识库作为参考资料，需先在下方填写路径并启动 RAG 服务；启动/停止仅手动触发，退出编辑器不影响其运行。": "RAG polish / RAG explain also retrieve from the rag-assistant knowledge base. Set the path below and start the service first; start and stop are manual, and quitting the editor leaves it running.","重新探测 RAG 服务与知识库列表": "Re-probe the RAG service and knowledge bases","（点「刷新」拉取模型列表）": " (click Refresh to list models)","（列表外）": " (not listed)","已获取 ": "Loaded "," 个模型。": " models.","模型列表获取失败：": "Could not list models: ","读取 AI 配置失败": "Could not read the AI config","读取 AI 配置失败：": "Could not read the AI config: ","测试中…": "Testing…","连接成功": "Connected","连接失败": "Connection failed","测试失败：": "Test failed: ","AI 配置已保存": "AI settings saved","（自动路由）": " (auto)","在线（": "Online ("," 个知识库）": " knowledge bases)","启动中…（冷加载需数十秒）": "Starting… (cold start can take tens of seconds)","启动中…": "Starting…","RAG 启动失败：": "RAG failed to start: ","RAG 服务已停止": "RAG service stopped","RAG 停止失败：": "Could not stop the RAG service: "," 个结果": " results","无结果": "No results","离线": "Offline","还活着": "Reachable","批注": "Annotate","标注片段（跟文本内容走，原文编辑后自动同步；删光自动失效）": "Anchor text (follows the content and re-syncs after edits; gone when deleted)","AI 解释": "AI explain","RAG 解释": "RAG explain","删除标注": "Delete note","完成": "Done","备注": "Note","润色": "Polish","RAG润色": "RAG polish","AI 润色预览": "AI polish preview","原文": "Original","润色后（可先手动微调）": "Polished (tweak before applying)","替换原文": "Replace","写点备注…": "Add a note…","需 RAG 服务在线（AI 设置中启动）": "Requires the RAG service (start it in AI settings)","给选中片段加批注": "Add a note to the selection","AI 润色选中片段": "Polish the selection with AI","基于 RAG 知识库检索增强润色（需 RAG 服务在线）": "Retrieval-augmented polish (requires the RAG service)","解释中…": "Explaining…","已结合联网资料解释": "Explained with web results","联网搜索失败，已用纯模型结果": "Web search failed, used the model alone","AI 解释失败：": "Explain failed: ","RAG 解释失败：": "RAG explain failed: ","\n可在工具栏「AI」里检查 RAG 服务状态。": "\nCheck the RAG service in AI settings.","选中内容为空": "Nothing selected","无法标注该选区（跨元素边界）": "Cannot anchor this selection (crosses element boundaries)","润色中…（本地模型可能需要一些时间）": "Polishing… (a local model can take a while)","已结合联网资料润色": "Polished with web results","润色失败：": "Polish failed: ","检索知识库并润色中…（RAG 冷启动或本地模型可能需要一些时间）": "Retrieving and polishing… (RAG cold start or a local model can take a while)","RAG 润色失败：": "RAG polish failed: ","原文已变化，无法定位选区，请重新选择后重试。": "The text changed and the selection could not be located. Select again and retry.","报告将发送给开发者（": "The report goes to the developer (","）。未配置邮件客户端时，可复制下方内容自行粘贴发送。": "). With no mail client configured, copy the text below and send it yourself.","问题描述（可留空）": "Problem description (optional)","自动附带的报告内容（只读）": "Attached report (read-only)","复制报告内容": "Copy report","打开邮件客户端": "Open mail client","例如：内容与事实不符 / 出现不当表述 / 代码无法运行…": "e.g. factually wrong / inappropriate wording / code does not run…","报告内容已复制，请粘贴发送给开发者": "Report copied, paste it to the developer","报告内容已复制，请粘贴发送到 ": "Report copied, paste it to ","复制失败，请手动全选复制": "Copy failed, select all and copy manually","可复制下方内容发送给开发者。": "Copy the text below and send it to the developer.","（无）": "(none)","新标签页": "New tab","打开失败：": "Open failed: ","读取失败": "Read failed","读取文件失败：": "Could not read the file: ","已保存到原文件": "Saved to the original file","保存失败：": "Save failed: ","已载入原文件": "Loaded the original file","已打开：": "Opened: ","已载入": "Loaded","载入内置文档失败：": "Could not load the built-in document: ","使用指南": "User guide","版权与开源组件声明": "Copyright and open-source notices","通过「打开」按钮选择（浏览器不提供完整路径）": "Chosen with the Open button (the browser hides the full path)","该文件通过「打开」按钮选择，浏览器不提供完整路径，无法自动重载。\n请通过右键菜单打开它，或再次用「打开」选择。": "This file was picked with the Open button, so the browser hides its path and it cannot reload automatically.\nOpen it from the context menu, or pick it again with Open.","文档尚未保存，无法打开副本": "Save the document before opening a copy","已用系统程序打开副本": "Opened a copy with the system default app","用系统关联程序打开这份副本": "Open this copy with the system default app","选择保存位置失败：": "Could not choose a save location: ","粘贴图片前请先保存文档（Ctrl+S），图片将存入同名 .assets 目录。": "Save the document before pasting images (Ctrl+S); they go into a sibling .assets folder.","图片保存失败：": "Could not save the image: ","粘贴文件前请先保存文档（Ctrl+S），文件将存入同名 .assets 目录。": "Save the document before pasting files (Ctrl+S); they go into a sibling .assets folder.","文件超过 20MB 上限（当前 ": "File exceeds the 20 MB limit (currently ","正在写入 ": "Writing ","已插入数据点：": "Data point inserted: ","文件写入失败：": "Write failed: ","排版已更新（缓存）": "Typesetting updated (cached)","已落盘 ": "Written ","(未命名)": "(untitled)","文档": "Documents","桌面": "Desktop","下载": "Downloads","用户目录": "Home","上次目录": "Last folder","请先选择保存目录（点「浏览…」）": "Choose a folder first (click Browse…)","未命名.md": "Untitled.md","未命名文档": "Untitled document","预览不存在": "Preview not found","已导出：": "Exported: ","导出失败：": "Export failed: ","未知错误": "Unknown error","无法导出：": "Cannot export: ","。请先运行并确认全部执行点结果后再导出": ". Run the exec points and confirm their results before exporting","（状态栏「▶ 运行」一次跑全部）": "(▶ Run in the status bar runs them all)","正在生成打印版，请稍候…": "Building the print version…","打印导出失败（数据序列化错误）：": "Print export failed (data serialisation): ","导出 Word 文档": "Export Word","后台静默落盘 + 浏览器下载": "Saved in the background and downloaded by the browser","运行错误或失败静默导出": "Export silently on errors or failures","来源：": "Source: ","\n时间：": "\nTime: ","构建：": "Build: ","— AI 输出内容（自动附带，最多 1000 字）—\n": "— AI output (attached automatically, up to 1000 chars) —\n","— 问题描述 —\n": "— Problem description —\n","MDEditor AI 生成内容报告（": "MDEditor AI content report (","已恢复未落盘草稿": "Recovered an unsaved draft","检测到未落盘的本地草稿，已为你恢复（磁盘版本未被覆盖）": "An unsaved local draft was found and restored (the file on disk was not overwritten)","用磁盘版本": "Use the file on disk","恢复": "Restore","发现未完成的保存备份（": "Found an unfinished save backup (","），是否用它恢复本文档？": "). Restore this document from it?","恢复失败：": "Restore failed: ","已从保存备份恢复": "Restored from the save backup","就近": "Nearby","已到文末，从头继续": "Reached the end, continuing from the top","替换失败": "Replace failed","无命中": "No match","替换后与原文相同": "Replacement is identical to the original","已替换 ": "Replaced "," 处（Ctrl+Z 一步撤销）": " occurrences (Ctrl+Z undoes in one step)","正则表达式无效": "Invalid regular expression","已撤销全部替换": "Undid all replacements","渲染失败": "Render failed","<h2>请使用正确方式打开</h2>": "<h2>Please open this page properly</h2>","<p>本页面被直接双击打开（file://），此方式<b>没有后端服务</b>，公式、图片、保存、导出均不可用。</p>": "<p>This page was opened directly from disk (file://). <b>There is no backend</b>, so formulas, images, saving and exporting are unavailable.</p>","<p>正确打开方式（任选其一）：</p>": "<p>Open it one of these ways:</p>","<ol><li>右键任意 .md 文件 →「Open with Markdown Editor」</li>": "<ol><li>Right-click any .md file and choose Open with Markdown Editor</li>","<li>双击工具目录中的 <b>MarkdownEditor.exe</b></li>": "<li>Run <b>MarkdownEditor.exe</b> from the tool folder</li>","<li>双击 .md 文件（已关联本编辑器）</li></ol>": "<li>Double-click a .md file already associated with this editor</li></ol>","<p>若点下方按钮无反应，说明后端服务未运行——先做上面第 2 步。</p>": "<p>If the button below does nothing, the backend is not running. Do step 2 above first.</p>","一级标题": "H1","二级标题": "H2","标题": "Heading","加粗": "Bold","粗体": "Bold","斜体": "Italic","删除线": "Strikethrough","删除": "Strike","行内代码": "Code","引用": "Quote","无序列表": "Bullets","列表项": "List item","序号": "Numbering","有序列表": "Numbered list","任务": "Task","任务列表": "Task list","链接": "Link","插入链接": "Insert link","链接文字": "Link text","插入表格": "Insert table","图表自动编号（图、表各自计数；只作用于预览与导出，不改源文）": "Auto-number figures and tables (each counted separately; preview and export only, source untouched)","内置文档": "Built-in documents","内置文档 · 点击载入（可编辑/另存为）": "Built-in · click to load (editable, save as copy)","回到初始示例状态": "Reset to the initial sample","最近文件": "Recent files","暂无标题": "No headings","默认文档（使用指南）": "Default document (user guide)","切换界面语言：中文 / English": "Switch the interface language: 中文 / English","语法提示开关：开启后光标所在行弹出方言速查（语法检查不受影响）": "Syntax hint toggle: shows the dialect cheat-sheet at the cursor when on (lint checks unaffected)","提示": "Hints","保存到 ": "Save to ","图": "Figure","表": "Table","图片输出（「打印」与导出；预览始终按栏宽缩略，不受此项影响）": "Image output (Print and exports; the preview always uses a column-width thumbnail and is unaffected)","像素": "Pixels","原图输出（不压缩）": "Original (no compression)","实图输出 · 300dpi（印刷）": "Fit to display · 300 dpi (print)","实图输出 · 150dpi（电子交付）": "Fit to display · 150 dpi (screen)","说明": "Note","按每张图的实际显示宽度换算目标像素再降采样：只缩不放、压完不变小就回滚用原图；源文件与磁盘上的图一个字节都不动。150dpi 下含小字的截图会发糊，慎用。": "Each image is downscaled to the pixels its real display width needs: never enlarged, and reverted to the original when the result is not smaller. The source files on disk are never touched. At 150 dpi screenshots with small text lose sharpness, so use with care.","def run(data):\n    # data['kv'] = {'键': '值'}（框架按第一个 == 剥离）\n    # data['raw'] = 数据点原文列表（== 不够用时自行解析）\n    return str(...)  # 返回 str 替换执行点；作图存当前目录返回 ![](文件名)": "def run(data):\n    # data['kv'] = {'key': 'value'} (the framework strips the first ==)\n    # data['raw'] = raw text of this data point (parse it yourself if == is not enough)\n    return str(...)  # return a str to replace the exec point; to draw a chart, save the file and return ![](file name)"};
 var I18N_RE=[[new RegExp("^批注 (\\d+)$"),"Notes {1}"],[new RegExp("^(\\d+) 字符$"),"{1} chars"],[new RegExp("^(\\d+) 词$"),"{1} words"],[new RegExp("^(\\d+) 行$"),"{1} lines"],[new RegExp("^第 (\\d+) 页 / 共 (\\d+) 页$"),"Page {1} of {2}"],[new RegExp("^(\\d+) 个结果$"),"{1} results"],[new RegExp("^在线（(\\d+) 个知识库）$"),"Online ({1} knowledge bases)"],[new RegExp("^已获取 (\\d+) 个模型。$"),"Loaded {1} models."],[new RegExp("^共 (\\d+) 条批注，点击正文中的虚线段可查看/编辑$"),"{1} notes; click a dashed span in the text to view or edit"],[new RegExp("^选中文字后点「备注」可加批注（AI 可在设置中配置）$"),"Select text and click Note to annotate (AI is configured in settings)"],[new RegExp("^已替换 (\\d+) 处（Ctrl\\+Z 一步撤销）$"),"Replaced {1} occurrences (Ctrl+Z undoes in one step)"],[new RegExp("^(\\d+) 个执行点未运行$"),"{1} exec points not run"],[new RegExp("^(\\d+) 个执行点已置为待运行$"),"{1} exec points set back to pending"],[new RegExp("^已载入 (.+?)——修改后「保存」即覆盖$"),"Loaded {1} — Save overwrites it"],[new RegExp("^验证失败：(.+)$"),"Verification failed: {1}"],[new RegExp("^删除 (.+)（点两次确认）$"),"Delete {1} (click twice)"],[new RegExp("^保存到 (.+)$"),"Save to {1}"],[new RegExp("^(.+) · (\\d{4}/\\d{1,2}/\\d{1,2} .+)$"),"{1} · {2}"],[new RegExp("^元数据已更新（(\\d+) 项）$"),"Metadata updated ({1} fields)"],[new RegExp("^元数据写入失败：(.+)$"),"Could not write the metadata: {1}"]];
 var _lang='zh';
 function _i18nLookup(t){
@@ -2840,7 +3274,8 @@ function _i18nEl(el){
 /* 只翻这些 UI 根；#editor、#preview、#outline（用户内容/文档标题）不在列 */
 var I18N_ROOTS=['#toolbar','#status','#findBar','#svOverlay','#tsOverlay','#lrOverlay',
                 '#fmOverlay','#llmOverlay','#annOverlay','#rwOverlay','#rpOverlay',
-                '#histOverlay','#importOverlay','#openMoreMenu'];
+                '#histOverlay','#importOverlay','#openMoreMenu','#newMoreMenu','#tplOverlay',
+                '#saveAsMenu','#tplSaveOverlay'];
 function _i18nRoots(){
   var out=[];
   for(var i=0;i<I18N_ROOTS.length;i++){
@@ -2928,6 +3363,75 @@ I18N_EN["历史版本"]="Versions";
 I18N_EN["保留"]="Keep";
 I18N_EN["份"]="copies";
 I18N_EN["第 {0} 版"]="Version {0}";
+/* v2.28.0 页边参考线 */
+I18N_EN["页边参考线"]="Margin guides";
+I18N_EN["页边参考线：在预览里画出这张纸的四边与版心。纸边界=灰实线，版心=红虚线，顶边距带里标注四边距实测值。**只作用于预览**——打印、HTML、Word 导出都不含参考线。开启后预览栏按整张纸显示（会出横向滚动条），文字位置一个像素不动"]="Margin guides: draws the sheet edge and the text block in the preview. Paper edge = solid grey, text block = dashed red, the four margins are written in the top band. Preview only — Print, HTML and Word exports never contain them. When on, the pane shows the whole sheet (a horizontal scrollbar may appear) while the text stays exactly where it was";
+/* v2.28.0 母版（.smdm） */
+I18N_EN["母版"]="Templates";
+I18N_EN["从母版新建 / 管理母版"]="New from template / Manage templates";
+I18N_EN["管理母版…"]="Manage templates…";
+I18N_EN["母版库："]="Template library: ";
+I18N_EN["（该位置不可写，母版存不进去）"]="(this location is not writable — templates cannot be saved there)";
+I18N_EN["还没有母版"]="No templates yet";
+I18N_EN["名称"]="Name";
+I18N_EN["图片"]="Images";
+I18N_EN["大小"]="Size";
+I18N_EN["修改时间"]="Modified";
+I18N_EN["操作"]="Actions";
+I18N_EN["新建"]="New";
+I18N_EN["编辑"]="Edit";
+I18N_EN["改名"]="Rename";
+I18N_EN["导出"]="Export";
+I18N_EN["删除"]="Delete";
+I18N_EN["刷新"]="Refresh";
+I18N_EN["关闭"]="Close";
+I18N_EN["确认删除？"]="Confirm delete?";
+I18N_EN["读取母版列表失败：{0}"]="Could not read templates: {0}";
+I18N_EN["从母版新建失败：{0}"]="Could not create from template: {0}";
+I18N_EN["已按母版「{0}」新建，保存时再选存放位置"]="Created from template “{0}” — choose where to save it on the first save";
+I18N_EN["改名失败：{0}"]="Rename failed: {0}";
+I18N_EN["已改名为：{0}"]="Renamed to: {0}";
+I18N_EN["导出母版"]="Export template";
+I18N_EN["已导出母版：{0}"]="Template exported: {0}";
+I18N_EN["导出失败：{0}"]="Export failed: {0}";
+I18N_EN["导入失败：{0}"]="Import failed: {0}";
+I18N_EN["已导入母版：{0}"]="Template imported: {0}";
+I18N_EN["已删除母版「{0}」（进了母版库的 .trash）"]="Template “{0}” deleted (moved into the library's .trash)";
+I18N_EN["删除失败：{0}"]="Delete failed: {0}";
+I18N_EN["母版不存在：{0}"]="Template not found: {0}";
+I18N_EN["母版：{0}"]="Template: {0}";
+I18N_EN["母版：{0}（未保存）"]="Template: {0} (unsaved)";
+/* v2.28.0 存为母版（另存为▾） */
+I18N_EN["存为母版"]="Save as template";
+I18N_EN["保存母版"]="Save template";
+I18N_EN["母版名称"]="Template name";
+I18N_EN["母版名称不能为空"]="Template name cannot be empty";
+I18N_EN["母版库路径还没取到，请重试"]="Template library path not ready yet, please retry";
+I18N_EN["存为母版失败：{0}"]="Failed to save template: {0}";
+I18N_EN["已存为母版「{0}」"]="Saved as template “{0}”";
+I18N_EN["母版库中已有「{0}」。直接确认将覆盖它；改个名字则存成一份新母版。"]="The library already has “{0}”. Confirming overwrites it; type another name to keep both.";
+I18N_EN["还没有母版。点「另存为 ▾」→「存为母版」，当前文档就成为母版。"]="No templates yet. Use Save as ▾ → Save as template to turn this document into one.";
+/* v2.29.0 图表操作菜单 */
+I18N_EN["图表操作"]="Chart actions";
+I18N_EN["另存为 SVG"]="Save as SVG";
+I18N_EN["另存为 PNG"]="Save as PNG";
+I18N_EN["复制源码"]="Copy source";
+I18N_EN["已下载 {0}"]="Saved {0}";
+I18N_EN["图表另存为"]="Save chart as";
+I18N_EN["已导出到 {0}"]="Exported to {0}";
+I18N_EN["源码已复制"]="Source copied";
+I18N_EN["复制失败：{0}"]="Copy failed: {0}";
+I18N_EN["图表导出失败：{0}"]="Chart export failed: {0}";
+I18N_EN["这张图还没有渲染完成，暂时无法导出"]="This chart has not finished rendering yet";
+I18N_EN["点「另存为 ▾」→「存为母版」，当前文档就成为母版。"]="Use Save as ▾ → Save as template to turn this document into one.";
+/* v2.26.5 分页预览（内置）新增文案 */
+I18N_EN["退出分页"]="Exit paged view";
+I18N_EN["正在分页…"]="Paginating…";
+I18N_EN["分页未完成（仍可查看与打印）"]="Paged view incomplete (still viewable and printable)";
+I18N_EN["打印失败："]="Print failed: ";
+I18N_EN["打印这份分页文档（纸张/页码在「排版」面板配置）"]="Print this paged document (paper / page numbers are set in Typesetting)";
+I18N_EN["退出分页预览，回到普通预览"]="Exit the paged preview and return to the normal preview";
+I18N_RE.push([new RegExp("^共 (\\d+) 页$"),"{1} pages"]);
 I18N_EN["历史版本预览"]="Version preview";
 I18N_EN["恢复到此版本"]="Restore this version";
 I18N_EN["确认恢复？"]="Confirm restore?";
@@ -3331,6 +3835,31 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
       }
     }
   }
+  function fixLocalBgs(root){
+    /* v2.27.1 full 背景图补 base（与 fixLocalImages 同口径）。
+       背景图是 background-image、不是 <img>，fixLocalImages 天然扫不到，
+       于是「正文图用相对路径能显示、背景图同一个相对路径 404」——
+       用户看到的是整块没底图，像语法被截断，实则解析完全正常。
+       这里把 data-bg-img 里的相对路径按当前文档目录补全，并同步改写
+       内联 style（预览/HTML 导出读 style；打印后处理读 data-bg-img）。
+       已经是绝对路径 / http / data 的一律不动。 */
+    var base=currentBase!==null?currentBase:(currentFile?String(currentFile).replace(/[\\/][^\\/]*$/,''):'');
+    var els=root.querySelectorAll('[data-bg-img]');
+    for(var i=0;i<els.length;i++){
+      var u=els[i].getAttribute('data-bg-img')||'';
+      if(u.indexOf('/img?path=')!==0)continue;
+      var raw='';
+      try{ raw=decodeURIComponent(u.slice(10)); }catch(e){ continue; }
+      if(!raw)continue;
+      if(/^[A-Za-z]:[\\/]/.test(raw))continue;
+      if(/^[\\/]/.test(raw))continue;
+      if(/^(https?:|file:|data:)/i.test(raw))continue;
+      if(!base)continue;
+      var nu='/img?path='+encodeURIComponent(base+'/'+raw).replace(/'/g,'%27');
+      els[i].setAttribute('data-bg-img',nu);
+      els[i].style.backgroundImage="url('"+nu+"')";
+    }
+  }
   /* 围栏状态推进（与解析器完全同口径）：null = 围栏外，{ch,n} = 围栏内。
      开 N 收 N —— **个数严格相等**才算收尾，内层更大的个数不闭合外层。
      分块 / 大纲 / 标题锚点打标三处都必须用它，不能再布尔翻转：
@@ -3454,6 +3983,250 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
     }
   }
   var diagramSeq=0;
+  /* ---- 图表操作菜单（v2.29.0）：四引擎共用 ----
+     vega-embed 自带的 ⋯（Save as SVG/PNG、View Source、Open in Vega Editor）
+     只服务 vega 一家，与另外三家风格不一；此处统一自建、四项收成三项。
+     动作素材全取自已渲染 DOM：
+       SVG → 克隆 + foreignObject 转文本 + 计算样式内联（单文件打开不掉色）
+       PNG → 同一条 SVG 走 canvas 2x
+       源码 → data-code（写入时 encodeURIComponent，读时解码）
+     结构：按钮留图内（.mde-fig-acts），菜单是全局单例、挂在 body 下。
+     文档色调（md-tone-*）只在 #preview 子树里改写 --text/--border/--accent，
+     菜单若留在图内会继承成「深底深字」（实测 rgb(34,36,42) 压在
+     rgb(33,33,36) 上）；挂 body 则继承 UI 层变量，顺带彻底躲开
+     .diagram 的 overflow-x:auto 裁剪。 */
+  var _figMenuEl=null, _figActsRef=null;
+  function _diagOk(el){
+    el.classList.add('diagram-ok');
+    _figActs(el);
+  }
+  function _figActs(el){
+    if(el.querySelector('.mde-fig-acts'))return;
+    var box=document.createElement('div');
+    box.className='mde-fig-acts';
+    box.innerHTML='<button type="button" class="mde-fig-btn" aria-haspopup="true"'
+      +' aria-expanded="false" title="'+escapeHtml(T('图表操作'))+'">'
+      +'<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">'
+      +'<circle cx="3.2" cy="8" r="1.45" fill="currentColor"/>'
+      +'<circle cx="8" cy="8" r="1.45" fill="currentColor"/>'
+      +'<circle cx="12.8" cy="8" r="1.45" fill="currentColor"/></svg></button>';
+    el.appendChild(box);
+  }
+  function _figMenu(){
+    if(_figMenuEl&&_figMenuEl.isConnected)return _figMenuEl;
+    var m=document.createElement('div');
+    m.className='mde-fig-menu';
+    m.hidden=true;
+    m.innerHTML='<button type="button" data-fig-act="svg">'+escapeHtml(T('另存为 SVG'))+'</button>'
+      +'<button type="button" data-fig-act="png">'+escapeHtml(T('另存为 PNG'))+'</button>'
+      +'<button type="button" data-fig-act="src">'+escapeHtml(T('复制源码'))+'</button>';
+    document.body.appendChild(m);
+    _figMenuEl=m;
+    return m;
+  }
+  function _figClose(){
+    if(!_figMenuEl)return;
+    _figMenuEl.hidden=true;
+    var acts=_figActsRef;
+    _figActsRef=null;
+    if(acts&&acts.classList&&acts.classList.contains('mde-fig-acts')){
+      acts.removeAttribute('data-open');
+      var b=acts.querySelector('.mde-fig-btn');
+      if(b)b.setAttribute('aria-expanded','false');
+    }
+  }
+  /* 菜单固定定位的坐标换算。滚动时代码里会重算而不是关菜单——
+     否则「滚动 → 关 → 用户还得再点一次」，而且自动化点击前的
+     scrollIntoView 也会把刚打开的菜单弄没。 */
+  function _figPlace(btn,menu){
+    var r=btn.getBoundingClientRect();
+    var w=menu.offsetWidth||130, h=menu.offsetHeight||96;
+    var left=Math.max(8,Math.min(r.right-w, (window.innerWidth||0)-w-8));
+    var top=r.bottom+6;
+    if(top+h>(window.innerHeight||0)-8) top=Math.max(8, r.top-h-6);
+    menu.style.left=left+'px';
+    menu.style.top=top+'px';
+  }
+  function _figOpen(acts){
+    var btn=acts.querySelector('.mde-fig-btn');
+    if(!btn)return;
+    var menu=_figMenu();
+    if(!menu.hidden&&_figActsRef===acts){ _figClose(); return; }
+    _figClose();
+    _figActsRef=acts;
+    acts.setAttribute('data-open','1');
+    btn.setAttribute('aria-expanded','true');
+    menu.hidden=false;
+    _figPlace(btn,menu);
+  }
+  function _figSrc(diag){
+    var raw=diag.getAttribute('data-code')||'';
+    try{ return decodeURIComponent(raw); }catch(e){ return raw; }
+  }
+  function _copyText(txt,okMsg){
+    var fallback=function(){
+      var ta=document.createElement('textarea');
+      ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.select();
+      try{ document.execCommand('copy'); showToast(okMsg); }
+      catch(e){ showToast(TF('复制失败：{0}', e.message), true); }
+      document.body.removeChild(ta);
+    };
+    if(navigator.clipboard&&navigator.clipboard.writeText)
+      navigator.clipboard.writeText(txt).then(function(){showToast(okMsg);}, fallback);
+    else fallback();
+  }
+  /* 图表落盘走「导出 .docx / .html」同一条路：先由服务端弹原生另存为框取路径，
+     再 POST 字节让它写盘。不能用 <a download>——内嵌窗口是 pywebview，
+     ALLOW_DOWNLOADS 默认 False，on_download_starting 里直接 args.Cancel=True，
+     点了「另存为 SVG」等于什么都没发生（v2.29.0 修）。 */
+  function _figSave(diag, ext, payload, kind){
+    var name=_figName(diag,ext);
+    var dir=currentFile ? String(currentFile).replace(/[\\\/][^\\\/]*$/,'') : (lastDir||'');
+    fetch('/api/pick-save?ext='+encodeURIComponent(ext)+
+          '&dir='+encodeURIComponent(dir)+
+          '&name='+encodeURIComponent(name)+
+          '&title='+encodeURIComponent(T('图表另存为')))
+      .then(function(r){return r.json();})
+      .then(function(j){
+        if(!(j&&j.ok)) return;              /* 用户取消：静默，不报错 */
+        var body={path:j.path, kind:kind};
+        if(kind==='png') body.dataUrl=payload; else body.text=payload;
+        return fetch('/api/fig-save',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify(body)})
+          .then(function(r){return r.json();})
+          .then(function(k){
+            if(k&&k.ok) showToast(TF('已导出到 {0}', k.path));
+            else showToast(TF('图表导出失败：{0}', (k&&k.error)||T('未知错误')), true);
+          });
+      })
+      .catch(function(e){ showToast(TF('图表导出失败：{0}', e.message), true); });
+  }
+  function _figName(diag,ext){
+    var base='图';
+    if(currentFile){
+      var p=String(currentFile).replace(/\\/g,'/').split('/');
+      var fn=p[p.length-1]||'';
+      if(fn)base=fn.replace(/\.[^.]+$/,'')||'图';
+    }
+    var all=preview.querySelectorAll('.diagram'), idx=-1;
+    for(var i=0;i<all.length;i++){ if(all[i]===diag){ idx=i; break; } }
+    return base+'-图'+(idx+1)+'.'+ext;
+  }
+  /* svg 序列化：尺寸按屏幕实际显示取（导出件与预览同尺寸），
+     foreignObject 先转纯 text（canvas 画 foreignObject 会污染画布）。 */
+  /* 取图表本体 svg：跳过 ⋯ 按钮里的图标 svg。按钮 appendChild 在末尾，
+     querySelector('svg') 多数情况已命中本体，但渲染失败只剩按钮时（导出
+     栅格化会遍历 .diagram[data-done]）会误把 14px 图标当图。 */
+  function _diagSvg(diag){
+    var list=diag.querySelectorAll('svg');
+    for(var i=0;i<list.length;i++){
+      if(!list[i].closest('.mde-fig-acts'))return list[i];
+    }
+    return null;
+  }
+  function _figSvgXml(diag){
+    var svg=_diagSvg(diag);
+    if(!svg)return null;
+    var rect=svg.getBoundingClientRect();
+    var w=Math.max(1,Math.ceil(rect.width)), h=Math.max(1,Math.ceil(rect.height));
+    var c=svg.cloneNode(true);
+    try{ _foToText(svg,c); }catch(e){}
+    /* 计算样式内联：mermaid 的配色/字体多在 <style> 与页面 CSS 变量里，
+       抽出单文件会掉；wavedrom/graphviz 本就是属性色，贴一遍也无害 */
+    var reals=[svg].concat([].slice.call(svg.querySelectorAll('*')));
+    var clones=[c].concat([].slice.call(c.querySelectorAll('*')));
+    var props=['fill','stroke','stroke-width','stroke-dasharray','stroke-linecap',
+      'stroke-linejoin','fill-opacity','stroke-opacity','opacity','color',
+      'font-family','font-size','font-weight','font-style','text-anchor',
+      'dominant-baseline','shape-rendering','visibility'];
+    var n=Math.min(reals.length,clones.length);
+    for(var i=0;i<n;i++){
+      var cl=clones[i];
+      if(!cl.style)continue;
+      var cs=getComputedStyle(reals[i]);
+      for(var k=0;k<props.length;k++){
+        var v=cs.getPropertyValue(props[k]);
+        if(v&&v!=='auto'&&v!=='')cl.style.setProperty(props[k],v);
+      }
+    }
+    c.setAttribute('xmlns','http://www.w3.org/2000/svg');
+    c.setAttribute('xmlns:xlink','http://www.w3.org/1999/xlink');
+    c.setAttribute('width',w);
+    c.setAttribute('height',h);
+    if(c.style){ c.style.removeProperty('max-width'); c.style.removeProperty('height'); }
+    var xml;
+    try{ xml=new XMLSerializer().serializeToString(c); }
+    catch(e){ return null; }
+    if(xml.indexOf('xmlns=')<0)
+      xml=xml.replace('<svg','<svg xmlns="http://www.w3.org/2000/svg"');
+    return {xml:xml,w:w,h:h};
+  }
+  function _figDo(diag,act){
+    if(act==='src'){
+      _copyText(_figSrc(diag), T('源码已复制'));
+      return;
+    }
+    var got=_figSvgXml(diag);
+    if(!got){ showToast(T('这张图还没有渲染完成，暂时无法导出'), true); return; }
+    if(act==='svg'){
+      _figSave(diag, 'svg', got.xml, 'svg');
+      return;
+    }
+    if(act==='png'){
+      var img=new Image();
+      img.onload=function(){
+        try{
+          var cv=document.createElement('canvas');
+          cv.width=got.w*2; cv.height=got.h*2;   /* 2x 与文档导出同口径 */
+          var cx=cv.getContext('2d');
+          cx.setTransform(2,0,0,2,0,0);
+          cx.drawImage(img,0,0,got.w,got.h);
+          _figSave(diag, 'png', cv.toDataURL('image/png'), 'png');
+        }catch(e){ showToast(TF('图表导出失败：{0}', e.message), true); }
+      };
+      img.onerror=function(){ showToast(TF('图表导出失败：{0}','image decode'), true); };
+      img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(got.xml);
+    }
+  }
+  /* 一次委托管全部图：⋯ 开合、菜单项执行、点别处关闭 */
+  document.addEventListener('click', function(e){
+    var t=e.target;
+    if(!t||!t.closest)return;
+    var btn=t.closest('.mde-fig-btn');
+    if(btn){
+      e.preventDefault(); e.stopPropagation();
+      _figOpen(btn.parentNode);
+      return;
+    }
+    var item=t.closest('[data-fig-act]');
+    if(item){
+      e.preventDefault(); e.stopPropagation();
+      var acts=_figActsRef;
+      var diag=acts&&acts.parentNode;
+      var act=item.getAttribute('data-fig-act');
+      _figClose();
+      if(diag)_figDo(diag,act);
+      return;
+    }
+    _figClose();
+  }, true);
+  document.addEventListener('mousedown', function(e){
+    if(!_figMenuEl||_figMenuEl.hidden)return;
+    var t=e.target;
+    if(t&&t.closest&&(t.closest('.mde-fig-acts')||t.closest('.mde-fig-menu')))return;
+    _figClose();
+  }, true);
+  document.addEventListener('keydown', function(e){
+    if(_figMenuEl&&!_figMenuEl.hidden&&e.key==='Escape')_figClose();
+  });
+  window.addEventListener('scroll', function(){
+    if(!_figMenuEl||_figMenuEl.hidden)return;
+    var acts=_figActsRef;
+    if(!acts||!acts.isConnected){ _figClose(); return; }
+    var btn=acts.querySelector('.mde-fig-btn');
+    if(btn)_figPlace(btn,_figMenuEl);
+  }, true);
   function mountDiagrams(root){
     if(!root||!root.querySelectorAll)return;
     var mm=root.querySelectorAll('.diagram[data-diagram="mermaid"]:not([data-done])');
@@ -3466,7 +4239,7 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
           var src=decodeURIComponent(el.getAttribute('data-code')||'');
           mermaid.render('mmd-'+(++diagramSeq), src).then(function(res){
             el.innerHTML=res.svg;
-            el.classList.add('diagram-ok');
+            _diagOk(el);
           }).catch(function(e){ diagramErr(el,src,e); });
         })(mm[i]);
       }
@@ -3477,7 +4250,7 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
           if(el.getAttribute('data-done'))return;
           el.setAttribute('data-done','1');
           var src=decodeURIComponent(el.getAttribute('data-code')||'');
-          var done=function(svg){ el.innerHTML=''; el.appendChild(svg); el.classList.add('diagram-ok'); };
+          var done=function(svg){ el.innerHTML=''; el.appendChild(svg); _diagOk(el); };
           try{
             if(vizInstance){ done(vizInstance.renderSVGElement(src)); }
             else{ Viz.instance().then(function(v){ vizInstance=v; done(vizInstance.renderSVGElement(src)); }).catch(function(e){ diagramErr(el,src,e); }); }
@@ -3503,7 +4276,7 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
             /* 暗色 UI 用 dark 皮肤；源码显式声明 skin 时尊重源码 */
             if(!obj.skin && !document.body.classList.contains('light'))obj.skin='dark';
             WaveDrom.RenderWaveForm(wi, obj, 'wd-');
-            el.classList.add('diagram-ok');
+            _diagOk(el);
           }catch(e){ diagramErr(el,src,e); }
         })(ww[w]);
       }
@@ -3517,7 +4290,8 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
           var src=decodeURIComponent(el.getAttribute('data-code')||'');
           try{
             var spec=JSON.parse(src);  /* 严格 JSON，fail-closed */
-            vegaEmbed(el, spec, {renderer:'svg'}).then(function(){ el.classList.add('diagram-ok'); })
+            /* v2.29.0 关掉 vega-embed 自带的 ⋯ 工具条，四家统一走自建菜单 */
+            vegaEmbed(el, spec, {renderer:'svg', actions:false}).then(function(){ _diagOk(el); })
               .catch(function(e){ diagramErr(el,src,e); });
           }catch(e){ diagramErr(el,src,e); }
         })(vg[k]);
@@ -3922,12 +4696,18 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
       div.setAttribute('data-h', blockHash(q.blocks[bi]));
       div.setAttribute('data-src-line', String(q.startLines[bi]||0));
       div.innerHTML=parseMarkdown(q.blocks[bi]);
-      restoreMath(div); fixLocalImages(div);
-      mountDiagrams(div);
+      restoreMath(div); fixLocalImages(div); fixLocalBgs(div);
+      /* v2.29.0 顺序修正：先入文档再渲染。WaveDrom.RenderWaveForm 内部用
+         document.getElementById 取容器（wavedrom.min.js 里
+         ro(t,e,n,s){so(t,e,document.getElementById(n+t),window.WaveSkin,s)}），
+         容器不在文档中即拿 null，抛 childNodes of null。vendor 冷启动时回调
+         走异步队列、执行时 div 早已插入，所以只有「已加载 + 新块」这一组合
+         必挂——表现为波形图偶发整块空白。 */
       if(fresh){
         var next=q.existing[bi+1];
         preview.insertBefore(div, next||null);
       }
+      mountDiagrams(div);
       renderQueue.t=setTimeout(step,0);
     },0);
   }
@@ -4169,6 +4949,110 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
     }
     mirrorTops=tops;
     mirrorReady=true;
+    if(lnOn())gutterRender();   /* 行号吃 mirrorTops：内容/排版/字号任何变化经此处 */
+  }
+  /* ── v2.26.5 编辑区行号 ──────────────────────────────────────
+     数据源：mirrorTops[]（每逻辑行顶像素，含校准）+ mirrorPad。
+     渲染：窗口化（视口 ±100px），rAF 节流；滚动只平移容器。
+     点击行号 = 跳到该逻辑行首（树走文本偏移，兼容 span[data-aid] 拆节点）。 */
+  var gutterEl=null,gutterInEl=null,gutterRaf=null,lnCache=null;
+  /* 不读 tsCfg：render 管线（镜像层）会在 tsCfg 初始化之前跑
+     （首轮 render 判例，tsCfg 尚未赋值），直读 localStorage + 缓存。
+     缓存在 applyLineNo 里失效——applyTypeset 先落盘、本函数后重读，
+     「应用」切开关当帧生效。 */
+  function lnOn(){
+    if(lnCache===null){
+      try{lnCache=!!JSON.parse(localStorage.getItem('md-editor-typeset-v3')||'{}').lineno;}
+      catch(e){lnCache=false;}
+    }
+    return lnCache;
+  }
+  function gutterEnsure(){
+    if(gutterEl)return true;
+    var pane=document.getElementById('editorPane');
+    if(!pane)return false;
+    gutterEl=document.createElement('div');
+    gutterEl.id='edGutter';
+    gutterInEl=document.createElement('div');
+    gutterInEl.id='edGutterIn';
+    gutterEl.appendChild(gutterInEl);
+    gutterEl.addEventListener('click',function(e){
+      var t=e.target;
+      if(!t||!t.getAttribute||!t.getAttribute('data-ln'))return;
+      gutterJump(parseInt(t.getAttribute('data-ln'),10));
+    });
+    pane.appendChild(gutterEl);
+    return true;
+  }
+  function applyLineNo(){
+    lnCache=null;          /* 开关可能刚被「应用」改过，强制重读 */
+    var on=lnOn();
+    if(on&&!gutterEnsure())return;
+    if(gutterEl)gutterEl.hidden=!on;
+    editor.classList.toggle('ln-on',on);
+    if(on){ buildMirrorMap(); }        /* padding 变了，镜像与行号一起重算 */
+    else if(gutterInEl){ gutterInEl.innerHTML=''; }
+  }
+  function gutterRender(){
+    if(!lnOn()||!mirrorReady){ if(gutterInEl)gutterInEl.innerHTML=''; return; }
+    if(!gutterEnsure())return;
+    var S=editor.scrollTop,vh=editor.clientHeight;
+    gutterInEl.style.transform='translateY('+(-S)+'px)';
+    /* 可见窗：tops 单调不减，线性找两端即可（窗内通常几十行） */
+    var lo=-1,hi=-1;
+    for(var i=0;i<mirrorTops.length;i++){
+      var y=mirrorTops[i]+mirrorPad;
+      if(y<S-100)continue;
+      if(y>S+vh+100)break;
+      if(lo<0)lo=i;
+      hi=i;
+    }
+    if(lo<0){ gutterInEl.innerHTML=''; return; }
+    var h='';
+    for(var j=lo;j<=hi;j++){
+      h+='<div class="gln" data-ln="'+j+'" style="top:'+
+         (mirrorTops[j]+mirrorPad)+'px">'+(j+1)+'</div>';
+    }
+    gutterInEl.innerHTML=h;
+  }
+  function gutterScroll(){
+    if(!lnOn())return;
+    if(gutterRaf)return;
+    gutterRaf=requestAnimationFrame(function(){
+      gutterRaf=null;
+      gutterRender();
+    });
+  }
+  /* 树走：全局文本偏移 → (节点, 节点内偏移)，用于把光标放到第 ln 行行首 */
+  function gutterCaretPos(off){
+    var walker=document.createTreeWalker(editor,NodeFilter.SHOW_TEXT,null,false);
+    var n,acc=0;
+    while((n=walker.nextNode())){
+      var len=n.nodeValue.length;
+      if(acc+len>=off)return{node:n,offset:off-acc};
+      acc+=len;
+    }
+    return null;
+  }
+  function gutterJump(ln){
+    var lines=getText().split('\n');
+    if(ln<0||ln>=lines.length)return;
+    var off=0;
+    for(var i=0;i<ln;i++)off+=lines[i].length+1;
+    var pos=gutterCaretPos(off);
+    if(!pos)return;
+    var sel=window.getSelection(),rg=document.createRange();
+    rg.setStart(pos.node,pos.offset);
+    rg.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(rg);
+    /* 行首滚到视口上部 1/3 处，看得见落点上下文 */
+    if(mirrorTops[ln]!==undefined){
+      var want=mirrorTops[ln]+mirrorPad-editor.clientHeight/3;
+      editor.scrollTop=Math.max(0,want);
+    }
+    editor.focus();
+    gutterRender();
   }
   var syncRaf=null;
   function syncPreviewToEditor(){
@@ -4235,6 +5119,7 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
     });
   }
   editor.addEventListener('scroll',syncPreviewToEditor);
+  editor.addEventListener('scroll',gutterScroll);
 
   var fmtDefs=[
     {label:'H1',title:'一级标题',wrap:false,pre:'# ',post:'',ph:'标题'},
@@ -4417,6 +5302,8 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
           stripMetaZones(bundle.clone, ext === 'html');
           var payload;
           var pageCfg=(function(){try{return JSON.parse(JSON.stringify(tsCfg.page));}catch(e){return {};}})();
+          /* v2.28.0 页边参考线是纯预览标尺，不属于产物契约：不进导出 payload */
+          if(pageCfg)delete pageCfg.guide;
           if (ext === 'docx') {
             var h = new XMLSerializer().serializeToString(inlineStylesInto(bundle.clone));
             payload = {mdPath: currentFile, path: j.path, bodyHtml: h,
@@ -4454,6 +5341,11 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
   function stripMetaZones(root, keepYaml){
     if(!root)return;
     var nodes=root.querySelectorAll('[data-mde-zone]');
+    /* v2.26.5 空壳清理：zone 删除后只剩空壳的 pblk 一并移除。
+       零高度空壳平时无害，但打印分页里它会占住一页——撞上
+       h1{break-before:page} 就把第一个 # 顶到第 2 页，首行是元数据的
+       文档打印空白第 1 页（2026-11-02 判例，@@ meta 与 YAML 同病）。 */
+    var shells=[];
     for(var i=nodes.length-1;i>=0;i--){
       var n=nodes[i];
       if(keepYaml&&n.getAttribute('data-mde-zone')==='a'){
@@ -4469,8 +5361,18 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
         pre.textContent='---\n'+lines.join('\n')+'\n---\n';
         n.parentNode.replaceChild(pre,n);
       }else{
+        var p=n.parentNode;
         n.parentNode.removeChild(n);
+        if(p&&p.nodeType===1&&shells.indexOf(p)<0)shells.push(p);
       }
+    }
+    for(var s=0;s<shells.length;s++){
+      var sh=shells[s];
+      if(sh.nodeName!=='DIV'||!sh.parentNode)continue;
+      if(!/(^|\s)pblk(\s|$)/.test(sh.className||''))continue;
+      if(sh.querySelector('*'))continue;                 /* 还有元素就不动 */
+      if((sh.textContent||'').replace(/\s/g,''))continue;/* 还有文本就不动 */
+      sh.parentNode.removeChild(sh);
     }
   }
   /* 把元素视觉样式计算值内联进 style 属性（供 docx 导出）。
@@ -4492,7 +5394,7 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
        导出PNG/导出SVG，summary 带箭头图标 svg；实测 details 无 class）：
        导出产物里是杂讯（docx 出 [图表] 占位、HTML 残留无样式图标），
        克隆后即删；仅渲染预览不受影响 */
-    var acts=clone.querySelectorAll('.vega-actions, .diagram details');
+    var acts=clone.querySelectorAll('.vega-actions, .diagram details, .mde-fig-acts');
     for(var a=0;a<acts.length;a++){ if(acts[a].parentNode){acts[a].parentNode.removeChild(acts[a]);} }
     /* low runner 导出口径：隐性数据点（display:none）必须删——docx 不认
        display:none，拉平会把隐藏数据当正文显示；显性数据点 span 保留
@@ -4617,7 +5519,7 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
   }
   function _rasterOne(diagEl){
     return new Promise(function(resolve){
-      var svg=diagEl.querySelector('svg');
+      var svg=_diagSvg(diagEl);
       if(!svg){resolve();return;}
       var rect=svg.getBoundingClientRect();
       var w=Math.max(1,Math.ceil(rect.width));
@@ -4767,9 +5669,11 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
     exportWithDialog('docx', '/api/export-docx', '导出 Word 文档');
   });
   var pagedBusy = false;
-  /* 打印（原「分页」按钮，二者已合并）：内嵌窗口下 window.print() 会阻塞，
-     故生成分页版 HTML 交给系统浏览器打开，用户在浏览器里 Ctrl+P
-     即可打印或存为 PDF。纸张/页码/目录在「排版」面板配置。 */
+  /* 打印（原「分页」按钮，二者已合并）：生成分页版 HTML 后不再跳外部浏览器，
+     改为在预览栏内用 iframe 装载（Paged.js 在 iframe 内自行分页），顶部固定
+     「打印 / 退出分页」两按钮；「打印」走 iframe.contentWindow.print()——
+     打印目标是分页文档本身，编辑器 UI 绝无进打印管线的可能。
+     纸张/页码/目录在「排版」面板配置。分页预览是静态快照，不做实时与跟随。 */
   document.getElementById('btnExportPaged').addEventListener('click',function(){
     uiBeacon('打印:1 进入');
     if (!_lrExportGate()) return;   /* v2.5.2：执行点未全部成功，拦截（与 HTML/docx 同关口） */
@@ -4815,7 +5719,7 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
         clearTimeout(timer);
         uiBeacon('打印:6 解析完成 ok=' + (j && j.ok));
         pagedBusy = false;
-        if(j&&j.ok){openExternal(j.url+'?t='+Date.now());}
+        if(j&&j.ok){enterPagedMode(j.url+'?t='+Date.now());}
         else{showToast('导出失败：'+((j&&j.error)||'未知错误'));}
       }).catch(function(e){
         clearTimeout(timer);
@@ -4829,6 +5733,63 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
       showToast('导出失败：'+(e && e.message));
     });
   });
+
+  /* ── 分页预览（内置）────────────────────────────────────
+     iframe 装载 /api/export-paged 产物，Paged.js 在 iframe 内自行分页。
+     轮询 .pagedjs_page 数量连续稳定即认为分页完成；Esc 或「退出分页」还原。 */
+  var _pagedPollTid = null;
+  function enterPagedMode(url){
+    /* 仅编辑视图下预览栏不可见：自动切回分屏再进分页 */
+    if(document.body.classList.contains('view-edit')){viewIdx=0;applyView();}
+    var pv = document.getElementById('preview');
+    var wrap = document.getElementById('pagedWrap');
+    var fr = document.getElementById('pagedFrame');
+    var st = document.getElementById('pagedStat');
+    if(_pagedPollTid){clearInterval(_pagedPollTid);_pagedPollTid=null;}
+    pv.style.display = 'none';
+    wrap.hidden = false;
+    st.textContent = T('正在分页…');
+    fr.src = url;
+    var last=-1, stable=0, tries=0;
+    _pagedPollTid = setInterval(function(){
+      tries++;
+      var n=-1;
+      try{
+        var d = fr.contentDocument;
+        if(d && d.body) n = d.querySelectorAll('.pagedjs_page').length;
+      }catch(e){}
+      if(n>0 && n===last){
+        if(++stable>=5){ /* ~1.25s 无增长 = 分页完成 */
+          clearInterval(_pagedPollTid);_pagedPollTid=null;
+          st.textContent = TF('共 {0} 页', n);
+        }
+      }else{stable=0;last=n;}
+      if(tries>240){ /* 60s 兜底：停轮询但内容照常可看可打 */
+        clearInterval(_pagedPollTid);_pagedPollTid=null;
+        if(last>0) st.textContent = TF('共 {0} 页', last);
+        else st.textContent = T('分页未完成（仍可查看与打印）');
+      }
+    },250);
+  }
+  function exitPagedMode(){
+    if(_pagedPollTid){clearInterval(_pagedPollTid);_pagedPollTid=null;}
+    var wrap = document.getElementById('pagedWrap');
+    var fr = document.getElementById('pagedFrame');
+    wrap.hidden = true;
+    try{fr.src='about:blank';}catch(e){}
+    document.getElementById('preview').style.display = '';
+  }
+  function printPaged(){
+    var fr = document.getElementById('pagedFrame');
+    try{ fr.contentWindow.print(); }
+    catch(e){ showToast(T('打印失败：')+e.message); }
+  }
+  document.getElementById('pagedPrintBtn').addEventListener('click',printPaged);
+  document.getElementById('pagedExitBtn').addEventListener('click',exitPagedMode);
+  document.addEventListener('keydown',function(e){
+    var wrap = document.getElementById('pagedWrap');
+    if(wrap && !wrap.hidden && e.key==='Escape'){exitPagedMode();}
+  },true);
 
 
 
@@ -5087,7 +6048,7 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
     var tsEl=document.getElementById('ts-style');
     var tsCss=tsEl?tsEl.textContent:'';
     return '<!DOCTYPE html>\n<html lang="zh-CN"><head><meta charset="UTF-8"><title>'+escapeHtml(title)+'</title>'+
-      '<style>'+katexCssText+'div.md-math-block{overflow-x:auto;margin:.8em 0;}span.md-math-inline{white-space:nowrap;}'+tsCss+'</style>'+'<style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;max-width:820px;margin:40px auto;padding:0 20px;line-height:1.7;color:#222;}'+
+      '<style>'+katexCssText+'div.md-math-block{overflow-x:auto;margin:.8em 0;}span.md-math-inline{white-space:nowrap;}'+tsCss+'</style>'+'<style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:820px;margin:40px auto;padding:0 20px;line-height:1.7;color:#222;}'+
       'h1,h2{border-bottom:1px solid #eee;padding-bottom:.3em;}code{background:#f4f4f4;padding:.15em .4em;border-radius:4px;font-family:Consolas,monospace;}pre{background:#f4f4f4;padding:14px;border-radius:8px;overflow:auto;}blockquote{border-left:3px solid #4a6cf7;background:#f5f7ff;padding:.4em 1em;margin:1em 0;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ddd;padding:7px 12px;}img{max-width:100%;}a{color:#4a6cf7;}</style></head><body class="markdown-body">'+body+'</body></html>';
   }
 
@@ -5170,7 +6131,7 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
   }
   /* 任何一次「打开已有文件」都走这里：清除「本次新建」标记，
      之后建档才敢写 created=none（接手别人的内容，不猜它哪年建的）。 */
-  function markOpened(){ _docCreatedHere=false; }
+  function markOpened(){ _docCreatedHere=false; _tplOrigin=''; }
   function loadFromUrl(){
     var m=location.search.match(/[?&]file=([^&]+)/);
     if(!m) return;
@@ -5280,9 +6241,16 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
   var PAPER_W_MM={A0:841,A1:594,A2:420,A3:297,A4:210,A5:148,
     B0:1000,B1:707,B2:500,B3:353,B4:250,B5:176,
     Letter:215.9,Legal:215.9,Ledger:279.4};
+  /* v2.26.6 纸张高 mm 表（与 md_server PAPER_H_MM 同源同值；custom 用 tsPh） */
+  var PAPER_H_MM={A0:1189,A1:841,A2:594,A3:420,A4:297,A5:210,
+    B0:1414,B1:1000,B2:707,B3:500,B4:353,B5:250,
+    Letter:279.4,Legal:355.6,Ledger:431.8};
   var SYS_KEY='md-editor-sysfonts';
-  var FONT_OPTS=['(默认)','宋体','黑体','微软雅黑','楷体','仿宋','等线','Arial','Georgia','Times New Roman','Courier New'];
-  var FONT_VALS=['','SimSun,serif','SimHei,sans-serif','"Microsoft YaHei",sans-serif','KaiTi,serif','FangSong,serif','DengXian,sans-serif','Arial,sans-serif','Georgia,serif','"Times New Roman",serif','"Courier New",monospace'];
+  /* 字体下拉只两档：「(默认)」（纯系统回落，产品零指定）+「本机字体」分组
+     （服务端 /api/fonts 读注册表真枚举，有什么列什么）。历史硬编码清单
+     （宋体/黑体/微软雅黑/楷体…）已删——本机没有的字体列出来是空选，
+     且产品点名微软雅黑（方正版权）落在授权区；用户想用雅黑由他本机
+     字体分组里自选，那是他自己的系统授权。 */
   var ALGN_OPTS=[['','默认'],['left','左对齐'],['center','居中'],['right','右对齐'],['justify','两端对齐']];
   var ALGN_VALS=['','left','center','right','justify'];
   var ALGN_LBLS=['默认','左对齐','居中','右对齐','两端对齐'];
@@ -5336,6 +6304,8 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
        开 = outside + 让出一槽，marker 站到文字块外，续行与首行文字同 x。
        默认关是硬约束：存量文档（简历等）必须逐字节不变。 */
     o.list={hang:!!(raw.list&&raw.list.hang)};
+    /* v2.26.5 编辑区行号：默认关（存量文档版面逐字节不变） */
+    o.lineno=!!raw.lineno;
     for(var i=0;i<TS_KEYS.length;i++){var r=(raw.fonts&&raw.fonts[TS_KEYS[i]])||{};o.fonts[TS_KEYS[i]]={f:r.f||'',s:r.s||'',a:r.a||''};}
     for(var j=0;j<IND_KEYS.length;j++){
       var kk=IND_KEYS[j],ri=(raw.indent&&raw.indent[kk])||null;
@@ -5356,6 +6326,13 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
        书册规范默认（外侧奇右偶左 + 纯数字页码）；显式自定义过的值不动 */
     if(pg.pn&&pg.pn.tpl==='第 {p} 页 / 共 {P} 页'){pg.pn.tpl='{p}';if(pg.pn.pos==='bc')pg.pn.pos='outer';}
     o.page={paper:pg.paper||'A4',pw:pg.pw||'',ph:pg.ph||'',
+      /* v2.27.1 纸张底色：纸面本身的浅/深两态，作用于预览 + HTML 导出 +
+         打印/PDF，与界面 dark/light 解耦（界面暗色时纸仍可是白的）。
+         默认 light = 存量行为（打印本来就是白纸），旧配置无此键即回落 light。 */
+      tone:(pg.tone==='dark')?'dark':'light',
+      /* v2.28.0 页边参考线：默认关（存量文档预览逐像素不变；它只是标尺，
+         不是版面本身）。开关只改 #preview 的宽与 padding，内容区宽恒定。 */
+      guide:!!pg.guide,
       mt:(function(v){v=parseFloat(v);return isNaN(v)?25:v;})(pg.mt),
       mr:(function(v){v=parseFloat(v);return isNaN(v)?18:v;})(pg.mr),
       mb:(function(v){v=parseFloat(v);return isNaN(v)?25:v;})(pg.mb),
@@ -5524,8 +6501,46 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
        段间距 !important，也压过主 CSS 的任何 margin 档）。 */
     css+='#preview *:has(+ .mde-blank), .markdown-body *:has(+ .mde-blank){margin-bottom:0 !important;}'
       +'#preview .mde-blank + *, .markdown-body .mde-blank + *{margin-top:0 !important;}';
+    /* v2.27.1 纸张底色：纸面本身的两态（浅=白纸黑字 / 深=深底浅字）。
+       作用于预览、HTML 导出、打印/PDF 三处，**与界面 dark/light 解耦**——
+       界面暗色时纸也可以是浅色，因为纸是产出物、不是界面皮肤。
+       这套规则写在 ts-style 里：导出链会把 ts-style 原样送进 HTML 与打印两侧
+       （#preview 前缀在导出时被换成 .markdown-body，这里直接用 .markdown-body
+       前缀，一次定义三处生效，不存在两套色板对不齐的可能）。
+       变量重定义覆盖正文绝大多数取色；背景/文字色与打印侧硬编码过的
+       pre/code/blockquote 显式再压一遍（PAGED_BASE_CSS 不用 var）。 */
+    var _tone=(tsCfg.page.tone==='dark')?'dark':'light';
+    if(_tone==='dark'){
+      css+='.markdown-body.md-tone-dark{--text:#e6e6e8;--border:#3a3a44;--quote-border:#3a3a44;'
+        +'--table-border:#3a3a44;--code-bg:#2a2a30;--accent:#7aa2f7;'
+        +'background:#1a1a1c !important;color:#e6e6e8 !important;'
+        +'-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
+        +'.markdown-body.md-tone-dark pre,.markdown-body.md-tone-dark code{background:#2a2a30 !important;}'
+        +'.markdown-body.md-tone-dark pre{border-color:#3a3a44 !important;}'
+        +'.markdown-body.md-tone-dark blockquote{background:rgba(122,162,247,.10) !important;}'
+        +'.markdown-body.md-tone-dark th,.markdown-body.md-tone-dark td{border-color:#3a3a44 !important;}';
+      /* 表头/首列底色是用户可调项：只在"没启用"或"仍是默认浅蓝"时换成深纸
+         可读的深灰蓝；用户自己选过颜色就尊重他的选择，不覆盖。 */
+      if(!tsCfg.table.headOn||String(tsCfg.table.headColor||'').toLowerCase()==='#dbe5ff'){
+        css+='.markdown-body.md-tone-dark th{background:#2c3140 !important;}';
+      }
+      if(!tsCfg.table.colOn||String(tsCfg.table.colColor||'').toLowerCase()==='#dbe5ff'){
+        css+='.markdown-body.md-tone-dark td:first-child{background:#24272e !important;}';
+      }
+    }else{
+      css+='.markdown-body.md-tone-light{--text:#22242a;--border:#e0ddd5;--quote-border:#d8d4cb;'
+        +'--table-border:#e0ddd5;--code-bg:#f4f4f4;--accent:#4a6cf7;'
+        +'background:#ffffff !important;color:#22242a !important;}';
+    }
     var st=document.createElement('style');st.id='ts-style';st.textContent=css;
     document.head.appendChild(st);
+    /* 纸面态挂在 #preview 上（它本身就是 .markdown-body）：导出时后端按
+       page_cfg.tone 给 <body> 挂同一个类，三处选择器逐字同源。 */
+    var _pvEl=document.getElementById('preview');
+    if(_pvEl){
+      _pvEl.classList.toggle('md-tone-dark',_tone==='dark');
+      _pvEl.classList.toggle('md-tone-light',_tone==='light');
+    }
     /* 桥接：parseMarkdown 的 <<< 继承链读取容器级缩进档（px，正文字号基准）。
        只暴露容器级三项（p 首行缩进作为顶层正文流的缩进位置来源、quote/li 整体缩进）；
        段内装饰不进链。更新后由调用方触发 render() 重算 ind-blk margin。 */
@@ -5547,15 +6562,78 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
     var pg=tsCfg.page;
     var pw=(pg.paper==='custom')?parseFloat(pg.pw):PAPER_W_MM[pg.paper];
     if(isNaN(pw)||pw<=0)pw=PAPER_W_MM.A4;
+    /* 纸高：full 拟页块的 min-height 用它（整张纸，不是页心） */
+    var ph=(pg.paper==='custom')?parseFloat(pg.ph):PAPER_H_MM[pg.paper];
+    if(isNaN(ph)||ph<=0)ph=PAPER_H_MM.A4;
     var ml=parseFloat(pg.ml)||0,mr=parseFloat(pg.mr)||0;
+    var mt=parseFloat(pg.mt)||0,mb=parseFloat(pg.mb)||0;
     var w=Math.max(50,pw-ml-mr);
     var st=document.getElementById('preview-paper-style');
     if(!st){
       st=document.createElement('style');st.id='preview-paper-style';
       document.head.appendChild(st);
     }
-    st.textContent='#preview{width:'+w+'mm;max-width:none;margin:0 auto;}'
+    /* padding:0 必须清——#preview 默认 24px 32px 的网页留白会把正文
+       挤窄 64px，与打印版心（纸宽−左右边距，657.6px@A4）逐块差出几行
+       （2026-11-02 对照校准实测：同源内容两侧分页 54 页 vs 52 页，根因即此）。
+       预览正文宽必须逐像素=版心宽 */
+    /* v2.28.0 页边参考线（可选开关，默认关）：
+       把 #preview 从「版心」放大成「一张纸」——宽 = 纸宽、四边距 = padding。
+       box-sizing:border-box 保证内容区宽仍是 w，与关闭态逐像素相等，
+       所以开关切换不会让正文重排（只是纸的边缘显形）。
+       画法全部用伪元素与 outline：零 DOM 侵入，::before 一条规则画四条版心线。
+       三条规则只在开启态拼接，关闭态字节与 v2.27.1 完全相同。 */
+    var base='#preview{width:'+w+'mm;max-width:none;margin:0 auto;position:relative;padding:0;}'
       +'#previewPane{overflow-x:auto;}';
+    if(pg.guide){
+      var onPaper=Math.max(50,parseFloat(pw)||PAPER_W_MM.A4);
+      /* 线色按纸面深浅各给一档：浅纸用深一档的中性灰（对白 3.2:1），
+         深纸用浅一档（对 #1a1a1c 6.6:1）。红线两态都留 3.5:1 以上。 */
+      var lnPaper=(pg.tone==='dark')?'#9aa0a6':'#8d949b';
+      var lnCore='#e5484d';
+      var _n=function(v){return String(Math.round((parseFloat(v)||0)*10)/10);};
+      var lbl=(_lang==='en')
+        ? 'T '+_n(mt)+' · R '+_n(mr)+' · B '+_n(mb)+' · L '+_n(ml)+' mm'
+        : '上 '+_n(mt)+' · 右 '+_n(mr)+' · 下 '+_n(mb)+' · 左 '+_n(ml)+' mm';
+      /* 顶边距带够高（≥7mm）就把数字写在带里垂直居中，否则提到纸外上方——
+         避免 11px 文字压到正文第一行 */
+      var lblPos=(mt>=7)
+        ? 'top:0;height:'+mt+'mm;line-height:'+mt+'mm;'
+        : 'top:-17px;height:16px;line-height:16px;';
+      /* 20px 呼吸加在 #preview 自己的 margin 上，不加 #previewPane 的 padding：
+         pane 的 padding 会缩小 content box，居中基准跟着移，正文会横移半个
+         边距量（实测 10px）。margin auto 的基准两态同为 pane 内容盒 —— 版心
+         中线不变，纸只是向四周长出去，文字一个像素不动。 */
+      base='#preview{width:'+onPaper+'mm;max-width:none;margin:20px auto;position:relative;'
+        +'box-sizing:border-box;padding:'+mt+'mm '+mr+'mm '+mb+'mm '+ml+'mm;'
+        +'outline:1px solid '+lnPaper+';}'
+        /* 版心线用 outline + outline-offset 画：inset 精确等于内容区内沿
+           （几何可断言），线本身外扩 2px 落在边距带里——用 border 会正好压
+           在最左那一列文字上（段首无缩进时首字被红线穿过去，实测如此）。 */
+        +'#preview::before{content:"";position:absolute;z-index:3;pointer-events:none;'
+        +'left:'+ml+'mm;right:'+mr+'mm;top:'+mt+'mm;bottom:'+mb+'mm;'
+        +'outline:1px dashed '+lnCore+';outline-offset:2px;}'
+        +'#preview::after{content:"'+lbl+'";position:absolute;z-index:4;pointer-events:none;'
+        +'left:'+ml+'mm;'+lblPos+'font-size:11px;font-family:inherit;letter-spacing:.02em;'
+        +'color:'+lnPaper+';white-space:nowrap;}';
+    }
+    /* v2.27.0 full 页块的背景 = 纸，不是版心：块用左右负边距长到纸宽、
+       再用等量 padding 把内容推回版心。故背景图铺满整张纸（含页边距），
+       文字仍在版心——与打印侧「贴 .pagedjs_page（整页）」同一几何口径。
+       代价：预览栏窄于纸宽时出横向滚动条，这是「看得见整张纸」的必要成本。
+       v2.28.0 注意：参考线开启时 #preview 的 padding 就是页边距，负边距让
+       full 块恰好长到 padding 外沿 = 纸边界，几何自动对齐，无需另写。
+       v2.29.0 修正（2026-11-03）：块高此前取「版心高」ph−mt−mb，只补了左右、
+       没补上下——背景图 100% 100% 铺上去等于把纸的上下页边距砍掉。A4 实测
+       块 210×247（r=0.8502）、纸面 210×297（r=0.7071），图横向被拉宽 20%。
+       现改为 min-height=纸高 + 上下 padding=页边距，块比例恒等于纸面比例：
+       A4/A5/A3/B2/Letter/自定义逐档实测 r 与纸面一致。变形与否此后只取决于
+       图片自身比例（√2 全系通用；Letter/Legal 这类换纸要用 c 裁切或 o 原始）。*/
+    st.textContent=base
+      +'.markdown-body .full-page{min-height:'+ph+'mm;'
+      +'padding-top:'+mt+'mm;padding-bottom:'+mb+'mm;'
+      +'margin-left:-'+ml+'mm;margin-right:-'+mr+'mm;'
+      +'padding-left:'+ml+'mm;padding-right:'+mr+'mm;}';
   }
   function fillSel(s,vals,labels){
     for(var i=0;i<vals.length;i++){var o=document.createElement('option');o.value=vals[i];o.textContent=labels[i];s.appendChild(o);}
@@ -5574,7 +6652,7 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
     var sels=document.querySelectorAll('select[data-ts]');
     for(var i=0;i<sels.length;i++){
       var s=sels[i];
-      if(s.options.length===0)fillSel(s,FONT_VALS,FONT_OPTS);
+      if(s.options.length===0)fillSel(s,[''],['(默认)']);
     }
     var alns=document.querySelectorAll('select[data-algn]');
     for(var a=0;a<alns.length;a++){
@@ -5806,10 +6884,25 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
   }
   function tsOpen(){
     document.getElementById('tsAuto').value=tsCfg.autoSaveMin;
+    document.getElementById('tsLineNo').checked=tsCfg.lineno;
     var sels=document.querySelectorAll('select[data-ts]');
     var szs=document.querySelectorAll('input[data-tssz]');
     var als=document.querySelectorAll('select[data-algn]');
-    for(var i=0;i<sels.length;i++){sels[i].value=tsCfg.fonts[sels[i].getAttribute('data-ts')].f||'';}
+    for(var i=0;i<sels.length;i++){
+      var fs=sels[i],fv=tsCfg.fonts[fs.getAttribute('data-ts')].f||'';
+      fs.value=fv;
+      /* 旧存档值（历史硬编码清单时代的链，如 SimSun,serif）在新选项集里
+         无匹配——注入保留项让选中可见，设置值不丢、不静默改写；用户
+         改选后自然换成本机字体值。 */
+      if(fv&&fs.selectedIndex<0){
+        var fo=document.createElement('option');
+        fo.value=fv;
+        var fm=fv.split(',')[0].replace(/["']/g,'');
+        fo.textContent='(存档) '+fm;
+        fs.insertBefore(fo,fs.firstChild);
+        fs.value=fv;
+      }
+    }
     for(var j=0;j<szs.length;j++){szs[j].value=tsCfg.fonts[szs[j].getAttribute('data-tssz')].s||'';}
     for(var a=0;a<als.length;a++){als[a].value=tsCfg.fonts[als[a].getAttribute('data-algn')].a||'';}
     var inds=document.querySelectorAll('select[data-ind]');
@@ -5823,6 +6916,8 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
     document.getElementById('tsColColor').value=tsCfg.table.colColor;
     var pg=tsCfg.page;
     document.getElementById('tsPaper').value=pg.paper;
+    document.getElementById('tsTone').value=(pg.tone==='dark')?'dark':'light';
+    document.getElementById('tsGuide').checked=!!pg.guide;
     document.getElementById('tsCustomRow').hidden=(pg.paper!=='custom');
     document.getElementById('tsPw').value=pg.pw;document.getElementById('tsPh').value=pg.ph;
     document.getElementById('tsMt').value=pg.mt;document.getElementById('tsMr').value=pg.mr;
@@ -6248,6 +7343,7 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
   }
   function newDoc(){
     currentFile = null; currentBuiltin = -1; currentBase = null;
+    _tplOrigin = '';   /* v2.28.0：新建的普通文档与母版无关（从母版新建会在之后重新赋值） */
     /* 新文档是新的生命周期：自动落盘要重新有一次「弹另存为」的机会 */
     _autoAskDeclined=false; _autoAskOpen=false; _svAuto=false;
     /* v2.23.0 新建即插入元数据锚点（老文件不管）：@@ meta 本身不渲染任何东西，
@@ -6267,6 +7363,363 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
     editor.focus();
   }
   document.getElementById('btnNew').addEventListener('click', newDoc);
+
+  /* ============ v2.28.0 母版（.smdm）============
+     一个容器两种身份：母版与 .smd 逐字节同构（ZIP: doc.md + assets/ + 历史 +
+     元数据档案），读写全走同一套代码，区别只有扩展名与「放在库里」这件事。
+     所以打开/保存/历史版本/贴图/批注/资产回收对母版一律自动可用。
+     库在 RUNTIME_DIR/templates —— 与 runs 库同构，只读安装（MSIX 落在
+     WindowsApps）时随它一起回退到 %LOCALAPPDATA%\MDEditor\runtime。
+     代价：MSIX 卸载会把库带走。所以「导出母版」不是可选装饰——库是工作副本，
+     手里的 .smdm 文件才是可带走的正本。 */
+  var TPL_DIR = '', TPL_ITEMS = null, _tplOrigin = '';
+
+  function tplTime(sec){
+    var d = new Date((+sec || 0) * 1000);
+    if (isNaN(d.getTime())) return '';
+    var p2 = function(n){ return n < 10 ? '0' + n : '' + n; };
+    return (d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+  }
+  function tplSize(n){
+    n = +n || 0;
+    if (n < 1024) return n + ' B';
+    if (n < 1048576) return Math.round(n / 1024) + ' KB';
+    return (n / 1048576).toFixed(1) + ' MB';
+  }
+  /* 列表一次拉全：菜单与模态共用同一份 TPL_ITEMS，避免两处口径漂移 */
+  function tplLoad(cb){
+    fetch('/api/templates', {cache:'no-store'})
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (!(j && j.ok)) { showToast(TF('读取母版列表失败：{0}', (j && j.error) || '未知错误')); return; }
+        TPL_DIR = j.dir || '';
+        TPL_ITEMS = j.items || [];
+        if (cb) cb(j);
+      })
+      .catch(function(e){ showToast(TF('读取母版列表失败：{0}', e.message)); });
+  }
+
+  /* ---- 新建▾ 下拉 ---- */
+  function tplMenuBuild(){
+    var it = TPL_ITEMS || [], h = '';
+    if (!it.length){
+      h += '<div class="nmm-empty">'
+         + T('还没有母版。点「另存为 ▾」→「存为母版」，当前文档就成为母版。')
+         + '</div>';
+    } else {
+      for (var i = 0; i < it.length; i++){
+        h += '<button data-tpl="' + escapeHtml(it[i].name) + '">'
+           + escapeHtml(it[i].name)
+           + '<span class="nmm-when">' + tplTime(it[i].mtime) + '</span></button>';
+      }
+    }
+    h += '<div class="nmm-sep"></div><button data-tpl-manage="1">' + T('管理母版…') + '</button>';
+    document.getElementById('newMoreMenu').innerHTML = h;
+  }
+  function tplMenuToggle(){
+    var m = document.getElementById('newMoreMenu'), b = document.getElementById('btnNewMore');
+    if (!m || !b) return;
+    if (!m.hidden){ m.hidden = true; return; }
+    tplLoad(function(){
+      tplMenuBuild();
+      var r = b.getBoundingClientRect();
+      m.style.left = Math.max(6, r.left) + 'px';
+      m.style.top = (r.bottom + 4) + 'px';
+      m.hidden = false;
+    });
+  }
+  /* 从母版新建：内容进来、路径留空——第一次保存必然弹「另存为」，
+     这正是「母版只是底稿，落盘的必须是自己的文档」那条口径。 */
+  function newFromTemplate(name){
+    fetch('/api/template/new', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({name:name})})
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (!(j && j.ok)){ showToast(TF('从母版新建失败：{0}', (j && j.error) || '未知错误')); return; }
+        newDoc();                        /* 先清态，再灌内容：currentFile 必须留空 */
+        _tplOrigin = j.name || name;
+        currentBase = j.base || null;    /* 母版图片基址：预览里 assets/* 照常显示 */
+        setText(j.content || '');
+        dirty = false;
+        updateFileIndicator('');
+        updateSaveBtn();
+        editor.focus();
+        showToast(TF('已按母版「{0}」新建，保存时再选存放位置', _tplOrigin));
+      })
+      .catch(function(e){ showToast(TF('从母版新建失败：{0}', e.message)); });
+  }
+  (function tplNewBind(){
+    var more = document.getElementById('btnNewMore');
+    var menu = document.getElementById('newMoreMenu');
+    if (!more || !menu) return;
+    more.addEventListener('click', function(ev){ ev.stopPropagation(); tplMenuToggle(); });
+    document.addEventListener('click', function(){ menu.hidden = true; });
+    /* 菜单项自己是 click 监听器里的 target —— 阻止冒泡到 document 才能点到 */
+    menu.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      var b = ev.target && ev.target.closest ? ev.target.closest('button') : null;
+      if (!b) return;
+      if (b.hasAttribute('data-tpl-manage')){ menu.hidden = true; tplManageOpen(); return; }
+      var n = b.getAttribute('data-tpl');
+      if (n){ menu.hidden = true; newFromTemplate(n); }
+    });
+  })();
+
+  /* ---- 另存为▾：存为母版（v2.28.0） ----
+     母版库位置固定（runtime/templates），"存哪"不是作者该决定的事，所以这条路
+     不问目录、只取名；另存为模态里也相应不再提供 .smdm（否则两条路会打架）。
+     当前文档本身就是母版时，这里变成"保存母版"＝写回它自己（与 Ctrl+S 同一条路），
+     不再派生副本——不然每点一次就多一份。 */
+  function tplSaveMenuToggle(){
+    var m = document.getElementById('saveAsMenu');
+    var b = document.getElementById('btnSaveAsMore');
+    if (!m || !b) return;
+    if (!m.hidden){ m.hidden = true; return; }
+    var isTpl = /\.smdm$/i.test(currentFile || '');
+    m.innerHTML = '<button data-tpl-save="1">' + T(isTpl ? '保存母版' : '存为母版') + '</button>';
+    var r = b.getBoundingClientRect();
+    m.style.left = Math.max(6, Math.min(r.left, window.innerWidth - 250)) + 'px';
+    m.style.top = (r.bottom + 4) + 'px';
+    m.hidden = false;
+  }
+  function tplSaveCurrent(){
+    /* 已是母版：写回包内（saveToDisk 按扩展名分流，不在这里另起一套） */
+    if (/\.smdm$/i.test(currentFile || '')){ saveToDisk(false); return; }
+    /* 名字来源：有文件用文件名，否则用「母版：X」里的 X，再否则未命名 */
+    var nm = currentFile ? String(currentFile).replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '') : '';
+    if (!nm) nm = String(_tplOrigin || '').trim() || T('未命名');
+    if (!TPL_ITEMS){ tplLoad(function(){ tplSaveAsk(nm); }); return; }
+    tplSaveAsk(nm);
+  }
+  /* 撞名才弹框：不静默覆盖，也不自动加序号（会产生一堆看不出区别的副本） */
+  function tplSaveAsk(nm){
+    var hit = false;
+    for (var i = 0; i < (TPL_ITEMS || []).length; i++){
+      if (TPL_ITEMS[i].name === nm){ hit = true; break; }
+    }
+    if (!hit){ tplSaveWrite(nm); return; }
+    document.getElementById('tplSaveHint').textContent =
+      TF('母版库中已有「{0}」。直接确认将覆盖它；改个名字则存成一份新母版。', nm);
+    var el = document.getElementById('tplSaveName');
+    el.value = nm;
+    document.getElementById('tplSaveOverlay').hidden = false;
+    el.focus(); el.select();
+  }
+  function tplSaveWrite(nm){
+    nm = String(nm || '').trim();
+    if (!nm){ showToast(T('母版名称不能为空')); return; }
+    if (!TPL_DIR){ showToast(T('母版库路径还没取到，请重试')); return; }
+    fetch('/api/save-as', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({dir: TPL_DIR, name: nm + '.smdm', content: getText(),
+                              base: currentBase, src: currentFile})})
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (!(j && j.ok)){ showToast(TF('存为母版失败：{0}', (j && j.error) || T('未知错误'))); return; }
+        document.getElementById('tplSaveOverlay').hidden = true;
+        TPL_ITEMS = null;                    /* 库变了，下次点开菜单重拉 */
+        _tplOrigin = nm;
+        /* 文档自己不因此变成母版：路径与正文都不动。响应里的 content 已按包内
+           assets/ 契约改写，写回编辑区会把 .md 的图片引用打断。 */
+        if (!currentFile) updateFileIndicator('');
+        showToast(TF('已存为母版「{0}」', nm));
+      })
+      .catch(function(e){ showToast(TF('存为母版失败：{0}', e.message)); });
+  }
+  (function tplSaveBind(){
+    var more = document.getElementById('btnSaveAsMore');
+    var menu = document.getElementById('saveAsMenu');
+    if (!more || !menu) return;
+    more.addEventListener('click', function(ev){ ev.stopPropagation(); tplSaveMenuToggle(); });
+    document.addEventListener('click', function(){ menu.hidden = true; });
+    menu.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      if (!(ev.target && ev.target.closest && ev.target.closest('button'))) return;
+      menu.hidden = true;
+      tplSaveCurrent();
+    });
+    document.getElementById('tplSaveCancel').addEventListener('click', function(){
+      document.getElementById('tplSaveOverlay').hidden = true;
+    });
+    document.getElementById('tplSaveGo').addEventListener('click', function(){
+      tplSaveWrite(document.getElementById('tplSaveName').value);
+    });
+    document.getElementById('tplSaveName').addEventListener('keydown', function(ev){
+      if (ev.key === 'Enter'){
+        ev.preventDefault(); tplSaveWrite(this.value);
+      } else if (ev.key === 'Escape'){
+        document.getElementById('tplSaveOverlay').hidden = true;
+      }
+    });
+  })();
+
+  /* ---- 母版管理 ---- */
+  var _tplDelPending = '', _tplDelTimer = 0;
+  function tplManageOpen(){
+    document.getElementById('tplOverlay').hidden = false;
+    tplRefreshList();
+  }
+  function tplManageClose(){ document.getElementById('tplOverlay').hidden = true; }
+  function tplRefreshList(){ tplLoad(tplRender); }
+  function tplRender(j){
+    var box = document.getElementById('tplList');
+    var sub = document.getElementById('tplDirLine');
+    sub.textContent = T('母版库：') + (j.dir || '')
+      + (j.writable === false ? '　' + T('（该位置不可写，母版存不进去）') : '');
+    var it = j.items || [];
+    if (!it.length){
+      box.innerHTML = '<div class="tpl-empty">' + T('还没有母版') + '<br>'
+        + T('点「另存为 ▾」→「存为母版」，当前文档就成为母版。') + '</div>';
+      return;
+    }
+    var h = '<table><thead><tr><th>' + T('名称') + '</th><th>' + T('图片') + '</th><th>'
+          + T('大小') + '</th><th>' + T('修改时间') + '</th><th>' + T('操作') + '</th>'
+          + '</tr></thead><tbody>';
+    for (var i = 0; i < it.length; i++){
+      var nm = escapeHtml(it[i].name);
+      h += '<tr>'
+        + '<td class="tpl-name" data-name="' + nm + '" title="' + escapeHtml(it[i].path || '') + '">' + nm + '</td>'
+        + '<td>' + (it[i].images || 0) + '</td>'
+        + '<td>' + tplSize(it[i].size) + '</td>'
+        + '<td>' + tplTime(it[i].mtime) + '</td>'
+        + '<td><div class="tpl-act">'
+        + '<button class="tpl-btn" data-act="new" data-name="' + nm + '">' + T('新建') + '</button>'
+        + '<button class="tpl-btn" data-act="edit" data-name="' + nm + '">' + T('编辑') + '</button>'
+        + '<button class="tpl-btn" data-act="rename" data-name="' + nm + '">' + T('改名') + '</button>'
+        + '<button class="tpl-btn" data-act="export" data-name="' + nm + '">' + T('导出') + '</button>'
+        + '<button class="tpl-btn danger" data-act="del" data-name="' + nm + '">' + T('删除') + '</button>'
+        + '</div></td></tr>';
+    }
+    box.innerHTML = h + '</tbody></table>';
+  }
+  function tplBeginRename(btn){
+    var tr = btn.closest('tr'), td = tr && tr.querySelector('td.tpl-name');
+    if (!td || td.querySelector('input')) return;
+    var old = td.getAttribute('data-name') || '';
+    td.innerHTML = '<input type="text" value="' + escapeHtml(old) + '"'
+      + ' style="width:100%;background:#1a1d24;color:#e8eaed;border:1px solid #3a4358;'
+      + 'border-radius:5px;padding:3px 6px;font:inherit;">';
+    var inp = td.querySelector('input');
+    inp.focus(); inp.select();
+    var done = false;
+    function finish(ok){
+      if (done) return; done = true;
+      var to = ok ? inp.value.replace(/^\s+|\s+$/g, '') : '';
+      if (!ok || !to || to === old){ td.textContent = old; return; }
+      fetch('/api/template/rename', {method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({name: old, to: to})})
+        .then(function(r){ return r.json(); })
+        .then(function(j){
+          if (j && j.ok){
+            showToast(TF('已改名为：{0}', j.name));
+            /* 正开着这个母版：路径跟着换，否则下一次 Ctrl+S 会在旧名下重建它 */
+            if (currentFile
+                && currentFile.replace(/^.*[\\/]/, '').toLowerCase()
+                   === (old + '.smdm').toLowerCase()) currentFile = j.path;
+            tplRefreshList();
+          } else {
+            showToast(TF('改名失败：{0}', (j && j.error) || '未知错误'));
+            td.textContent = old;
+          }
+        })
+        .catch(function(e){ showToast(TF('改名失败：{0}', e.message)); td.textContent = old; });
+    }
+    inp.addEventListener('keydown', function(e){
+      if (e.key === 'Enter'){ e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape'){ e.preventDefault(); finish(false); }
+    });
+    inp.addEventListener('blur', function(){ finish(false); });
+  }
+  function tplExport(name){
+    var def = name + '.smdm';
+    fetch('/api/pick-save?ext=smdm&name=' + encodeURIComponent(def)
+          + '&dir=' + encodeURIComponent(lastDir || '') + '&title='
+          + encodeURIComponent('导出母版'))
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (!(j && j.ok && j.path)) return;      /* 用户取消 */
+        fetch('/api/template/export', {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({name: name, path: j.path})})
+          .then(function(r){ return r.json(); })
+          .then(function(k){
+            if (k && k.ok){
+              lastDir = k.path.replace(/[\\/][^\\/]*$/, '');
+              showToast(TF('已导出母版：{0}', k.path));
+            } else showToast(TF('导出失败：{0}', (k && k.error) || '未知错误'));
+          });
+      })
+      .catch(function(e){ showToast(TF('导出失败：{0}', e.message)); });
+  }
+  function tplImport(){
+    fetch('/api/open-file?dir=' + encodeURIComponent(lastDir || '') + '&mode=template')
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (!(j && j.ok && j.path)) return;      /* 取消 */
+        fetch('/api/template/import', {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({src: j.path})})
+          .then(function(r){ return r.json(); })
+          .then(function(k){
+            if (k && k.ok){ showToast(TF('已导入母版：{0}', k.name)); tplRefreshList(); }
+            else showToast(TF('导入失败：{0}', (k && k.error) || '未知错误'));
+          });
+      })
+      .catch(function(e){ showToast(TF('导入失败：{0}', e.message)); });
+  }
+  function tplDelete(btn, name){
+    /* 两次点击确认（沿用编辑器里「点两次」的既有交互，不弹原生 confirm） */
+    if (_tplDelPending !== name){
+      if (_tplDelPending) {
+        var pv = document.querySelector('#tplList button[data-act="del"][data-name="'
+                 + _tplDelPending.replace(/"/g, '\\"') + '"]');
+        if (pv) pv.textContent = T('删除');
+      }
+      _tplDelPending = name;
+      btn.textContent = T('确认删除？');
+      clearTimeout(_tplDelTimer);
+      _tplDelTimer = setTimeout(function(){
+        _tplDelPending = '';
+        btn.textContent = T('删除');
+      }, 4000);
+      return;
+    }
+    clearTimeout(_tplDelTimer); _tplDelPending = '';
+    fetch('/api/template/delete', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({name: name})})
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (j && j.ok){ showToast(TF('已删除母版「{0}」（进了母版库的 .trash）', j.name)); tplRefreshList(); }
+        else showToast(TF('删除失败：{0}', (j && j.error) || '未知错误'));
+      })
+      .catch(function(e){ showToast(TF('删除失败：{0}', e.message)); });
+  }
+  (function tplManageBind(){
+    var ov = document.getElementById('tplOverlay');
+    var box = document.getElementById('tplList');
+    if (!ov || !box) return;
+    document.getElementById('tplClose').addEventListener('click', tplManageClose);
+    document.getElementById('tplRefresh').addEventListener('click', tplRefreshList);
+    document.getElementById('tplImport').addEventListener('click', tplImport);
+    ov.addEventListener('click', function(ev){ if (ev.target === ov) tplManageClose(); });
+    document.addEventListener('keydown', function(ev){
+      if (ev.key === 'Escape' && !ov.hidden) tplManageClose();
+    });
+    box.addEventListener('click', function(ev){
+      var b = ev.target && ev.target.closest ? ev.target.closest('button') : null;
+      if (!b) return;
+      var act = b.getAttribute('data-act'), nm = b.getAttribute('data-name') || '';
+      if (!act || !nm) return;
+      if (act === 'new'){ tplManageClose(); newFromTemplate(nm); }
+      else if (act === 'edit'){
+        var it = (TPL_ITEMS || []).filter(function(x){ return x.name === nm; })[0];
+        if (!it){ showToast(TF('母版不存在：{0}', nm)); return; }
+        tplManageClose();
+        loadFile(it.path);          /* currentFile=母版路径 → Ctrl+S 写回母版包 */
+      }
+      else if (act === 'rename') tplBeginRename(b);
+      else if (act === 'export') tplExport(nm);
+      else if (act === 'del') tplDelete(b, nm);
+    });
+  })();
+
   document.getElementById('btnSaveAs').addEventListener('click', openSaveAs);
   document.addEventListener('keydown', function(e){
     if ((e.ctrlKey||e.metaKey) && (e.key==='n'||e.key==='N')){
@@ -6383,10 +7836,16 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
       return;
     }
     // 浏览器模式：打开保存模态框（文件名不带后缀，格式由下拉决定）
-    var bare = (defaultName || '未命名').replace(/\.(md|smd)$/i, '');
+    var bare = (defaultName || '未命名').replace(/\.(md|smd|smdm)$/i, '');
     document.getElementById('svName').value = bare;
-    document.getElementById('svFmt').value = (currentFile && /\.smd$/i.test(currentFile)) ? '.smd' : '.md';
-    document.getElementById('svDir').value = lastDir;
+    /* 母版不在这条路上：存母版走「另存为 ▾ → 存为母版」，入哪个库不由作者选。
+       从母版另存出来时默认给 .smd——同为单文件容器，图片不用另建同名目录。 */
+    var _cf = currentFile || '';
+    document.getElementById('svFmt').value = /\.smd(m)?$/i.test(_cf) ? '.smd' : '.md';
+    /* 目录：正开着母版就用它自己所在目录（另存为＝换个名字存一份，不该把人
+       搬进母版库）；普通文档用上次目录 */
+    document.getElementById('svDir').value = /\.smdm$/i.test(_cf)
+      ? _cf.replace(/[\\/][^\\/]*$/, '') : lastDir;
     document.getElementById('svOverlay').hidden = false;
     fillQuickDirs();
   }
@@ -6394,7 +7853,7 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
     var dir = document.getElementById('svDir').value.trim();
     if (!dir) { showToast('请先选择保存目录（点「浏览…」）'); return; }
     var fmt = document.getElementById('svFmt').value;
-    var name = (document.getElementById('svName').value.trim() || '未命名').replace(/\.(md|smd)$/i, '') + fmt;
+    var name = (document.getElementById('svName').value.trim() || '未命名').replace(/\.(md|smd|smdm)$/i, '') + fmt;
     saveAsTo(dir, name, getText());
   });
   /* v2.8 外部文件引用：插入行的池前缀照抄文档里最近一个数据点的完整前缀
@@ -6513,6 +7972,7 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
   });
   document.getElementById('tsApply').addEventListener('click',function(){
     tsCfg.autoSaveMin=Math.max(0,Math.min(60,parseInt(document.getElementById('tsAuto').value,10)||0));
+    tsCfg.lineno=!!document.getElementById('tsLineNo').checked;
     var sels=document.querySelectorAll('select[data-ts]');
     var szs=document.querySelectorAll('input[data-tssz]');
     var als=document.querySelectorAll('select[data-algn]');
@@ -6537,6 +7997,8 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
     tsCfg.table.colColor=document.getElementById('tsColColor').value;
     var pg=tsCfg.page;
     pg.paper=document.getElementById('tsPaper').value;
+    pg.tone=(document.getElementById('tsTone').value==='dark')?'dark':'light';
+    pg.guide=!!document.getElementById('tsGuide').checked;
     pg.pw=document.getElementById('tsPw').value;pg.ph=document.getElementById('tsPh').value;
     pg.mt=parseFloat(document.getElementById('tsMt').value)||0;pg.mr=parseFloat(document.getElementById('tsMr').value)||0;
     pg.mb=parseFloat(document.getElementById('tsMb').value)||0;pg.ml=parseFloat(document.getElementById('tsMl').value)||0;
@@ -6568,7 +8030,7 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
       var _mk2=META_UI_KEYS[_mi2];
       tsCfg.meta[_mk2]=(document.getElementById(META_UI_IDS[_mk2]).value||'').replace(/^\s+|\s+$/g,'');
     }
-    applyTypeset();applyPaperWidth();render(true);resetAutoDisk();
+    applyTypeset();applyPaperWidth();applyLineNo();render(true);resetAutoDisk();
     document.getElementById('tsOverlay').hidden=true;
     document.getElementById('tsDirty').hidden=true;   /* 已持久化，提示收起 */
     applyMeta();
@@ -6591,7 +8053,7 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
     diskTimer=null;
     if(tsCfg.autoSaveMin>0){diskTimer=setInterval(function(){if(dirty)diskNow();},tsCfg.autoSaveMin*60000);}
   }
-  tsFill();applyTypeset();applyPaperWidth();render();resetAutoDisk();
+  tsFill();applyTypeset();applyPaperWidth();applyLineNo();render();resetAutoDisk();
 
   /* ---- build self-check: hard-reload once when the served HTML changes ---- */
   (function(){
@@ -6629,6 +8091,15 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
   }
   function updateFileIndicator(p){
     var name=p?String(p).replace(/^.*[\\/]/,''):'默认文档';
+    /* v2.28.0 母版两态都要如实标身份，否则很容易误以为在改普通文档：
+       ① 从母版新建、还没另存 → 「母版：X（未保存）」
+       ② 直接打开库里的母版 → 「母版：X」（Ctrl+S 就是写回母版包） */
+    var base=String(p||'').replace(/^.*[\\/]/,'');
+    if(p && /\.smdm$/i.test(base)){
+      name=TF('母版：{0}', base.replace(/\.smdm$/i,''));
+    }else if(!p && _tplOrigin){
+      name=TF('母版：{0}（未保存）', _tplOrigin);
+    }
     document.getElementById('statFile').textContent=name;
     document.title=(name==='默认文档')?'MDEditor':'MDEditor - '+name;
   }
@@ -8221,7 +9692,7 @@ I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="T
   });
   var DG_HINTS=[
     [/^[ ]{0,3}@@\s*begin\s+fill/i,[['@@ begin fill{50|50}','分栏：各栏比例相加 =100；不带参数 = 2~4 栏等分'],['空行分栏','连续非空行属同一栏，末行写 @@ end fill 收尾']]],
-    [/^[ ]{0,3}@@\s*begin\s+full/i,[['@@ begin full{t|m|b}','独占一页：t=居上 m=居中 b=居下（分页导出生效）']]],
+    [/^[ ]{0,3}@@\s*begin\s+full/i,[['@@ begin full{t|m|b}','独占一页：t=居上 m=居中 b=居下（分页导出生效）'],['@@ begin full{m:![](图) o|c|f 九宫}','独占一页+背景图：o=原始尺寸 c=撑满 f=填充；九宫两字母 lt~rb 定位（预览/HTML/打印生效）']]],
     [/^[ ]{0,3}@@\s*begin\s+page/i,[['@@ begin page{noll|1|i|I}','页区页码：noll 不印页码／1 重编／i、I 罗马数字（分页导出生效）']]],
     [/^[ ]{0,3}@@\s*begin\s+color/i,[['@@ begin color{#c0392b}','整块着色：颜色名或 #rgb／#rrggbb，末行写 @@ end color 收尾']]],
     [/^[ ]{0,3}@@\s*begin\b/i,[['@@ begin fill{a|b}','分栏'],['@@ begin full{t|m|b}','独占一页'],['@@ begin page{noll|1|i|I}','页区页码'],['@@ begin color{X}','整块着色'],['@@ begin page full color …','并写时按 page→full→color 的顺序排列']]],

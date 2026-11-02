@@ -64,7 +64,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 125  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 126  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 # MSIX 商城版判定（微软商店政策 11.16 的"报告 AI 生成内容"入口用）：
 # 商城包与侧载包恒落在 WindowsApps 之下，Release 安装包/便携形态不会。
@@ -1016,6 +1016,90 @@ _DOC_RO_ERR = ("文档所在目录不可写，无法随文档保存——请把�
                "（或改用 .smd 自包含格式）后重试")
 
 
+TEMPLATES_DIR = os.path.join(RUNTIME_DIR, "templates")
+TPL_EXT = ".smdm"
+try:
+    os.makedirs(TEMPLATES_DIR, exist_ok=True)
+except Exception:
+    pass
+
+# ---------- 母版（v2.28.0）：.smdm 模板库 ----------
+# 与 runs 库同构——挂在同一个 RUNTIME_DIR 下，只读安装（MSIX 落在 WindowsApps）
+# 自动继承 %LOCALAPPDATA%\MDEditor\runtime 回退，不需要第二套可写性判据。
+# 代价讲明白：MSIX 卸载会把库一起带走，所以「导出母版」不是锦上添花——
+# 库是工作副本，手里的 .smdm 文件才是可带走的正本。
+_WIN_RESERVED = ({"CON", "PRN", "AUX", "NUL"}
+                 | {"COM%d" % _i for _i in range(1, 10)}
+                 | {"LPT%d" % _i for _i in range(1, 10)})
+
+
+def _tpl_name(name):
+    """母版名 = 文件名 = 唯一身份，所以在这里一次性把非法输入挡掉。
+    空名、路径穿越、Windows 保留字符与保留设备名一律返回 ""。"""
+    n = str(name or "").strip()
+    if not n:
+        return ""
+    n = os.path.basename(n.replace("\\", "/")).strip()
+    if n.lower().endswith(TPL_EXT):
+        n = n[:-len(TPL_EXT)].strip()
+    n = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", n)
+    n = re.sub(r"\s+", " ", n).strip().rstrip(".")
+    if not n or n in (".", "..") or len(n) > 80:
+        return ""
+    if n.split(".")[0].strip().upper() in _WIN_RESERVED:
+        return ""
+    return n
+
+
+def _tpl_file(name):
+    n = _tpl_name(name)
+    if not n:
+        return "", ""
+    return os.path.join(TEMPLATES_DIR, n + TPL_EXT), n
+
+
+def _tpl_zip_meta(p):
+    """列表里的两个轻量摘要：图片数、正文第一行。包坏了就给 0/空，不让一条
+    坏文件把整个列表打成 500——它仍然要出现在列表里，用户才知道该删它。"""
+    try:
+        with zipfile.ZipFile(p) as z:
+            pre = (_smd.ASSETS_DIR if _smd else "assets") + "/"
+            imgs = sum(1 for n in z.namelist()
+                       if n.startswith(pre) and not n.endswith("/"))
+            doc = (_smd.DOC_NAME if _smd else "doc.md")
+            txt = z.read(doc).decode("utf-8", "replace")
+        first = ""
+        for ln in txt.splitlines():
+            s = ln.strip()
+            if s and not s.startswith("@@"):
+                first = s.lstrip("#").strip()[:60]
+                break
+        return imgs, first
+    except Exception:
+        return 0, ""
+
+
+def _tpl_list():
+    items = []
+    if os.path.isdir(TEMPLATES_DIR):
+        for fn in os.listdir(TEMPLATES_DIR):
+            if not fn.lower().endswith(TPL_EXT):
+                continue
+            p = os.path.join(TEMPLATES_DIR, fn)
+            if not os.path.isfile(p):
+                continue
+            try:
+                stt = os.stat(p)
+            except OSError:
+                continue
+            imgs, first = _tpl_zip_meta(p)
+            items.append({"name": fn[:-len(TPL_EXT)], "file": fn, "path": p,
+                          "size": stt.st_size, "mtime": int(stt.st_mtime),
+                          "images": imgs, "title": first})
+    items.sort(key=lambda x: (-x["mtime"], x["name"]))
+    return items
+
+
 def _safe_asset_name(name):
     """外部引用文件名清洗（v2.8）：去路径、替换数据点分隔符
     （, = { } 与换行会让 @@ MDE 那一行解析错），保留扩展名与原名主干。"""
@@ -1454,7 +1538,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 q = urllib.parse.parse_qs(u.query)
                 initdir = q.get("dir", [""])[0]
-                p = _pick_file_subprocess(initdir)
+                p = _pick_file_subprocess(initdir, q.get("mode", [""])[0])
                 if p:
                     _LAST_DOC_DIR[0] = os.path.dirname(p)
                 self._send(200, json.dumps({"ok": True, "path": p},
@@ -1863,6 +1947,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self._send(500, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
             return
+        if u.path == "/api/templates":
+            # 母版库列表：dir 给前端做「另存为 .smdm」的默认目录，
+            # writable 让界面能如实说明（只读安装位时库根本写不进去）。
+            try:
+                self._send(200, json.dumps(
+                    {"ok": True, "dir": TEMPLATES_DIR,
+                     "writable": _dir_writable(TEMPLATES_DIR),
+                     "items": _tpl_list()}, ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
+            return
         if u.path == "/api/save-backups":
             # 打开文档时查询：是否有保存失败保留的备份（<文档>.tmp<时间戳>）
             q = urllib.parse.parse_qs(u.query)
@@ -2173,6 +2269,167 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(500, json.dumps({"ok": False, "error": str(e)},
                                            ensure_ascii=False))
             return
+        # ---------- 母版库（v2.28.0）：.smdm 的增删改查 ----------
+        # 一套容器两种身份：库里的 .smdm 就是普通 .smd 包，读写全走 _smd，
+        # 这里只做「库」这一层的目录管理（列举/取正文/改名/删除/导入/导出）。
+        if u.path.startswith("/api/template/"):
+            try:
+                act = u.path[len("/api/template/"):]
+                length = int(self.headers.get("Content-Length", 0))
+                obj = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                if _smd is None:
+                    self._send(500, json.dumps(
+                        {"ok": False, "error": "自包含容器不可用（_smd 未加载）"},
+                        ensure_ascii=False))
+                    return
+
+                if act == "new":
+                    p, n = _tpl_file(obj.get("name"))
+                    if not p:
+                        self._send(400, json.dumps(
+                            {"ok": False, "error": "母版名称不合法"}, ensure_ascii=False))
+                        return
+                    if not os.path.isfile(p):
+                        self._send(404, json.dumps(
+                            {"ok": False, "error": "母版不存在：%s" % n},
+                            ensure_ascii=False))
+                        return
+                    base = _smd.base_dir_for(p)
+                    docp = os.path.join(base, _smd.DOC_NAME)
+                    content = io.open(docp, encoding="utf-8").read()
+                    imgs = []
+                    ad = os.path.join(base, _smd.ASSETS_DIR)
+                    if os.path.isdir(ad):
+                        imgs = sorted(x for x in os.listdir(ad)
+                                      if os.path.isfile(os.path.join(ad, x)))
+                    self._send(200, json.dumps(
+                        {"ok": True, "name": n, "path": p,
+                         "content": content, "base": base, "images": imgs},
+                        ensure_ascii=False))
+                    return
+
+                if act == "delete":
+                    p, n = _tpl_file(obj.get("name"))
+                    if not p or not os.path.isfile(p):
+                        self._send(404, json.dumps(
+                            {"ok": False, "error": "母版不存在"}, ensure_ascii=False))
+                        return
+                    # 不直删：挪进库内的 .trash/（带时间戳）。MSIX 库本身随
+                    # 卸载消失，系统回收站反而不便定位——库内回收站更直观。
+                    trash = os.path.join(TEMPLATES_DIR, ".trash")
+                    os.makedirs(trash, exist_ok=True)
+                    ts = time.strftime("%Y%m%d-%H%M%S")
+                    dst = os.path.join(trash, "%s.%s%s" % (n, ts, TPL_EXT))
+                    k = 1
+                    while os.path.exists(dst):
+                        dst = os.path.join(trash, "%s.%s-%d%s" % (n, ts, k, TPL_EXT))
+                        k += 1
+                    os.replace(p, dst)
+                    self._send(200, json.dumps(
+                        {"ok": True, "name": n, "trashed": dst}, ensure_ascii=False))
+                    return
+
+                if act == "rename":
+                    old, on = _tpl_file(obj.get("name"))
+                    new, nn = _tpl_file(obj.get("to"))
+                    if not old or not new:
+                        self._send(400, json.dumps(
+                            {"ok": False, "error": "母版名称不合法"}, ensure_ascii=False))
+                        return
+                    if not os.path.isfile(old):
+                        self._send(404, json.dumps(
+                            {"ok": False, "error": "母版不存在"}, ensure_ascii=False))
+                        return
+                    if os.path.normcase(old) == os.path.normcase(new):
+                        self._send(200, json.dumps(
+                            {"ok": True, "name": on, "path": old,
+                             "unchanged": True}, ensure_ascii=False))
+                        return
+                    if os.path.exists(new):
+                        self._send(409, json.dumps(
+                            {"ok": False, "error": "已存在同名母版：%s" % nn},
+                            ensure_ascii=False))
+                        return
+                    os.replace(old, new)
+                    self._send(200, json.dumps(
+                        {"ok": True, "name": nn, "path": new, "old": old},
+                        ensure_ascii=False))
+                    return
+
+                if act == "import":
+                    src = os.path.abspath(str(obj.get("src") or ""))
+                    if (not src or not os.path.isfile(src)
+                            or not src.lower().endswith((".smdm", ".smd"))):
+                        self._send(400, json.dumps(
+                            {"ok": False, "error": "只能导入 .smdm / .smd 文件"},
+                            ensure_ascii=False))
+                        return
+                    good = False
+                    try:
+                        with zipfile.ZipFile(src) as z:
+                            good = _smd.DOC_NAME in z.namelist()
+                    except Exception:
+                        good = False
+                    if not good:
+                        self._send(400, json.dumps(
+                            {"ok": False, "error": "不是有效的自包含文档（包里没有 %s）"
+                                                   % _smd.DOC_NAME},
+                            ensure_ascii=False))
+                        return
+                    n = _tpl_name(os.path.basename(src))
+                    if not n:
+                        self._send(400, json.dumps(
+                            {"ok": False, "error": "母版名称不合法"}, ensure_ascii=False))
+                        return
+                    dst = os.path.join(TEMPLATES_DIR, n + TPL_EXT)
+                    if os.path.exists(dst):
+                        self._send(409, json.dumps(
+                            {"ok": False, "error": "已存在同名母版：%s" % n},
+                            ensure_ascii=False))
+                        return
+                    shutil.copy2(src, dst)
+                    self._send(200, json.dumps(
+                        {"ok": True, "name": n, "path": dst}, ensure_ascii=False))
+                    return
+
+                if act == "export":
+                    p, n = _tpl_file(obj.get("name"))
+                    if not p or not os.path.isfile(p):
+                        self._send(404, json.dumps(
+                            {"ok": False, "error": "母版不存在"}, ensure_ascii=False))
+                        return
+                    # 必须先判空再 abspath：abspath("") 会返回当前工作目录，
+                    # 那是一个「看起来合法」的目录，导出会静默写到进程 cwd 旁边
+                    # （实测落在应用目录同级），而不是用户选的目标目录。
+                    raw = str(obj.get("path") or "").strip()
+                    dst = os.path.abspath(raw) if raw else ""
+                    if not dst:
+                        dd = str(obj.get("dir") or "")
+                        if not dd or not os.path.isdir(dd):
+                            self._send(400, json.dumps(
+                                {"ok": False, "error": "目标目录不存在"},
+                                ensure_ascii=False))
+                            return
+                        dst = os.path.join(dd, n + TPL_EXT)
+                    if not dst.lower().endswith(TPL_EXT):
+                        dst += TPL_EXT
+                    if not os.path.isdir(os.path.dirname(dst)):
+                        self._send(400, json.dumps(
+                            {"ok": False, "error": "目标目录不存在"},
+                            ensure_ascii=False))
+                        return
+                    shutil.copy2(p, dst)
+                    self._send(200, json.dumps(
+                        {"ok": True, "name": n, "path": dst}, ensure_ascii=False))
+                    return
+
+                self._send(404, json.dumps(
+                    {"ok": False, "error": "未知的母版操作：%s" % act},
+                    ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
+            return
         if u.path == "/api/save-as":
             try:
                 length = int(self.headers.get("Content-Length", 0))
@@ -2184,7 +2441,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._send(400, json.dumps({"ok": False,
                         "error": "目录不存在"}, ensure_ascii=False))
                     return
-                to_smd = _smd is not None and name.lower().endswith(".smd")
+                # v2.28.0：.smdm（母版）与 .smd 同一容器，走同一条打包路径
+                to_smd = _smd is not None and name.lower().endswith((".smd", ".smdm"))
                 if not to_smd and not name.lower().endswith(".md"):
                     name += ".md"
                 path = os.path.join(d, name)
@@ -2816,6 +3074,46 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self._send(500, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
             return
+        if u.path == "/api/fig-save":
+            # 图表另存为（v2.29.0）：前端先用 /api/pick-save 取到用户路径，这里只写字节。
+            # 不用 <a download>：内嵌窗口是 pywebview，ALLOW_DOWNLOADS 默认 False，
+            # on_download_starting 直接 args.Cancel = True —— 点「另存为 SVG」等于什么都没发生。
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                obj = json.loads(self.rfile.read(length).decode("utf-8"))
+                path = (obj.get("path") or "").strip()
+                kind = (obj.get("kind") or "").strip().lower()
+                if not path:
+                    self._send(400, json.dumps({"ok": False, "error": "缺少路径"},
+                                               ensure_ascii=False))
+                    return
+                parent = os.path.dirname(path) or "."
+                if not os.path.isdir(parent):
+                    self._send(400, json.dumps({"ok": False, "error": "目录不存在"},
+                                               ensure_ascii=False))
+                    return
+                if kind == "png":
+                    data = base64.b64decode(
+                        (obj.get("dataUrl") or "").split(",", 1)[-1])
+                else:
+                    data = (obj.get("text") or "").encode("utf-8")
+                if not data:
+                    self._send(400, json.dumps({"ok": False, "error": "内容为空"},
+                                               ensure_ascii=False))
+                    return
+                tmp = path + ".part"
+                with open(tmp, "wb") as f:
+                    f.write(data)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, path)
+                self._send(200, json.dumps({"ok": True, "path": path,
+                                            "bytes": len(data)},
+                                           ensure_ascii=False))
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False))
+            return
         self._send(404, "not found")
 
     def log_message(self, *a):  # 静默
@@ -3168,7 +3466,14 @@ FIGCAP_BASE_CSS = """
 
 PAGED_BASE_CSS = """
 *{box-sizing:border-box;}
-.markdown-body{color:#222;line-height:1.7;word-wrap:break-word;overflow-wrap:anywhere;}
+/* font-family/font-size 必须与预览 body 基准逐字一致（--sans 链 + 15px）：
+   打印侧漏任何一项浏览器都回落默认（serif=Times/16px），英文数字宽度
+   变化 → 换行数变化 → 表格/段落行高爆炸，分页虚线的预览几何对照整层
+   漂移（2026-11-02 校准实测：字体回落致速查表 871→1173px）。面板设置了
+   字体字号档时由 tsCss !important 覆盖，互不干扰。默认字体零指定：
+   纯系统回落，产品不点名任何字体（微软雅黑系方正版权），与预览 --sans
+   同步维护。 */
+.markdown-body{color:#222;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:15px;line-height:1.7;word-wrap:break-word;}
 .markdown-body h1,.markdown-body h2,.markdown-body h3,.markdown-body h4,.markdown-body h5,.markdown-body h6{line-height:1.35;margin:1.4em 0 .6em;font-weight:650;}
 .markdown-body h1{font-size:1.9em;border-bottom:1px solid #ddd;padding-bottom:.3em;}
 .markdown-body h2{font-size:1.5em;border-bottom:1px solid #ddd;padding-bottom:.25em;}
@@ -3194,7 +3499,7 @@ PAGED_BASE_CSS = """
 .markdown-body table{border-collapse:collapse;margin:1em 0;width:100%;table-layout:auto;font-size:.93em;break-inside:auto;}
 .markdown-body thead{display:table-header-group;}
 .markdown-body tr{break-inside:avoid;}
-.markdown-body th,.markdown-body td{border:1px solid #bbb;padding:7px 12px;text-align:left;word-break:keep-all;overflow-wrap:anywhere;}
+.markdown-body th,.markdown-body td{border:1px solid #bbb;padding:7px 12px;text-align:left;}
 .markdown-body th{background:#f0f2f6;font-weight:650;}
 .markdown-body img{display:block;margin:0 auto;max-width:100%;max-height:__IMGMAXH__mm;break-inside:avoid;}
 .markdown-body p:has(>img){margin:0;text-indent:0 !important;}
@@ -3212,6 +3517,9 @@ PAGED_BASE_CSS = """
 .markdown-body .full-page{break-before:page;break-after:page;height:__PAGECH__mm;display:flex;flex-direction:column;justify-content:center;width:100%;}
 .markdown-body .full-page[data-full-pos="t"]{justify-content:flex-start;}
 .markdown-body .full-page[data-full-pos="b"]{justify-content:flex-end;}
+/* v2.26.6 full 背景图：页盒衬底须强制打印背景色（print-color-adjust 可继承，
+   否则 Chromium 打印默认 economy 丢背景，无论用户是否勾「背景图形」） */
+.pagedjs_page{print-color-adjust:exact;-webkit-print-color-adjust:exact;}
 .markdown-body .fill-col img{width:100% !important;height:auto;}
 .markdown-body .fill-col table img{width:auto !important;max-width:100% !important;height:auto;}
 .markdown-body .fill-col .diagram{width:100% !important;}
@@ -3557,6 +3865,323 @@ def _deflex_sliced_figures(html):
 
     return _FIG_RE.sub(_fix, html)
 
+# v2.26.8 表格预拆分（打印侧，分页前执行）。
+# Paged.js 拆表三宗罪（2026-11-02 实测）：① 拆片是全新 table、列宽按片内行
+# 重算（col2 551→595、行高 39→62，整表 895→1061，误差向后逐页传导）；
+# ② 续页片不带表头（违反书册规范 STRUCTURE_GUIDE 6.2"thead 跨页重复表头"）；
+# ③ 表头孤片（表头单独占一页、正文行在下一页）。
+# 对策：分页前按"表头+行子集"把跨页表拆成片段序列——首片留原位，续片各带
+# 克隆表头 + break-before:page + colgroup 钉死列宽（列宽取整表自然布局，
+# 片内行高与预览逐行相等）。拆分预算与预览虚线 layoutPageHints v3.2 是
+# 同一套算术（同步锚：markdown-editor.html 单元流推演循环，改一处必改
+# 两处），行高在图片全部就绪后实测。
+PAGED_SPLIT_TMPL = """
+(function(){
+  var PGH = __PGH__;
+  var PGW = __PGW__;
+  function startPaged(){
+    if (window.PagedPolyfill && window.PagedPolyfill.preview) {
+      /* v2.27.0 auto:false 的副作用修正：PagedConfig.after 只在 Paged.js
+         自动启动那条路径里被调用，手动 preview() 不会触发它。而页码填充
+         (__pgFill)、孤表头兜底、full 背景贴图三件事全挂在 after 上，
+         于是三者一并静默失效（实测 after 内的 data-bg-done 计数恒为 0）。
+         这里显式补调一次，用 __pgAfterDone 保证幂等（万一某版 polyfill
+         自己也会调）。 */
+      var _pr = null;
+      try { _pr = window.PagedPolyfill.preview(); } catch(e) { _pr = null; }
+      var _fireAfter = function(){
+        if (window.__pgAfterDone) { return; }
+        window.__pgAfterDone = 1;
+        try {
+          if (window.PagedConfig && typeof window.PagedConfig.after === 'function') {
+            window.PagedConfig.after();
+          }
+        } catch(e) {}
+      };
+      if (_pr && typeof _pr.then === 'function') {
+        _pr.then(function(){ setTimeout(_fireAfter, 30); });
+      } else {
+        setTimeout(_fireAfter, 300);
+      }
+      return;
+    }
+    setTimeout(startPaged, 30);
+  }
+  function imgsReady(cb){
+    var ims = document.images, pend = [];
+    for (var i = 0; i < ims.length; i++)
+      if (!(ims[i].complete && ims[i].naturalWidth > 0)) pend.push(ims[i]);
+    var fired = false;
+    function go(){ if (!fired) { fired = true; cb(); } }
+    /* 兜底：个别图源挂起时 8s 放行分页（拆分预算退化，不白屏） */
+    setTimeout(go, 8000);
+    (function chk(){
+      pend = pend.filter(function(im){ return im.complete && im.naturalWidth > 0; });
+      if (pend.length) { setTimeout(chk, 60); return; }
+      go();
+    })();
+  }
+  function colgroupOf(t, colW){
+    var old = t.querySelector('colgroup');
+    if (old) return old.cloneNode(true);
+    var tw = t.getBoundingClientRect().width;
+    var cg = document.createElement('colgroup');
+    if (!(tw > 0) || !colW || !colW.length) return cg;
+    for (var i = 0; i < colW.length; i++) {
+      var c = document.createElement('col');
+      c.style.width = (colW[i] / tw * 100).toFixed(4) + '%';
+      cg.appendChild(c);
+    }
+    return cg;
+  }
+  /* 单元流推演：与预览虚线 layoutPageHints v3.2 同构（同步锚），但不画线、
+     只推进 cutY；遇到未拆分表的跨页行即拆该表并返回 true（DOM 已变，外层
+     重推）。已拆续片（data-mde-frag，自带 break-before:page）当原子单元。 */
+  function onePass(pvTop){
+    var root = document.getElementById('paged-content');
+    if (!root) return false;
+    var avoid = function(o){
+      if (o.tagName === 'BLOCKQUOTE' || o.tagName === 'HR') return true;
+      if (o.tagName === 'TR' || o.tagName === 'LI') return true;
+      if (o.tagName === 'FIGURE' && o.getAttribute('data-fig-side') === 'ts') return false;
+      if (o.tagName === 'FIGURE') return true;
+      if (o.classList.contains('mde-fig') || o.classList.contains('diagram')) return true;
+      if (o.classList.contains('fill-row')) return true;
+      if (o.tagName === 'P' && o.children.length === 1 && o.children[0].tagName === 'IMG') return true;
+      return false;
+    };
+    var forced = function(o){
+      return o.tagName === 'H1' || o.classList.contains('full-page') ||
+             o.classList.contains('page-region') ||
+             (o.getAttribute && o.getAttribute('data-mde-frag'));
+    };
+    var noLast = function(o){
+      return o.tagName === 'H2' || o.tagName === 'H3' ||
+             o.tagName === 'H4' || o.tagName === 'HR';
+    };
+    var units = [];
+    function drill(el, tbl){
+      var t = el.tagName;
+      /* 预拆分产物：div 包裹层（data-mde-frag 续片 / data-mde-orphan 整表
+         推页）——break-before 必须挂在 div 上，Paged.js 对 table 元素的
+         break-before 无视（实测）。包裹层当原子单元（片高≤页心，构造保证） */
+      if (el.getAttribute && (el.getAttribute('data-mde-frag') ||
+                              el.getAttribute('data-mde-orphan'))) {
+        var fw = el.getBoundingClientRect();
+        if (fw.height > 0)
+          units.push({el: el, top: fw.top - pvTop, h: fw.height, mt: 0,
+                      tbl: null, avoid: true, forced: true, noLast: false});
+        return;
+      }
+      if (t === 'TABLE') {
+        if (el.getAttribute('data-mde-frag')) {
+          var fr = el.getBoundingClientRect();
+          if (fr.height > 0)
+            units.push({el: el, top: fr.top - pvTop, h: fr.height, mt: 0,
+                        tbl: null, avoid: true, forced: true, noLast: false});
+          return;
+        }
+        var rows = el.rows;
+        for (var ri = 0; ri < rows.length; ri++) drill(rows[ri], el);
+        return;
+      }
+      if (t === 'UL' || t === 'OL' ||
+          (t === 'DIV' && el.classList && el.classList.contains('ind-blk'))) {
+        for (var bi = 0; bi < el.children.length; bi++) drill(el.children[bi], null);
+        return;
+      }
+      var r = el.getBoundingClientRect();
+      if (r.height <= 0 && r.width <= 0) return;
+      units.push({el: el, top: r.top - pvTop, h: r.height, tbl: tbl,
+                  mt: parseFloat(getComputedStyle(el).marginTop) || 0,
+                  avoid: avoid(el), forced: forced(el), noLast: noLast(el)});
+    }
+    /* 块收集：导出 HTML 顶层是 .pblk 章级容器（预览结构原样带来），排版
+       意义上的块是 pblk 内部元素——与预览虚线 layoutPageHints 同一下钻口径 */
+    var kids = [];
+    var topEls = root.children;
+    for (var k = 0; k < topEls.length; k++) {
+      var ch = topEls[k];
+      if (ch.classList && ch.classList.contains('pblk')) {
+        for (var k3 = 0; k3 < ch.children.length; k3++) {
+          var c3 = ch.children[k3];
+          if (c3.hasAttribute && c3.hasAttribute('data-mde-zone')) continue;
+          kids.push(c3);
+        }
+      } else kids.push(ch);
+    }
+    for (var k4 = 0; k4 < kids.length; k4++) drill(kids[k4], null);
+    if (!units.length) return false;
+    var cutY = units[0].top, pgStart = cutY, lastTbl = null, tblCont = false;
+    for (var k2 = 0; k2 < units.length; k2++) {
+      var b = units[k2];
+      var theadH = 0;
+      if (b.tbl && b.tbl === lastTbl && tblCont && b.tbl.tHead)
+        theadH = b.tbl.tHead.getBoundingClientRect().height;
+      if (!b.tbl || b.tbl !== lastTbl) tblCont = false;
+      lastTbl = b.tbl || null;
+      var pgBot = cutY + PGH - theadH;
+      if (k2 > 0 && b.forced && b.top > cutY + 0.5) {
+        cutY = b.top - b.mt; pgStart = b.top; lastTbl = null; tblCont = false;
+        continue;
+      }
+      if (b.top + b.h <= pgBot + 0.5) continue;
+      if (b.tbl && !b.tbl.getAttribute('data-mde-split'))
+        return splitTable(b.tbl, pgBot, pvTop);
+      if (b.avoid && b.h <= PGH + 0.5) {
+        var cand = b.top, mtPush = b.mt;
+        if (b.tbl && (k2 === 0 || units[k2 - 1].tbl !== b.tbl)) {
+          cand = b.top - (b.tbl.tHead ?
+                          b.tbl.tHead.getBoundingClientRect().height : 0);
+          mtPush = parseFloat(getComputedStyle(b.tbl).marginTop) || 0;
+          tblCont = false;
+        } else if (b.tbl) tblCont = true;
+        if (k2 > 0 && units[k2 - 1].noLast && units[k2 - 1].top > pgStart + 0.5) {
+          cand = units[k2 - 1].top; mtPush = units[k2 - 1].mt;
+          lastTbl = null; tblCont = false;
+        }
+        cutY = cand - mtPush; pgStart = cand;
+      } else if (b.avoid) {
+        if (b.top > cutY + 0.5) pgStart = b.top;
+        cutY = b.top - b.mt;
+        while (b.top + b.h > cutY + PGH + 0.5) cutY += PGH;
+        cutY = b.top + b.h; pgStart = cutY;
+      } else if ((b.el.tagName === 'P' || b.el.tagName === 'PRE') && b.top < pgBot - 0.5) {
+        var cs = getComputedStyle(b.el);
+        var lhEl = (b.el.tagName === 'PRE' && b.el.querySelector('code')) ?
+                   b.el.querySelector('code') : b.el;
+        var lh = parseFloat(getComputedStyle(lhEl).lineHeight);
+        var pt = parseFloat(cs.paddingTop) || 0;
+        var firstLine = b.top + pt + (b.el.tagName === 'PRE' ? 1 : 0);
+        var cut = pgBot;
+        if (lh > 0) {
+          var n = Math.floor((pgBot - firstLine + 0.5) / lh);
+          if (b.el.tagName === 'P') {
+            var N = Math.max(1, Math.round((b.h - pt) / lh));
+            if (N - n < 2) n = N - 2;
+            if (n < 2) {
+              var cand2 = b.top, mtPush2 = b.mt;
+              if (k2 > 0 && units[k2 - 1].noLast && units[k2 - 1].top > pgStart + 0.5) {
+                cand2 = units[k2 - 1].top; mtPush2 = units[k2 - 1].mt; lastTbl = null;
+              }
+              cutY = cand2 - mtPush2; pgStart = cand2; cut = null;
+            }
+          }
+          if (cut !== null && n >= 1) cut = firstLine + n * lh;
+        }
+        if (cut !== null) { cutY = cut; pgStart = cut; }
+        while (b.top + b.h > cutY + PGH + 0.5) { cutY += PGH; pgStart = cutY; }
+      } else {
+        var cand3 = pgBot;
+        if (k2 > 0 && units[k2 - 1].noLast && units[k2 - 1].top > pgStart + 0.5) {
+          cand3 = units[k2 - 1].top; lastTbl = null;
+        }
+        cutY = cand3; pgStart = cand3;
+      }
+    }
+    return false;
+  }
+  function splitTable(T, pgBot, pvTop){
+    T.setAttribute('data-mde-split', '1');
+    try { (window.__mdeCalls = window.__mdeCalls || []).push({
+      t: (T.rows[0] ? T.rows[0].textContent || '' : '').trim().slice(0, 8),
+      nbody: T.tBodies.length ? T.tBodies[0].rows.length : -1,
+      pgBot: Math.round(pgBot)}); } catch (e0) {}
+    var bodyRows = [];
+    for (var bi = 0; bi < T.tBodies.length; bi++)
+      for (var ri = 0; ri < T.tBodies[bi].rows.length; ri++)
+        bodyRows.push(T.tBodies[bi].rows[ri]);
+    if (!bodyRows.length) return false;
+    /* 首页装得下的行数（行底 ≤ pgBot，行序单调故可顺序数） */
+    var fit = 0;
+    while (fit < bodyRows.length &&
+           bodyRows[fit].getBoundingClientRect().bottom - pvTop <= pgBot + 0.5) fit++;
+    if (!fit) {
+      /* 首行就放不下：整表推新页（消灭孤表头），不拆。
+         断页挂在 div 包裹层——Paged.js 只认块级元素上的 break-before */
+      var ow = document.createElement('div');
+      ow.setAttribute('data-mde-orphan', '1');
+      ow.style.width = PGW + 'px';
+      ow.style.maxWidth = PGW + 'px';
+      T.parentNode.insertBefore(ow, T);
+      ow.appendChild(T);
+      return true;
+    }
+    var colW = [], refRow = T.rows[0];
+    for (var ci = 0; ci < refRow.cells.length; ci++)
+      colW.push(refRow.cells[ci].getBoundingClientRect().width);
+    try { window.__mdeCalls[window.__mdeCalls.length - 1].fit = fit; } catch (e0) {}
+    var rowH = bodyRows.map(function(r){ return r.getBoundingClientRect().height; });
+    var theadH = T.tHead ? T.tHead.getBoundingClientRect().height : 0;
+    /* 首片先钉列宽（移走剩余行后列宽不重排），再挪行 */
+    T.insertBefore(colgroupOf(T, colW), T.firstChild);
+    /* v2.27.0 片高预算必须扣掉表格自身的上下 margin：原式只减了表头高和
+       1px，而 .markdown-body table 带 margin:1em 0（15px×2）。续片算出的
+       片高于是贴着页心（实测 934 vs 页心 933.54，只超 0.46px），Paged.js
+       一放不下就把整个 frag 留在原处、按原文档宽度（2451px）铺开——纸面上
+       就是一张超宽表叠在第 2 页。margin 实测获取，不写死，字号变了也跟得上。 */
+    var _tcs = window.getComputedStyle(T);
+    var _mt = parseFloat(_tcs.marginTop) || 0;
+    var _mb = parseFloat(_tcs.marginBottom) || 0;
+    var rest = fit, prev = T, budget = PGH - theadH - _mt - _mb - 2;
+    while (rest < bodyRows.length) {
+      var take = 0, acc = 0;
+      while (rest + take < bodyRows.length &&
+             acc + rowH[rest + take] <= budget + 0.5) {
+        acc += rowH[rest + take]; take++;
+      }
+      if (!take) take = 1;   /* 单行超页心：单独成片允许溢出（退化态） */
+      var frag = T.cloneNode(false);   /* 属性/类/style 随片走，无子节点 */
+      frag.appendChild(colgroupOf(T, colW));
+      if (T.tHead) frag.appendChild(T.tHead.cloneNode(true));
+      var tb = document.createElement('tbody');
+      for (var k = 0; k < take; k++) tb.appendChild(bodyRows[rest + k]);
+      frag.appendChild(tb);
+      /* 断页挂 div 包裹层（Paged.js 对 table 的 break-before 无视） */
+      var wrap = document.createElement('div');
+      wrap.setAttribute('data-mde-frag', '1');
+      /* v2.27.0 包裹层钉版心宽：不带宽度时它继承原文档 markdown-body 的
+         实际宽度（实测 2451px），于是 @@ table 的 width:50% 在那里算成
+         2123px，纸面上就是一条横贯全页的超宽表。钉住后不论它落在页盒内
+         还是残留在原文档，百分比都按版心算。 */
+      wrap.style.width = PGW + 'px';
+      wrap.style.maxWidth = PGW + 'px';
+      wrap.appendChild(frag);
+      if (prev.nextSibling) prev.parentNode.insertBefore(wrap, prev.nextSibling);
+      else prev.parentNode.appendChild(wrap);
+      prev = wrap;
+      rest += take;
+    }
+    return true;
+  }
+  imgsReady(function(){
+    var splitErr = '';
+    try {
+      /* 关键：分页前的裸文档宽度=视口宽（不是版心），行高/列宽全部失真
+         （实测首表 1264px 宽、行高 58 vs 版心下 78）。先钉版心宽再测量。 */
+      var root0 = document.getElementById('paged-content');
+      root0.style.width = PGW + 'px';
+      root0.style.margin = '0';
+      var g = 0;
+      var pvTop = root0.getBoundingClientRect().top;
+      while (true) {
+        try {
+          if (!onePass(pvTop)) break;
+        } catch (e) {
+          /* 单轮失败不静默：留现场（诊断锚），后续表退化交 Paged.js 自然断 */
+          splitErr = String(e) + ' @g=' + g;
+          break;
+        }
+        pvTop = root0.getBoundingClientRect().top;
+        if (++g >= 300) break;
+      }
+    } catch (e) { splitErr = String(e) + ' @outer'; }
+    if (splitErr) { try { window.__mdeSplitErr = splitErr; } catch (e2) {} }
+    startPaged();
+  });
+})();
+"""
+
 PAGED_FILLER_TMPL = """
 (function(){
   var tpl = __TPL__;
@@ -3776,6 +4401,35 @@ def build_standalone_html(md_path, body_html, ts_css, page_cfg=None):
         return tag[:sm.start()] + 'src="file:///' + p + '"' + tag[sm.end():]
 
     body = re.sub(r'<img[^>]*?src="/img\?path=[^"]+"[^>]*>', _proxy, body_html)
+    # v2.27.1 full 背景图：内联 style 里的 /img? 引用代理成 file:///（背景保原图
+    # 不降采样）。原实现直接 unquote 整个 "path=..." 串当路径拼 file:///，
+    # 产物是 file:////img?path=... 这种死链（导出后永不显示）；且相对路径不按
+    # 文档目录解析。两处一并修正：先取出真正的 path 参数，再按 md 目录补全。
+    def _abs_img(p):
+        p = p.replace("\\", "/")
+        if not p:
+            return p
+        if os.path.isabs(p) or re.match(r"^[A-Za-z]:/", p):
+            return p
+        if re.match(r"^(https?:|file:|data:)", p, re.I):
+            return p
+        if md_path:
+            return os.path.dirname(md_path).replace("\\", "/") + "/" + p
+        return p
+
+    def _proxy_bg(m):
+        q = urllib.parse.parse_qs(
+            urllib.parse.urlparse(m.group(1)).query).get("path", [""])[0]
+        p = _abs_img(q)
+        if not p:
+            return m.group(0)
+        return "background-image:url('file:///" + p + "')"
+    # 引号有三种形态：序列化后是 &quot;（前端 innerHTML 落进导出模板时必然转义），
+    # 直接拼字符串时是 ' 或 "。只认裸引号会整段漏过 —— 这正是原实现从未生效的原因。
+    body = re.sub(
+        r"background-image:\s*url\(\s*(?:&quot;|&#39;|['\"])?\s*"
+        r"(/img\?path=[^)'\"&\s]+)\s*(?:&quot;|&#39;|['\"])?\s*\)",
+        _proxy_bg, body)
     if md_path:
         mdir = os.path.dirname(md_path).replace("\\", "/")
         # 排除 data:（内嵌图/栅格化图表；历史缺陷：data: 被当相对路径拼上
@@ -3788,8 +4442,7 @@ def build_standalone_html(md_path, body_html, ts_css, page_cfg=None):
     html = ('<!DOCTYPE html>\n<html lang="zh-CN"><head><meta charset="UTF-8"><title>__TITLE__</title>'
         "<style>__KATEX__</style><style>div.md-math-block{overflow-x:auto;margin:.8em 0;}"
         "span.md-math-inline{white-space:nowrap;}__TS__</style>"
-        '<style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",'
-        '"Microsoft YaHei",sans-serif;width:__CONTENTW__mm;max-width:none;'
+        '<style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;width:__CONTENTW__mm;max-width:none;'
         'margin:40px auto;padding:0;'
         'line-height:1.7;color:#222;}'
         'h1,h2{border-bottom:1px solid #eee;padding-bottom:.3em;}'
@@ -3807,7 +4460,7 @@ def build_standalone_html(md_path, body_html, ts_css, page_cfg=None):
         '.diagram[data-diagram-align="right"]{margin-left:auto;}'
         '.diagram[data-diagram-align="left"]{margin-right:auto;}'
         '.fill-row{display:flex;gap:1em;margin:.6em 0;}'
-        '.full-page{break-before:page;break-after:page;min-height:250mm;display:flex;flex-direction:column;justify-content:center;}'
+        '.full-page{break-before:page;break-after:page;min-height:__PGCH__mm;display:flex;flex-direction:column;justify-content:center;}'
         '.full-page[data-full-pos="t"]{justify-content:flex-start;}'
         '.full-page[data-full-pos="b"]{justify-content:flex-end;}'
         '.page-region{break-before:page;break-after:page;}'
@@ -3818,10 +4471,10 @@ def build_standalone_html(md_path, body_html, ts_css, page_cfg=None):
         '.fill-col .diagram{width:100% !important;}'
         '.fill-col .diagram svg{max-width:100%;height:auto;}'
         'img,svg{max-width:100%;}svg{height:auto;}a{color:#4a6cf7;}'
-        '__FIGCAP__</style></head><body class="markdown-body">__BODY__'
+        '__FIGCAP____PAPER__</style></head><body class="markdown-body __TONE__">__BODY__'
         '<button id="__copyBtn" style="position:fixed;right:18px;bottom:18px;z-index:2147483647;'
         'padding:9px 16px;border:0;border-radius:8px;background:#4a6cf7;color:#fff;'
-        'font:14px/1.2 -apple-system,Segoe UI,PingFang SC,Microsoft YaHei,sans-serif;'
+        'font:14px/1.2 -apple-system,BlinkMacSystemFont,sans-serif;'
         'cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.25)">一键复制</button>'
         '<script>'
         'function __inlineClone(src){'
@@ -3863,7 +4516,33 @@ def build_standalone_html(md_path, body_html, ts_css, page_cfg=None):
     html = html.replace("__KATEX__", katex_css)
     html = html.replace("__TS__", ts)
     html = html.replace("__FIGCAP__", FIGCAP_BASE_CSS)
+    # v2.27.1 纸张底色：正文取色由前端 ts_css 的 .markdown-body.md-tone-* 单源
+    # 提供（同一份 ts-style 也进打印），这里只补「纸」本身——导出件是独立
+    # 文件，html/body 必须自己上底色，否则深色纸两侧漏白。
+    _tone = "dark" if str(_pc.get("tone") or "") == "dark" else "light"
+    html = html.replace("__TONE__", "md-tone-" + _tone)
+    html = html.replace("__PAPER__",
+                        "html,body{background-color:#1a1a1c !important;}"
+                        "*{-webkit-print-color-adjust:exact;print-color-adjust:exact;}"
+                        if _tone == "dark" else "")
     html = html.replace("__CONTENTW__", ("%.2f" % _w_mm).rstrip("0").rstrip("."))
+    # v2.26.6 拟页块页心高：纸高−上下边距（与预览/打印同口径，替代写死 250mm）
+    if _paper == "custom":
+        try:
+            _pgh = float(_pc.get("ph") or 0)
+        except Exception:
+            _pgh = 0
+        if _pgh <= 0:
+            _pgh = 297.0
+    else:
+        _pgh = PAPER_H_MM.get(_paper, 297.0)
+    try:
+        _mtv = float(_pc.get("mt", 25))
+        _mbv = float(_pc.get("mb", 25))
+    except Exception:
+        _mtv, _mbv = 25.0, 25.0
+    _pgch = max(30.0, _pgh - _mtv - _mbv)
+    html = html.replace("__PGCH__", ("%.2f" % _pgch).rstrip("0").rstrip("."))
     html = html.replace("__BODY__", body)
     return html
 
@@ -3939,6 +4618,12 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
         page_ch = max(50.0, float(paper_h) - float(mt) - float(mb) - 1.0)
     except (TypeError, ValueError):
         page_ch = 246.0
+    # v2.26.8 表格预拆分页心预算（px，96dpi）：注意不带 full 的 1mm 余量——
+    # 与预览虚线 pgH 同一口径（Math.max(30,ph-mt-mb)*mm），两边算术必须一致
+    try:
+        pgh_px = max(50.0, (float(paper_h) - float(mt) - float(mb)) * 96.0 / 25.4)
+    except (TypeError, ValueError):
+        pgh_px = 933.5
     # 版心宽（切片条带的渲染宽度基准）
     try:
         paper_w = (float(pw) if (paper == "custom" and pw)
@@ -3946,6 +4631,9 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
         icb_w = max(40.0, paper_w - float(mr) - float(ml))
     except (TypeError, ValueError):
         icb_w = 174.0
+    # v2.26.8 版心宽 px：预拆分测量前把裸文档钉到版心宽（否则按视口宽排版，
+    # 行高全部失真——实测首表 1264px 宽、行高 58 vs 版心下 78）
+    pgw_px = icb_w * 96.0 / 25.4
     pn = page_cfg.get("pn", {}) or {}
     toc_cfg = page_cfg.get("toc", {}) or {}
     # v2.15.0：界面语言决定产物里的固定文案（目录标题）；正文与用户内容不受影响
@@ -3976,6 +4664,11 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
         "p{orphans:2;widows:2;}li{orphans:1;widows:1;}"
         "hr{break-inside:avoid;break-after:avoid;}"
         "table{break-inside:auto;}blockquote{break-inside:avoid;}"
+        # v2.26.8 表格预拆分：续片 div 包裹层强制新页、孤表头表整表推新页。
+        # 断页必须挂在块级 div 上——Paged.js 的分页器对 table 元素的
+        # break-before 无视（2026-11-02 实测）；片内表额外margin 清零
+        "div[data-mde-frag],div[data-mde-orphan]{break-before:page;}"
+        "div[data-mde-frag] table,div[data-mde-orphan] table{margin-top:0;margin-bottom:0;}"
         # v2.17.0 页区：起止两端都强制断页——页码是页级属性，一页只能有
         # 一个数字，边界落在页中必然有一方的号是错的。区域若是文末最后
         # 一块，撤掉 break-after，否则末尾会多催一张空白页。
@@ -4046,6 +4739,30 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
     # 超高长图切片：高 > 版心的图切小条带续排（切点吸附静默行）
     body = _slice_tall_images(body, icb_w, img_maxh, out_dpi)
 
+    # v2.27.1 full 背景图相对路径按文档目录补全。打印页是 http 页面，保持
+    # /img?path= 代理形态；不补则后端按工具目录解析，文档同级 .assets 里的
+    # 图一律 404（正文图有前端 fixLocalImages 兜底，背景图没有，于是
+    # 「正文图能显示、背景图不能」，看起来像背景图语法被截断）。
+    if md_path:
+        def _abs_proxy_url(u):
+            q = urllib.parse.parse_qs(
+                urllib.parse.urlparse(u).query).get("path", [""])[0]
+            p = q.replace("\\", "/")
+            if not p or os.path.isabs(p) or re.match(r"^[A-Za-z]:/", p) \
+                    or re.match(r"^(https?:|file:|data:)", p, re.I):
+                return u
+            p = os.path.dirname(md_path).replace("\\", "/") + "/" + p
+            return "/img?path=" + urllib.parse.quote(p, safe="")
+
+        body = re.sub(
+            r"background-image:\s*url\((['\"])(/img\?path=[^)'\"]+)\1\)",
+            lambda m: "background-image:url('%s')" % _abs_proxy_url(m.group(2)),
+            body)
+        body = re.sub(
+            r'(data-bg-img=")(/img\?path=[^"]+)(")',
+            lambda m: m.group(1) + _abs_proxy_url(m.group(2)) + m.group(3),
+            body)
+
     # 图片 src 保持 /img 代理原样：打印版由系统浏览器打开的是服务端
     # http URL（/static/document.paged.html），http 页面按浏览器安全策略
     # 禁止加载 file:/// 本地资源（重写即真实图片全挂——v2.1.3 曾改反）；
@@ -4057,6 +4774,40 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
     # 在分页导出中消失的根因；置于 ts_css 之前，排版设置的 !important 仍可覆盖
     base_css = (PAGED_BASE_CSS.replace("__IMGMAXH__", ("%.2f" % img_maxh))
                 .replace("__PAGECH__", ("%.2f" % page_ch))) + FIGCAP_BASE_CSS
+
+    # v2.27.1 纸张底色（深/浅）。正文与边框取色由前端 ts_css 里的
+    # .markdown-body.md-tone-* 给出（与预览、HTML 导出同一份 ts-style，单源）；
+    # 这里只负责「纸」本身：页盒与文档背景。print-color-adjust:exact 是必需的
+    # ——浏览器打印默认丢弃背景色，不加则深色纸印出来仍是白的。
+    _tone = "dark" if str(page_cfg.get("tone") or "") == "dark" else "light"
+    tone_cls = "md-tone-" + _tone
+    # 内容容器必须透明：纸的颜色与 full 背景图都挂在页盒 (.pagedjs_page) 上，
+    # 而内容层带着 .markdown-body.md-tone-* 的 !important 背景色，一旦不透明
+    # 就把页盒上的背景图整块盖住（浅色纸白底盖白纸看不出，深色纸 + 背景图直接
+    # 消失）。注意 Paged.js 会把 #paged-content 连同 class 克隆进每一页、但**不带
+    # id**，只写 #paged-content 选择器命中不了克隆体 —— 必须按类选择。
+    _see_through = ("#paged-content,.pagedjs_page_content,.pagedjs_area,"
+                    ".pagedjs_page .markdown-body{"
+                    "background-color:transparent !important;}")
+    if _tone == "dark":
+        # 必须用 background-color 而非 background 简写：简写会把 background-image
+        # 一并重置成 none，而 full 背景图正是给 .pagedjs_page 贴的 background-image
+        # （!important 的简写会把它清掉——深色纸下背景图整个消失）。
+        # 纸色只上给 .pagedjs_page：Paged.js 的结构是 page > sheet > content，
+        # sheet 铺满整页且是 page 的后代，给它上不透明色就会把 page 上的背景图
+        # 整块盖住（深色纸 + 背景图 = 图消失、只剩纯色）。
+        # 页眉/页脚/页码走 Paged.js 的 margin box，不在正文流里，
+        # 正文的 md-tone-dark 规则覆盖不到：不显式上色就会在深色纸上
+        # 露出一条白底、并让页码变成看不见的深字。
+        paper_css = ("html,body{background-color:#1a1a1c !important;}"
+                     ".pagedjs_page{background-color:#1a1a1c !important;}"
+                     ".pagedjs_sheet{background-color:transparent !important;}"
+                     ".pagedjs_margin{background-color:transparent !important;}"
+                     ".pagedjs_margin-content{color:#e6e6e8 !important;}"
+                     + _see_through +
+                     "*{-webkit-print-color-adjust:exact;print-color-adjust:exact;}")
+    else:
+        paper_css = _see_through
 
     # 资源内嵌（全部本地，离线可用）
     katex_css = ""
@@ -4089,12 +4840,102 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
         filler = filler.replace(k, v)
     filler = filler.replace("</script", "<\\/script")
 
+    # v2.26.8 表格预拆分脚本：置于 PagedConfig 之前（它异步等图片就绪后
+    # 才调 PagedPolyfill.preview()，届时 PagedConfig/polyfill 早已就位）
+    split_js = (PAGED_SPLIT_TMPL
+                .replace("__PGH__", ("%.2f" % pgh_px))
+                .replace("__PGW__", ("%.2f" % pgw_px))
+                .replace("</script", "<\\/script"))
+
     # v2.19.1 完成信号预置：PagedConfig.after 是 polyfill 排版全部完成的官方
     # 回调（Vm=window.PagedConfig||{...} 在 polyfill 执行时读取，必须先于它
     # 定义）。after 内微延时等最终 DOM 落定后调 __pgFill 回填页码与目录。
-    paged_cfg = ("window.PagedConfig={auto:true,after:function(){"
-                 "return new Promise(function(res){setTimeout(function(){"
-                 "try{window.__pgFill&&window.__pgFill();}catch(e){}res();},80);});}};")
+    # v2.26.6 full 背景图页盒衬底：分页完成后把 .full-page[data-bg-img] 的
+    # 背景贴到所在 .pagedjs_page（整页含边距，页面背景的本义），块上内联
+    # 背景清 none 防双画——预览/HTML 导出是块衬，打印是页盒衬，同一组
+    # data-bg-* 属性两种消费方式。
+    # v2.26.8 auto:false：启动改由预拆分脚本在图片就绪+表格预拆后手动调
+    # PagedPolyfill.preview()——图片没量准就分页，表格行高与拆分预算全错。
+    # after 内的孤表头兜底：推演漂移令个别表在页底只装下表头时，Paged.js
+    # 自然断产生"整页只有表头"的碎片——移除之（该页本就近满，移除无副
+    # 作用；根治靠推演精度专项）。
+    paged_cfg = ('window.PagedConfig={auto:false,after:function(){'
+                 'return new Promise(function(res){setTimeout(function(){'
+                 'try{window.__pgFill&&window.__pgFill();}catch(e){}'
+                 'try{(function(){'
+                 'var _ots=document.querySelectorAll('
+                 '".pagedjs_page .markdown-body table");'
+                 'for(var _i=0;_i<_ots.length;_i++){'
+                 'var _t=_ots[_i];'
+                 'if(_t.tHead&&_t.tBodies.length&&'
+                 '_t.tBodies[0].rows.length===0&&_t.rows.length===1){'
+                 '_t.parentNode.removeChild(_t);}'
+                 '}})();}catch(e){}'
+                 'try{(function(){'
+                 'var SZ={o:"auto",c:"cover",f:"100% 100%"};'
+                 'var PS={lt:"left top",ct:"center top",rt:"right top",'
+                 'lc:"left center",cc:"center center",rc:"right center",'
+                 'lb:"left bottom",cb:"center bottom",rb:"right bottom"};'
+                 # v2.27.0 重试：after 里 80ms 的时机早于部分页盒落定，
+                 # 原实现一次遍历、closest 为 null 就 continue，且永不重试
+                 # （实测同一文档连跑两次：一次贴上、一次全无）。现在无条件
+                 # 逐轮重试：每 60ms 一轮、最多 100 轮（约 6s，异步不挡 res()），
+                 # 每轮把此刻已在页盒内的块贴上并打 data-bg-done 跳过。
+                 # 不能以"本轮是否有命中"为终止条件——元素尚未进页盒时
+                 # 命中数与被等待数同时为 0，会当场收工，正是原缺陷的复刻。
+                 'function __pgBgOnce(){'
+                 'var fls=document.querySelectorAll(".full-page[data-bg-img]");'
+                 'var hit=0;'
+                 'for(var i=0;i<fls.length;i++){'
+                 'var el=fls[i];'
+                 'if(el.getAttribute("data-bg-done")==="1")continue;'
+                 'var pg=el.closest?el.closest(".pagedjs_page"):null;'
+                 'if(!pg)continue;'
+                 'var u=el.getAttribute("data-bg-img").replace(/"/g,"%22");'
+                 'el.style.backgroundImage="none";'
+                 'pg.style.backgroundImage="url(\\""+u+"\\")";'
+                 'pg.style.backgroundSize=SZ[el.getAttribute("data-bg-mode")]||"cover";'
+                 'pg.style.backgroundPosition=PS[el.getAttribute("data-bg-pos")]||"center center";'
+                 'pg.style.backgroundRepeat="no-repeat";'
+                 'el.setAttribute("data-bg-done","1");'
+                 'hit++;'
+                 '}'
+                 'return hit;}'
+                 'var __tries=0;'
+                 'if(document.querySelectorAll(".full-page[data-bg-img]").length){'
+                 '(function tick(){'
+                 '__pgBgOnce();'
+                 'if(__tries<100){__tries++;setTimeout(tick,60);}'
+                 '})();}'
+                 '})();}catch(e){}'
+                 # v2.27.0 @@ table 列宽修补：Paged.js 拆表用 cloneNode(false)
+                 # 重建续片，内联 style 留住了、colgroup 子节点却丢掉，续片
+                 # 列宽退化成等分（实测 50/30/20 → 33/33/33）。表格带
+                 # data-mde-cols 签名，这里按签名重建缺的 colgroup。
+                 # 只在缺失时补，已有 colgroup 的（预拆分脚本造的片）不动。
+                 'try{(function(){'
+                 'function __pgCols(){'
+                 'var tbs=document.querySelectorAll(".pagedjs_page table[data-mde-cols]");'
+                 'var fixed=0;'
+                 'for(var i=0;i<tbs.length;i++){'
+                 'var t=tbs[i];'
+                 'if(t.querySelector("colgroup"))continue;'
+                 'var sp=t.getAttribute("data-mde-cols").split(",");'
+                 'var cg=document.createElement("colgroup");'
+                 'for(var j=0;j<sp.length;j++){'
+                 'var c=document.createElement("col");'
+                 'if(sp[j]&&sp[j]!=="0")c.style.width=sp[j];'
+                 'cg.appendChild(c);}'
+                 't.insertBefore(cg,t.firstChild);'
+                 'fixed++;}'
+                 'return fixed;}'
+                 'var __ctries=0;'
+                 '(function ctick(){'
+                 '__pgCols();'
+                 'if(__ctries<30){__ctries++;setTimeout(ctick,100);}'
+                 '})();'
+                 '})();}catch(e){}'
+                 'res();},80);});}};')
     paged_cfg = paged_cfg.replace("</script", "<\\/script")
 
     # 目录版式（STRUCTURE_GUIDE 6.4：点线引导 + 页码右对齐列；
@@ -4116,8 +4957,9 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
 
     html = (
         '<!DOCTYPE html>\n<html lang="zh-CN"><head><meta charset="UTF-8"><title>%s</title>'
-        "<style>%s</style><style>%s</style><style>%s%s%s</style>"
-        '</head><body class="markdown-body"><div id="paged-content" class="markdown-body">%s</div>'
+        "<style>%s</style><style>%s</style><style>%s%s%s%s</style>"
+        '</head><body class="markdown-body %s"><div id="paged-content" class="markdown-body %s">%s</div>'
+        "<script>%s</script>"
         "<script>%s</script>"
         "<script>%s</script>"
         "<script>%s</script></body></html>"
@@ -4128,7 +4970,11 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
         katex_css,
         toc_css,
         ts_css,
+        paper_css,
+        tone_cls,
+        tone_cls,
         body,
+        split_js,
         paged_cfg,
         paged_js,
         filler,
@@ -4256,9 +5102,10 @@ def _run_picker(script, tmpname):
         return ""
 
 
-def _pick_file_subprocess(initdir=""):
-    """原生"打开文件"框（GetOpenFileNameW，过滤 .md/.smd）；独立子进程弹窗，
-    路径经临时文件回传（与 _pick_dir_subprocess 同模式）。取消/失败返回空串。"""
+def _pick_file_subprocess(initdir="", mode=""):
+    """原生"打开文件"框（GetOpenFileNameW，过滤 .md/.smd/.smdm）；独立子进程弹窗，
+    路径经临时文件回传（与 _pick_dir_subprocess 同模式）。取消/失败返回空串。
+    mode="template" 时收窄成只挑母版（导入母版库用）。"""
     here = os.path.dirname(os.path.abspath(__file__))
     picker = os.path.join(here, "_pickfile.py")
     if not os.path.exists(picker):
@@ -4274,7 +5121,7 @@ def _pick_file_subprocess(initdir=""):
     if not os.path.exists(py_exe):
         py_exe = sys.executable
     try:
-        subprocess.run([py_exe, picker, tmp, initdir or ""], timeout=900,
+        subprocess.run([py_exe, picker, tmp, initdir or "", mode or ""], timeout=900,
                        creationflags=0x08000000)
     except Exception:
         pass

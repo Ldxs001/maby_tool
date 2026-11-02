@@ -23,6 +23,7 @@ from lxml import etree, html as lxml_html
 from docx import Document
 from docx.shared import Pt, RGBColor, Inches, Mm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.section import WD_SECTION_START
 from docx.oxml.ns import qn
 try:
     from docx.oxml import OxmlElement
@@ -1597,7 +1598,49 @@ def build_docx(md_path, body_html, ts_css=None, page_cfg=None):
         if found:
             mb = found[0]
     ctx = {"para": None, "ind": 0.0, "lhang": (hang, slot_ol, slot_ul)}
+
+    def _sect_valign(sec, val):
+        """v2.26.6 节垂直对齐（full 内容上/中/下）：Word 封面页的标准机制。
+        oxml 手术：w:vAlign 按 schema 须位于 w:cols 之后、w:docGrid 之前；
+        val=None 移除（top 是 Word 缺省，add_section 克隆旧 sectPr 须清）。"""
+        sectPr = sec._sectPr
+        for old in sectPr.findall(qn("w:vAlign")):
+            sectPr.remove(old)
+        if val:
+            el = OxmlElement("w:vAlign")
+            el.set(qn("w:val"), val)
+            grid = sectPr.find(qn("w:docGrid"))
+            if grid is not None:
+                grid.addprevious(el)
+            else:
+                sectPr.append(el)
+
+    # v2.26.6 full 独占一页（docx 口径：不出背景图——Word 无逐页页面背景，
+    # 出骨架：节分隔 NEW_PAGE 保证块自成一节（内容溢出则续页同节续排），
+    # 节属性 w:vAlign 实现内容上/中/下。并写 page full 里嵌的 full 不在
+    # 顶层（docx 无页码区概念）按普通块走，此处只认顶层 .full-page。
+    # 文末若是 full 不补关节——最后一级就是 body sectPr，补了反而多一张
+    # 空白页；中间 full 由「下一个普通块前开新节」闭环。
+    in_full = False
     for child in _children(mb):
+        _cls = (child.get("class", "") or "") if isinstance(child.tag, str) else ""
+        if "full-page" in _cls.split():
+            sec = doc.add_section(WD_SECTION_START.NEW_PAGE)
+            _sect_valign(sec, {"t": "top", "m": "center", "b": "bottom"}.get(
+                child.get("data-full-pos") or "m", "center"))
+            saved_ind = ctx["ind"]
+            ctx["ind"] = 0.0
+            ctx["para"] = None
+            for ch in _children(child):
+                _walk(ch, doc, md_path, ctx)
+            ctx["ind"] = saved_ind
+            ctx["para"] = None
+            in_full = True
+            continue
+        if in_full:
+            sec2 = doc.add_section(WD_SECTION_START.NEW_PAGE)
+            _sect_valign(sec2, None)
+            in_full = False
         _walk(child, doc, md_path, ctx)
     buf = io.BytesIO()
     doc.save(buf)

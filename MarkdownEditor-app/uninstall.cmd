@@ -10,11 +10,13 @@ REM It only clears system integration (registry / shortcuts / ARP entry).
 REM File deletion is opt-in, double-confirmed, and lives in the uninstaller
 REM GUI (UninstallMDEditor.exe), never in this script.
 
-echo [1/6] Remove .md/.smd context menu and associations...
+echo [1/6] Remove .md/.smd/.smdm context menu and associations...
 reg delete "HKCU\Software\Classes\.md\shell\MDViewer" /f >nul 2>&1
 reg delete "HKCU\Software\Classes\MDViewer.md" /f >nul 2>&1
 reg delete "HKCU\Software\Classes\.smd" /f >nul 2>&1
 reg delete "HKCU\Software\Classes\MDViewer.smd" /f >nul 2>&1
+reg delete "HKCU\Software\Classes\.smdm" /f >nul 2>&1
+reg delete "HKCU\Software\Classes\MDViewer.smdm" /f >nul 2>&1
 reg delete "HKCU\Software\Classes\Applications\MarkdownEditor.exe" /f >nul 2>&1
 reg delete "HKCU\Software\Classes\Markdown Document" /f >nul 2>&1
 

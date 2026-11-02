@@ -109,6 +109,7 @@ MANIFEST_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
             <uap:SupportedFileTypes>
             <uap:FileType>.md</uap:FileType>
             <uap:FileType>.smd</uap:FileType>
+            <uap:FileType>.smdm</uap:FileType>
             </uap:SupportedFileTypes>
           </uap3:FileTypeAssociation>
         </uap3:Extension>

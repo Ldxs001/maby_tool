@@ -43,7 +43,7 @@ class OPENFILENAMEW(ctypes.Structure):
 FLAGS = 0x00001000 | 0x00000800 | 0x00080000 | 0x00000008 | 0x00000004 | 0x00200000
 
 
-def pick_file(init_dir=""):
+def pick_file(init_dir="", mode=""):
     comdlg32 = ctypes.windll.comdlg32
     user32 = ctypes.windll.user32
     try:
@@ -59,17 +59,25 @@ def pick_file(init_dir=""):
             ofn.hwndOwner = user32.GetForegroundWindow()
         except Exception:
             ofn.hwndOwner = None
-        ofn.lpstrFilter = ("Markdown (*.md;*.smd)\0*.md;*.smd\0"
-                           "Markdown (*.md)\0*.md\0"
-                           "自包含文档 (*.smd)\0*.smd\0"
-                           "文本文件 (*.txt)\0*.txt\0"
-                           "所有文件 (*.*)\0*.*\0\0")
+        # mode=template：只挑母版（导入母版库用），标题与过滤都收窄；
+        # 其余走原来的 Markdown 口径，只是把 .smdm 一并列进首项。
+        if mode == "template":
+            ofn.lpstrFilter = ("母版 (*.smdm;*.smd)\0*.smdm;*.smd\0"
+                               "所有文件 (*.*)\0*.*\0\0")
+            ofn.lpstrTitle = "选择要导入的母版"
+            ofn.lpstrDefExt = "smdm"
+        else:
+            ofn.lpstrFilter = ("Markdown (*.md;*.smd;*.smdm)\0*.md;*.smd;*.smdm\0"
+                               "Markdown (*.md)\0*.md\0"
+                               "自包含文档 (*.smd;*.smdm)\0*.smd;*.smdm\0"
+                               "文本文件 (*.txt)\0*.txt\0"
+                               "所有文件 (*.*)\0*.*\0\0")
+            ofn.lpstrTitle = "打开 Markdown 文档"
+            ofn.lpstrDefExt = "md"
         ofn.lpstrFile = ctypes.cast(buf, wintypes.LPWSTR)
         ofn.nMaxFile = 32768
-        ofn.lpstrTitle = "打开 Markdown 文档"
         ofn.lpstrInitialDir = init_dir or None
         ofn.Flags = FLAGS
-        ofn.lpstrDefExt = "md"
         comdlg32.GetOpenFileNameW.restype = wintypes.BOOL
         comdlg32.GetOpenFileNameW.argtypes = [ctypes.POINTER(OPENFILENAMEW)]
         if not comdlg32.GetOpenFileNameW(ctypes.byref(ofn)):
@@ -84,7 +92,8 @@ def pick_file(init_dir=""):
 
 try:
     init = sys.argv[2] if len(sys.argv) > 2 else ""
-    result = pick_file(init)
+    mode = sys.argv[3] if len(sys.argv) > 3 else ""
+    result = pick_file(init, mode)
 except Exception:
     result = ""
 try:
