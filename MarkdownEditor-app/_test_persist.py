@@ -115,20 +115,26 @@ with sync_playwright() as p:
 
     # render(force) 即时性：p 档从 first/2 改为 none（或字符改 3），应用后
     # 不碰编辑器，ind-blk 内联 margin 即时随继承链更新
+    # 注：v2.13.x 起 ind-blk 内联 margin 由 em 改为 px 直写（em 基准随容器字号
+    # 漂移，2em 在 15px 继承链下渲染 30px，与正文首行 37.3px 不齐），断言随之
+    # 由「== 2em」改为「px 数值且字符数线性」，判据仍是「应用后即时生效」。
     def ind_blk_margin():
         return pg.evaluate(
-            "(()=>{const d=document.querySelector('.ind-blk');"
-            "return d?d.style.marginLeft:null;})()")
+            "(()=>{const d=document.querySelector('#preview .ind-blk');"
+            "if(!d)return null;const v=parseFloat(d.style.marginLeft);"
+            "return isNaN(v)?null:v;})()")
     m2 = ind_blk_margin()
-    check("初设排版后 ind-blk margin 即时=2em", m2 == "2em", str(m2))
+    check("初设排版后 ind-blk margin 即时=2 字符(px)",
+          m2 is not None and 30 < m2 < 45, str(m2))
     pg.click("#btnTypeset")
     pg.wait_for_timeout(200)
     pg.fill('input[data-indchars="p"]', "3")
     pg.click("#tsApply")
     pg.wait_for_timeout(900)   # render 队列 + 节流
     m3 = ind_blk_margin()
-    check("改排版后 ind-blk margin 即时 2em->3em（无需编辑操作）",
-          m2 == "2em" and m3 == "3em", "%s -> %s" % (m2, m3))
+    check("改排版后 ind-blk margin 即时 2→3 字符（无需编辑操作）",
+          bool(m2) and bool(m3) and abs(m3 / m2 - 1.5) < 0.03,
+          "%s -> %s" % (m2, m3))
     ctx.close()
 
     # ---------- 会话 2：全新 context（LS 空=模拟关窗），恢复引导回放 ----------
@@ -171,12 +177,13 @@ with sync_playwright() as p:
         "(()=>{const o=document.querySelector('#preview ol')||"
         "document.querySelector('.markdown-body ol');"
         "if(!o)return null;const s=getComputedStyle(o);"
-        "const fs=parseFloat(getComputedStyle(document.getElementById('preview')||o).fontSize);"
-        "return {ml:s.marginLeft,pos:s.listStylePosition,fs:fs};"
+        "return {ml:s.marginLeft,pos:s.listStylePosition};"
         "})()")
-    want_ml = str((cs["fs"] if cs else 15) * 2) + "px"
-    check("重启后 ol margin=2em(容器字号)/inside",
-          cs and cs["pos"] == "inside" and cs["ml"] == want_ml,
+    # 缩进档 = 面板「列表」字符数 × 列表字号，实现为 px 直写（2 字符≈37.3px）；
+    # 断言只锁「档位生效且为 inside」，不锁具体像素（字号档会变）
+    ok_ml = bool(cs) and 30 <= float(cs["ml"].replace("px", "")) <= 40
+    check("重启后 ol 缩进档生效/inside",
+          bool(cs) and cs["pos"] == "inside" and ok_ml,
           str(cs))
 
     check("会话2无页面异常", not errors2, "; ".join(errors2[:2]))

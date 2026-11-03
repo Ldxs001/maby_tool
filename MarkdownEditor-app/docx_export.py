@@ -12,7 +12,7 @@
 依赖（随应用内置于 docxdeps/）：python-docx、lxml、latex2mathml、Pillow。
 """
 import base64
-
+import copy
 import io
 import os
 import re
@@ -565,8 +565,29 @@ def _resolve_img_src(src, md_path):
 # ---------------------------------------------------------------------------
 # 内联内容 -> docx runs
 # ---------------------------------------------------------------------------
+# v2.33.0 块级字体继承（@@ begin font）。
+# 前端 inlineStylesInto 通常已把计算样式抄到每个元素，这条继承是第二道保险：
+# 只要某个 run 自己没写 font-family/font-size（例如 tail 文本挂在无 style 的
+# 容器上，或调用方没走内联通道），就沿用它所在的 .mde-font 容器。
+# 用 threading.local 而不是全局：导出是逐请求同步的，但也别让并发请求互相串。
+_TLS_FONT = threading.local()
+
+
+def _push_font_style(style):
+    prev = getattr(_TLS_FONT, "style", "")
+    _TLS_FONT.style = style or ""
+    return prev
+
+
+def _pop_font_style(prev):
+    _TLS_FONT.style = prev or ""
+
+
 def _apply_run_style(run, style_node):
-    sd = _style_dict(style_node.get("style", ""))
+    _own = style_node.get("style", "") if style_node is not None else ""
+    _base = getattr(_TLS_FONT, "style", "")
+    # 自身声明在后，_style_dict 逐键覆盖 → 元素自己的值优先于容器继承
+    sd = _style_dict((_base + ";" + _own) if _base else _own)
     fs = _pt(sd.get("font-size"))
     if fs:
         run.font.size = Pt(fs)
@@ -1225,6 +1246,8 @@ def _walk(node, doc, md_path, ctx):
     # 下钻递归子块；直接文本节点兜底为段落，不丢内容
     if tag == "div":
         sd = _style_dict(node.get("style", ""))
+        # v2.33.0：.mde-font 容器把字体/字号压进继承上下文，块内所有 run 生效
+        _font_prev = _push_font_style(node.get("style", ""))             if "mde-font" in cls.split() else None
         ml = _px("margin-left", sd)
         base = float(ctx.setdefault("ind", 0.0)) + (
             ml * 0.75 if ml is not None else 0)
@@ -1244,6 +1267,8 @@ def _walk(node, doc, md_path, ctx):
                 _add_run(tp, ch.tail, ch)
         ctx["ind"] = saved
         ctx["para"] = None
+        if _font_prev is not None:
+            _pop_font_style(_font_prev)
         return
 
     # 段落（p）：首行缩进/悬挂缩进（前端 px 档位）+ ctx 块级缩进栈。
@@ -1599,11 +1624,8 @@ def build_docx(md_path, body_html, ts_css=None, page_cfg=None):
             mb = found[0]
     ctx = {"para": None, "ind": 0.0, "lhang": (hang, slot_ol, slot_ul)}
 
-    def _sect_valign(sec, val):
-        """v2.26.6 节垂直对齐（full 内容上/中/下）：Word 封面页的标准机制。
-        oxml 手术：w:vAlign 按 schema 须位于 w:cols 之后、w:docGrid 之前；
-        val=None 移除（top 是 Word 缺省，add_section 克隆旧 sectPr 须清）。"""
-        sectPr = sec._sectPr
+    def _sect_valign_el(sectPr, val):
+        """w:vAlign 施加到 sectPr 元素（schema：w:cols 之后、w:docGrid 之前）。"""
         for old in sectPr.findall(qn("w:vAlign")):
             sectPr.remove(old)
         if val:
@@ -1615,33 +1637,142 @@ def build_docx(md_path, body_html, ts_css=None, page_cfg=None):
             else:
                 sectPr.append(el)
 
-    # v2.26.6 full 独占一页（docx 口径：不出背景图——Word 无逐页页面背景，
-    # 出骨架：节分隔 NEW_PAGE 保证块自成一节（内容溢出则续页同节续排），
-    # 节属性 w:vAlign 实现内容上/中/下。并写 page full 里嵌的 full 不在
-    # 顶层（docx 无页码区概念）按普通块走，此处只认顶层 .full-page。
-    # 文末若是 full 不补关节——最后一级就是 body sectPr，补了反而多一张
-    # 空白页；中间 full 由「下一个普通块前开新节」闭环。
-    in_full = False
+    def _sect_valign(sec, val):
+        """v2.26.6 节垂直对齐（full 内容上/中/下）：Word 封面页的标准机制。
+        val=None 移除（top 是 Word 缺省，add_section 克隆旧 sectPr 须清）。"""
+        _sect_valign_el(sec._sectPr, val)
+
+    def _end_section(val):
+        """结束当前节并给**这一节**写上/中/下，随后开新节。
+        python-docx 的 add_section 返回的是「之后」那一节：旧节的 sectPr
+        是克隆体，落在新插进 body 末尾的承载段落里，故对齐要写到那个
+        sectPr 上，而不是返回值上（v2.29.1 修正 v2.26.6 的错位）。
+        承载段落会把内容顶下半行（它自身占一行），能并进前一段就并掉：
+        只有 body 末尾确实是它、且前一个兄弟是段落时才并（前一个是表格
+        时不能并，否则表格被划进下一节）。"""
+        new_sec = doc.add_section(WD_SECTION_START.NEW_PAGE)
+        _sect_valign(new_sec, None)          # 新节是克隆来的，先清回默认
+        body = doc.element.body
+        ps = body.findall(qn("w:p"))
+        if not ps:
+            return
+        carrier = ps[-1]
+        pPr = carrier.find(qn("w:pPr"))
+        sectPr = None if pPr is None else pPr.find(qn("w:sectPr"))
+        if sectPr is None:
+            return
+        # 显式 nextPage（缺省也是它，写出来免得 Word 版本差异）
+        for old in sectPr.findall(qn("w:type")):
+            sectPr.remove(old)
+        tp = OxmlElement("w:type")
+        tp.set(qn("w:val"), "nextPage")
+        pgSz = sectPr.find(qn("w:pgSz"))
+        if pgSz is not None:
+            pgSz.addprevious(tp)
+        else:
+            sectPr.insert(0, tp)
+        _sect_valign_el(sectPr, val)
+        # 并进前一段（分节符仍在该段之后，节边界不变）。注意 body 末尾还有一个
+        # 直接子元素 w:sectPr（sentinel，描述最后一节），不能把它当成邻居。
+        kids = [k for k in body
+                if isinstance(k.tag, str) and k.tag != qn("w:sectPr")]
+        if len(kids) >= 2 and kids[-1] is carrier and kids[-2].tag == qn("w:p"):
+            prev = kids[-2]
+            pPr2 = prev.find(qn("w:pPr"))
+            if pPr2 is None:
+                pPr2 = OxmlElement("w:pPr")
+                prev.insert(0, pPr2)
+            if pPr2.find(qn("w:sectPr")) is None:
+                pPr2.append(sectPr)
+                body.remove(carrier)
+
+    # v2.29.1 full 独占一页（docx 口径：不出背景图——Word 无逐页页面背景，
+    # 用「节」实现：NEW_PAGE 分隔 + 节属性 w:vAlign 管上/中/下）：
+    #   · 判定不看 class：前端 inlineStylesInto 出件前剥掉全部 class（实测
+    #     docx payload 里 "full-page" 出现 0 次），只留 data-*；故按
+    #     data-full-pos（t/m/b）认，同时兼容未剥 class 的调用方。
+    #   · full 块在预览里被 pblk 壳包着（导出后是 div[data-h]），不在
+    #     markdown-body 顶层，且壳里常混排别的块（指南封面 full 与副标题、
+    #     版本说明同在一个 pblk，子元素=3）→ _lift 拆壳，兄弟内容 _rebox
+    #     包回原壳再入下一节。
+    #   · 文首 full 不预加节（会多一张空白首节），由「内容之后」那次
+    #     add_section 闭环；文末 full 直接改 body 的 sentinel sectPr。
+    def _is_full(el):
+        if not isinstance(el.tag, str):
+            return False
+        if el.get("data-full-pos") in ("t", "m", "b"):
+            return True
+        return "full-page" in (el.get("class") or "").split()
+
+    def _has_full(el):
+        if not isinstance(el.tag, str):
+            return False
+        if _is_full(el):
+            return True
+        return any(_has_full(k) for k in _children(el))
+
+    def _rebox(shell, node):
+        """把摊平后的兄弟节点包回原壳（保住 pblk 的字体/边距等段落设置）。"""
+        if shell is None:
+            return node
+        box = copy.deepcopy(shell)
+        for k in list(box):
+            box.remove(k)
+        box.text = None
+        box.append(node)
+        return box
+
+    def _lift(node, shell):
+        """把含 full 的容器摊平成顶层序列：full 独立出来，兄弟内容包回壳。
+        指南实测（2026-11-03）：封面 full 与它后面的副标题、版本说明同在一个
+        pblk 壳里（子元素=3），「唯一子元素」型穿透认不出，必须真正拆壳。"""
+        if not isinstance(node.tag, str):
+            return [node]
+        if _is_full(node):
+            return [node]
+        kids = _children(node)
+        if not any(_has_full(k) for k in kids):
+            return [_rebox(shell, node)]
+        out = []
+        for k in kids:
+            if _has_full(k):
+                out.extend(_lift(k, None if _is_full(k) else node))
+            else:
+                out.append(_rebox(node, k))
+        return out
+
+    blocks = []
     for child in _children(mb):
-        _cls = (child.get("class", "") or "") if isinstance(child.tag, str) else ""
-        if "full-page" in _cls.split():
-            sec = doc.add_section(WD_SECTION_START.NEW_PAGE)
-            _sect_valign(sec, {"t": "top", "m": "center", "b": "bottom"}.get(
-                child.get("data-full-pos") or "m", "center"))
-            saved_ind = ctx["ind"]
-            ctx["ind"] = 0.0
+        blocks.extend(_lift(child, None))
+
+    val_of = {"t": "top", "m": "center", "b": "bottom"}
+    sections = []                      # [(valign, [blocks])]，valign=None 为正文节
+    cur = []
+    for blk in blocks:
+        if _is_full(blk):
+            if cur:
+                sections.append((None, cur))
+            sections.append((val_of.get(blk.get("data-full-pos") or "m", "center"),
+                             list(_children(blk))))
+            cur = []
+        else:
+            cur.append(blk)
+    if cur or not sections:
+        sections.append((None, cur))
+
+    for si, (val, blks) in enumerate(sections):
+        saved_ind = ctx["ind"]
+        if val is not None:
+            ctx["ind"] = 0.0              # full 内容不吃段落缩进
             ctx["para"] = None
-            for ch in _children(child):
-                _walk(ch, doc, md_path, ctx)
-            ctx["ind"] = saved_ind
-            ctx["para"] = None
-            in_full = True
-            continue
-        if in_full:
-            sec2 = doc.add_section(WD_SECTION_START.NEW_PAGE)
-            _sect_valign(sec2, None)
-            in_full = False
-        _walk(child, doc, md_path, ctx)
+        for b in blks:
+            _walk(b, doc, md_path, ctx)
+        ctx["ind"] = saved_ind
+        ctx["para"] = None
+        if si < len(sections) - 1:
+            _end_section(val)
+        elif val is not None:
+            _sect_valign(doc.sections[-1], val)   # 文末就是 full：写 body sectPr
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()

@@ -31,13 +31,13 @@ body = ('<div class="markdown-body">'
         '<h2>章节乙</h2><p>内容</p></div>')
 html = S.build_paged_html('', body, '', pg)
 
-# 1. PagedConfig.after 预置在场
-t('产物预置 PagedConfig.after（auto+回调）',
-  'window.PagedConfig={auto:true,after:function(){' in html)
-# 2. 预置先于 polyfill 执行体（polyfill 内部的 PagedConfig||{auto 读取点）
-t('PagedConfig 预置先于 polyfill 读取点',
-  html.index('window.PagedConfig={auto:true') <
-  html.index('PagedConfig||{auto'))
+# 1. PagedConfig.after 预置在场（v2.26.8 起改 auto:false：启动由表格预拆分
+#    脚本在图片就绪后手动调 preview()，after 由 _fireAfter 幂等补调）
+t('产物预置 PagedConfig.after（auto:false+回调）',
+  'window.PagedConfig={auto:false,after:function(){' in html)
+# 2. PagedConfig 预置与 __pgFill 定义各自恰好一次（重复注入会让 after 双跑）
+t('PagedConfig 预置恰好一处', html.count('window.PagedConfig={auto:false') == 1)
+t('__pgFill 定义恰好一处', html.count('window.__pgFill = function(){') == 1)
 # 3. after 回调调 __pgFill
 t('after 回调内调 window.__pgFill',
   'window.__pgFill&&window.__pgFill();' in html)
@@ -53,11 +53,9 @@ t('目录页码回填先查已有 .md-toc-pg',
 t('点线回填先查已有 .toc-dots',
   "links[i].querySelector('.toc-dots')" in html)
 
-# 7. 三段 script 顺序：预置 < polyfill < 回填器
-i_cfg = html.index('window.PagedConfig={auto:true')
-i_poly = html.index('PagedConfig||{auto')
-i_fill = html.index('window.__pgFill = function(){')
-t('脚本顺序 预置 < polyfill < 回填器', i_cfg < i_poly < i_fill)
+# 7. 手动 preview 调用恰好一处（v2.26.8 auto:false：启动权从 polyfill
+#    自动路径移交预拆分脚本；旧三段 `预置<polyfill<回填器` 锚已随内联串失效）
+t('手动 preview() 调用恰好一处', html.count('PagedPolyfill.preview()') == 1)
 
 # 8. 产物结构不回归：目录条目与锚点仍在（1 个 h1 + 2 个 h2 = 3 条）
 t('目录条目仍在（3 条）', len(re.findall(r'class="toc-l\d"', html)) == 3)

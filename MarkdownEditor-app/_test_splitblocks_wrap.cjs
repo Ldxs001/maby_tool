@@ -16,7 +16,12 @@ const html = fs.readFileSync(path.join(__dirname, 'markdown-editor.html'), 'utf8
 /* ---- 从 HTML 抽 splitBlocks 真身 ---- */
 const m = html.match(/  function splitBlocks\(src\)\{[\s\S]*?\n  \}\r?\n/);
 if (!m) { console.error('FAIL: splitBlocks 未在 markdown-editor.html 中找到'); process.exit(1); }
-const splitBlocks = new Function('return (' + m[0].replace(/^  /, '').replace(/\s*$/, '') + ')')();
+/* splitBlocks 依赖 _fenceStep（fence 状态机），必须一并抽出来放进同一闭包 */
+const fm = html.match(/  function _fenceStep\(line, st\)\{[\s\S]*?\n  \}\r?\n/);
+if (!fm) { console.error('FAIL: _fenceStep 未在 markdown-editor.html 中找到'); process.exit(1); }
+const _fenceSrc = fm[0].replace(/^  /gm, '');
+const _sbSrc = m[0].replace(/^  /, '').replace(/\s*$/, '');
+const splitBlocks = new Function('return (function(){' + _fenceSrc + '\nreturn (' + _sbSrc + ');})()')();
 if (typeof splitBlocks !== 'function') { console.error('FAIL: splitBlocks 抽取后不可调用'); process.exit(1); }
 
 /* ---- 应用真实渲染路径：切块 → 逐块解析 ---- */

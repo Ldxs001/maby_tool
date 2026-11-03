@@ -109,17 +109,23 @@ with sync_playwright() as p:
         "const fs=parseFloat(getComputedStyle(o.closest('#preview')||o.parentElement).fontSize);"
         "return {ml:s.marginLeft,pad:s.paddingLeft,pos:s.listStylePosition,fs:fs};"
         "})()")
-    want_ml = str(cs["fs"] * 2) + "px"
-    check("ol margin-left=2em(按容器字号 %s)" % want_ml,
-          cs and cs["ml"] == want_ml,
+    # 缩进档自 v2.13.x 起为 px 直写（em 基准随容器字号漂移），
+    # 判据改为「ol margin-left == 解析器桥接的列表档 px」，不再写死 2em。
+    ipx = pg.evaluate("window.__IND_PX__") or {}
+    li_px = ipx.get("li")
+    got_ml = float(cs["ml"].replace("px", "")) if cs else -1
+    check("ol margin-left=列表缩进档(%s px)" % li_px,
+          cs and li_px is not None and abs(got_ml - float(li_px)) < 0.6,
           "got=%s" % cs["ml"])
     check("ol padding-left=0px", cs and cs["pad"] == "0px", str(cs))
     check("ol list-style-position=inside",
           cs and cs["pos"] == "inside", str(cs))
 
-    iem = pg.evaluate("window.__IND_EM__")
-    check("__IND_EM__.li===2", iem and iem.get("li") == 2, str(iem))
-    check("__IND_EM__.quote===2", iem and iem.get("quote") == 2, str(iem))
+    check("__IND_PX__.li 为列表缩进档 px",
+          li_px is not None and 20 <= float(li_px) <= 60, str(ipx))
+    q_px = ipx.get("quote")
+    check("__IND_PX__.quote 为引用缩进档 px",
+          q_px is not None and 20 <= float(q_px) <= 60, str(ipx))
 
     check("no page errors", not errors, "; ".join(errors[:2]))
     b.close()

@@ -24,6 +24,7 @@ import os
 import sys
 import json
 import re
+import struct
 import atexit
 import zipfile
 import urllib.parse
@@ -64,7 +65,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 126  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 138  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 # MSIX 商城版判定（微软商店政策 11.16 的"报告 AI 生成内容"入口用）：
 # 商城包与侧载包恒落在 WindowsApps 之下，Release 安装包/便携形态不会。
@@ -144,6 +145,250 @@ RUNS_DIR = os.path.join(RUNTIME_DIR, "runs")
 PYLIBS_DIR = os.path.join(RUNTIME_DIR, "pylibs")
 RUN_CACHE_DIR = os.path.join(RUNTIME_DIR, "run_cache")
 PORTABLE_PY = os.path.join(HERE, "python", "python.exe")
+
+
+# ---------------------------------------------------------------------------
+# 本机字体的「真实面」枚举（v2.33.0）
+# ---------------------------------------------------------------------------
+# 旧实现把注册表 value 名按 & 拆开直接当字体名返回，于是 "Microsoft YaHei
+# Light" 与 "Microsoft YaHei" 并列摆在下拉里。问题不在列得全不全，而在**选了
+# 不生效且无提示**：实测（2026-11-04，DOM 宽度判定，见 _probe_v233_weight2.py）
+#   font-family:"Microsoft YaHei Light"   → 1119.20（命中 Light 面）
+#   font-family:"Arial Bold"             → 1187.02（= sans-serif，回落）
+#   font-family:"Arial"; font-weight:700 → 1172.47（命中 Bold 面）
+# 同一个「带样式后缀的名字」，Light 有效、Bold 无效——差别在字体文件自身的
+# name 表：非 RIBBI 字重（Light/Semibold/Black…）是独立 family 名，RIBBI
+# （Regular/Bold/Italic/Bold Italic）不是。靠词表猜后缀必然出错，故改为直接读
+# 字体文件的 name / OS/2 表，取确定性的四项：
+#   fam1      name ID 1，CSS 的 font-family 用这个名字（实测两种情况都对）
+#   sub2      name ID 2，判断要不要额外加粗/斜体
+#   full      name ID 4，给人看的显示名
+#   usWeightClass OS/2 偏移 4，CSS font-weight 的真值
+# 判例：msyhl.ttc 的 usWeightClass 是 290 而不是 300——写 300 浏览器也能就近
+# 匹配到 Light，但「真值」才谈得上确定性，所以坚持取表里的数。
+# Word 侧同源于此：rFonts 写 fam1，weight>=600 再加 w:b。Light 的 fam1 本身
+# 就是「Microsoft YaHei Light」，Word 字体列表里有这一条，于是 docx 无需拼后缀。
+# 不引入 fontTools：便携发行版 python/Lib/site-packages 里没有它，为读三个表
+# 拉 10MB 依赖不划算。这里只 seek 读表目录/name/OS2，单文件毫秒级，零依赖。
+_SFNT_NAME_WANT = (1, 2, 4, 16, 17)
+
+
+def _sfnt_pick_name(recs):
+    """从 name 表记录里挑出 (nameID -> 字符串)。优先英文 0x409，再 0x804。"""
+    best = {}
+    for pid, eid, lid, nid, raw in recs:
+        if nid not in _SFNT_NAME_WANT:
+            continue
+        try:
+            s = raw.decode("utf-16-be") if pid in (0, 3) else raw.decode("latin-1")
+        except Exception:
+            continue
+        s = s.strip()
+        if not s:
+            continue
+        rank = 0 if lid == 0x409 else (1 if lid == 0x804 else 2)
+        if nid not in best or rank < best[nid][0]:
+            best[nid] = (rank, s)
+    return {k: v[1] for k, v in best.items()}
+
+
+def _read_one_face(fh, off):
+    """读一个 sfnt face（ttc 里第 off 字节起）的 name/OS2/head 摘要。"""
+    fh.seek(off)
+    hdr = fh.read(12)
+    if len(hdr) < 12:
+        return None
+    num = struct.unpack_from(">H", hdr, 4)[0]
+    if num <= 0 or num > 512:
+        return None
+    fh.seek(off + 12)
+    dir_raw = fh.read(16 * num)
+    if len(dir_raw) < 16 * num:
+        return None
+    tabs = {}
+    for i in range(num):
+        tag, _chk, toff, tlen = struct.unpack_from(">4sIII", dir_raw, i * 16)
+        tabs[tag] = (toff, tlen)
+    if b"name" not in tabs:
+        return None
+    noff, nlen = tabs[b"name"]
+    if nlen <= 0 or nlen > 4 << 20:
+        return None
+    fh.seek(noff)
+    nb = fh.read(nlen)
+    if len(nb) < 6:
+        return None
+    _fmt, count, str_off = struct.unpack_from(">HHH", nb, 0)
+    recs = []
+    p = 6
+    for _ in range(min(count, 4096)):
+        if p + 12 > len(nb):
+            break
+        pid, eid, lid, nid, ln, so = struct.unpack_from(">HHHHHH", nb, p)
+        p += 12
+        s = str_off + so
+        if s < 0 or s + ln > len(nb) or ln > 4096:
+            continue
+        recs.append((pid, eid, lid, nid, nb[s:s + ln]))
+    names = _sfnt_pick_name(recs)
+    fam1 = names.get(1) or names.get(16)
+    if not fam1:
+        return None
+    sub2 = names.get(2) or names.get(17) or "Regular"
+    full = names.get(4) or (fam1 if sub2.lower() == "regular" else fam1 + " " + sub2)
+    wt = 400
+    if b"OS/2" in tabs:
+        ooff, olen = tabs[b"OS/2"]
+        if olen >= 6:
+            try:
+                fh.seek(ooff + 4)
+                wt = struct.unpack(">H", fh.read(2))[0]
+            except Exception:
+                wt = 400
+    if not (1 <= wt <= 1000):
+        wt = 400
+    italic = False
+    if b"head" in tabs:
+        hoff, hlen = tabs[b"head"]
+        if hlen >= 46:
+            try:
+                fh.seek(hoff + 44)
+                italic = bool(struct.unpack(">H", fh.read(2))[0] & 0x02)
+            except Exception:
+                italic = False
+    if not italic:
+        _s = sub2.lower()
+        italic = ("italic" in _s) or ("oblique" in _s)
+    return {"fam1": fam1, "sub2": sub2, "full": full, "w": wt,
+            "i": 1 if italic else 0}
+
+
+def _read_font_faces_file(path):
+    """一个字体文件 → 全部 face。ttc/otc 逐个子字体读。"""
+    out = []
+    try:
+        fh = open(path, "rb")
+    except OSError:
+        return out
+    try:
+        head = fh.read(12)
+        if len(head) < 12:
+            return out
+        if head[:4] == b"ttcf":
+            n = struct.unpack_from(">I", head, 8)[0]
+            n = max(0, min(n, 64))
+            raw = fh.read(4 * n)
+            offs = list(struct.unpack_from(">%dI" % n, raw, 0)) if n else []
+        else:
+            offs = [0]
+        for off in offs:
+            try:
+                fa = _read_one_face(fh, off)
+            except Exception:
+                fa = None
+            if fa:
+                out.append(fa)
+    except Exception:
+        pass
+    finally:
+        try:
+            fh.close()
+        except Exception:
+            pass
+    return out
+
+
+def _font_registry_items():
+    """注册表 → [(注册名, 文件绝对路径)]。不拆 &（拆了会造出假字体名）。"""
+    items = []
+    try:
+        import winreg
+    except Exception:
+        return items
+    windir = os.environ.get("WINDIR", r"C:\Windows")
+    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        try:
+            k = winreg.OpenKey(
+                hive, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts")
+        except OSError:
+            continue
+        i = 0
+        while True:
+            try:
+                name, val, _t = winreg.EnumValue(k, i)
+                i += 1
+            except OSError:
+                break
+            if not isinstance(val, str) or not val:
+                continue
+            name = re.sub(r"\s*\((TrueType|OpenType|PostScript)\)$", "",
+                          name, flags=re.IGNORECASE)
+            p = val if os.path.isabs(val) else os.path.join(windir, "Fonts", val)
+            items.append((name, p))
+        try:
+            winreg.CloseKey(k)
+        except OSError:
+            pass
+    return items
+
+
+_FACES_LOCK = threading.Lock()
+_FACES_MEMO = {"sig": None, "faces": None}
+
+
+def _enum_font_faces():
+    """本机全部字体面，按 (fam1, weight, italic) 去重。
+
+    返回值每项：{"n": 显示名, "f": fam1, "w": usWeightClass, "i": 0/1}
+    结果落盘缓存（runtime/fonts-cache.json），键为注册表条目数 + 文件 mtime
+    之和——装/删字体后自动失效，无需手动清缓存。
+    """
+    items = _font_registry_items()
+    if not items:
+        return []
+    sig = "%d:%d" % (len(items), int(sum(
+        (os.path.getmtime(p) if os.path.exists(p) else 0) for _n, p in items)))
+    with _FACES_LOCK:
+        if _FACES_MEMO["sig"] == sig and _FACES_MEMO["faces"]:
+            return _FACES_MEMO["faces"]
+        cache_p = os.path.join(RUNTIME_DIR, "fonts-cache.json")
+        try:
+            with io.open(cache_p, encoding="utf-8") as fh:
+                cd = json.load(fh)
+            if cd.get("v") == 2 and cd.get("sig") == sig and cd.get("faces"):
+                _FACES_MEMO["sig"] = sig
+                _FACES_MEMO["faces"] = cd["faces"]
+                return cd["faces"]
+        except Exception:
+            pass
+        per_file = {}
+        seen = {}
+        for _name, p in items:
+            if p not in per_file:
+                per_file[p] = _read_font_faces_file(p)
+            for fa in per_file[p]:
+                key = (fa["fam1"].lower(), fa["w"], fa["i"])
+                cur = seen.get(key)
+                if cur is None:
+                    seen[key] = {"n": fa["full"], "f": fa["fam1"],
+                                 "w": fa["w"], "i": fa["i"]}
+                elif len(fa["full"]) < len(cur["n"]):
+                    # 同 face 多个显示名时取较短者（"Arial Bold" 优于
+                    # "Arial Bold & Arial Bold Italic" 这类拼串）
+                    cur["n"] = fa["full"]
+        faces = sorted(seen.values(), key=lambda d: d["n"].lower())
+        _FACES_MEMO["sig"] = sig
+        _FACES_MEMO["faces"] = faces
+        try:
+            os.makedirs(RUNTIME_DIR, exist_ok=True)
+            with io.open(cache_p, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({"v": 2, "sig": sig, "faces": faces},
+                                    ensure_ascii=False))
+        except Exception:
+            pass
+        return faces
+
+
 
 # 子进程一律不带控制台（v2.9.0 修）：本服务跑在 pythonw.exe 里（GUI 子系统、
 # 无控制台），被拉起的 python.exe 是控制台程序——不指定 CREATE_NO_WINDOW 时
@@ -1637,31 +1882,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if u.path == "/api/fonts":
             try:
-                import winreg
-                fonts = set()
-                for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
-                    try:
-                        k = winreg.OpenKey(hive, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts")
-                    except OSError:
-                        continue
-                    i = 0
-                    while True:
-                        try:
-                            name, _, _ = winreg.EnumValue(k, i)
-                            i += 1
-                        except OSError:
-                            break
-                        name = re.sub(r"\s*\((TrueType|OpenType|PostScript)\)$", "", name, flags=re.IGNORECASE)
-                        for part in name.split("&"):
-                            part = part.strip()
-                            if part:
-                                fonts.add(part)
-                    try:
-                        winreg.CloseKey(k)
-                    except OSError:
-                        pass
-                self._send(200, json.dumps({"ok": True,
-                    "fonts": sorted(fonts, key=lambda s: s.lower())}, ensure_ascii=False))
+                # v2.33.0：faces 是「真实面」（family + 字重 + 斜体），
+                # fonts 是旧的纯名字数组，留着只为兼容旧前端缓存/旧调用方。
+                faces = _enum_font_faces()
+                names = sorted({d["f"] for d in faces}, key=lambda s: s.lower())
+                self._send(200, json.dumps({"ok": True, "faces": faces,
+                                            "fonts": names},
+                                           ensure_ascii=False))
             except Exception as e:
                 self._send(500, json.dumps({"ok": False, "error": str(e)},
                                            ensure_ascii=False))
@@ -2837,10 +3064,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 body_html = obj.get("bodyHtml", "")
                 ts_css = obj.get("tsCss", "")
                 page_cfg = obj.get("cfg", {}) or {}
-                html = build_paged_html(md_path, body_html, ts_css, page_cfg)
+                # v2.30.0 出片路径：mode=native 走原生 CSS 分页（前端默认值），
+                # 缺省/其他值仍走 Paged.js——保证旧调用方与既有测试行为不变。
+                mode = str(obj.get("mode") or "paged").lower()
+                native = (mode == "native")
+                html = build_paged_html(md_path, body_html, ts_css, page_cfg,
+                                        native=native)
                 # /static/ 路由两级查找（HERE → RUNTIME_DIR），产物落可写
                 # runtime 即可用 /static/<name> 取回——商城包安装目录只读
-                name = "document.paged.html"
+                name = ("document.print.html" if native
+                        else "document.paged.html")
                 with open(os.path.join(RUNTIME_DIR, name), "w", encoding="utf-8") as f:
                     f.write(html)
                 self._send(200, json.dumps({"ok": True, "url": "/static/" + name},
@@ -3480,6 +3713,15 @@ PAGED_BASE_CSS = """
 .markdown-body h3{font-size:1.25em;}
 .markdown-body h4{font-size:1.08em;}
 .markdown-body p{margin:.85em 0;}
+/* v2.33.0 @@ begin font：块级临时字体/字号（产物侧）。
+   排版面板（tsCss）给每个元素写了 font-family/font-size 且带 !important，
+   特异性 (0,1,1)；这里的 `.markdown-body .mde-font[data-ff] :is(...)` 是
+   (0,3,1)，靠特异性压过去，与 tsCss 的插入顺序无关。
+   :is() 里的集合与预览 TS_MAP 同源，漏一类就等于漏一类。 */
+.markdown-body .mde-font[data-ff] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,table,pre,code,figcaption,td,th,.mde-tabcap){font-family:var(--mff) !important;}
+.markdown-body .mde-font[data-ffw] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,table,pre,code,figcaption,td,th,.mde-tabcap){font-weight:var(--mff-w) !important;}
+.markdown-body .mde-font[data-ffi] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,table,pre,code,figcaption,td,th,.mde-tabcap){font-style:italic !important;}
+.markdown-body .mde-font[data-fs] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,table,pre,code,figcaption,td,th,.mde-tabcap){font-size:var(--mfs) !important;}
 .markdown-body a{color:#4a6cf7;text-decoration:none;}
 .markdown-body strong{font-weight:700;}
 .markdown-body em{font-style:italic;}
@@ -3499,7 +3741,7 @@ PAGED_BASE_CSS = """
 .markdown-body table{border-collapse:collapse;margin:1em 0;width:100%;table-layout:auto;font-size:.93em;break-inside:auto;}
 .markdown-body thead{display:table-header-group;}
 .markdown-body tr{break-inside:avoid;}
-.markdown-body th,.markdown-body td{border:1px solid #bbb;padding:7px 12px;text-align:left;}
+.markdown-body th,.markdown-body td{border:1px solid #bbb;padding:7px 12px;text-align:left;overflow-wrap:anywhere;}
 .markdown-body th{background:#f0f2f6;font-weight:650;}
 .markdown-body img{display:block;margin:0 auto;max-width:100%;max-height:__IMGMAXH__mm;break-inside:avoid;}
 .markdown-body p:has(>img){margin:0;text-indent:0 !important;}
@@ -3509,6 +3751,19 @@ PAGED_BASE_CSS = """
 .markdown-body .diagram[data-diagram-align="center"]{margin-left:auto;margin-right:auto;}
 .markdown-body .diagram[data-diagram-align="right"]{margin-left:auto;}
 .markdown-body .diagram[data-diagram-align="left"]{margin-right:auto;}
+/* v2.29.3 代码作图容器与 svg 尺寸口径（与预览 .diagram 同一条规则）。
+   此前打印模板里**一条 .diagram 基础样式都没有**，只有上面三条对齐规则：
+     · graphviz 输出 width="490pt"、wavedrom width="400"，没有 max-width
+       约束，纸面上按固有宽度铺开——实测 dot 图 172.9mm 溢出版心 87mm 容器；
+     · mermaid 靠自身内联 max-width 缩到 281px，vega 靠 307px 固定宽；
+   四张图在纸上四套尺寸，看起来「缩放规律乱」。现统一为：容器宽 =
+   版心×{N}%（不写 100%），svg 宽 = 容器内容宽、高按 viewBox 等比。
+   为何 !important：mermaid 把 max-width 写在 svg 的 style 上（内联），
+   普通规则压不住；四引擎输出均带 viewBox，等比缩放不变形。 */
+.markdown-body .diagram{margin:.9em 0;text-align:center;overflow:hidden;border:1px solid #ddd;border-radius:6px;padding:10px;background:#f8f9fb;break-inside:avoid;}
+.markdown-body .diagram svg{width:100% !important;max-width:100% !important;height:auto !important;display:block;margin:0 auto;}
+/* WaveDrom 的 svg 在 div#wd-N 里、vega 在 div.mde-vega-host 里，故用后代选择器 */
+.markdown-body .diagram .mde-fig-acts svg{width:14px !important;height:14px !important;display:inline-block !important;}
 .markdown-body .fill-row{display:flex;gap:1em;margin:.6em 0;break-inside:avoid;}
 .markdown-body .fill-col{min-width:0;}
 /* v2.13 @@ begin full 独占一页块：前后强制分页 + 撑满页心（__PAGECH__ =
@@ -3964,7 +4219,17 @@ PAGED_SPLIT_TMPL = """
       var t = el.tagName;
       /* 预拆分产物：div 包裹层（data-mde-frag 续片 / data-mde-orphan 整表
          推页）——break-before 必须挂在 div 上，Paged.js 对 table 元素的
-         break-before 无视（实测）。包裹层当原子单元（片高≤页心，构造保证） */
+         break-before 无视（实测）。包裹层当原子单元（片高≤页心，构造保证）。
+         v2.29.6（A'）：data-mde-headfrag 首片壳同样原子化，avoid（放不下
+         推页）但 forced=false（不必起新页）。 */
+      if (el.getAttribute && el.getAttribute('data-mde-headfrag')) {
+        var hw2 = el.getBoundingClientRect();
+        if (hw2.height > 0)
+          units.push({el: el, top: hw2.top - pvTop, h: hw2.height,
+                      mt: parseFloat(getComputedStyle(el).marginTop) || 0,
+                      tbl: null, avoid: true, forced: false, noLast: false});
+        return;
+      }
       if (el.getAttribute && (el.getAttribute('data-mde-frag') ||
                               el.getAttribute('data-mde-orphan'))) {
         var fw = el.getBoundingClientRect();
@@ -4021,6 +4286,13 @@ PAGED_SPLIT_TMPL = """
       if (!b.tbl || b.tbl !== lastTbl) tblCont = false;
       lastTbl = b.tbl || null;
       var pgBot = cutY + PGH - theadH;
+      /* v2.29.7：所有强制断页单元（frag / orphan / H1 / full-page /
+         page-region）实排都必起新页，模拟必须同样无条件起新页。
+         原条件只对 frag/orphan 无条件（v2.29.6 A），H1/full-page/
+         page-region 仍走「有间隙才跳」——现实断页而模拟不跳，文档后续
+         内容整体错开一整页 → 后续表的 fit 系统性偏小 → 首片只占页底
+         一小块（实测 P23：首片 70.5mm 而页底剩 172mm）→ 续片强制断页
+         → 页底大片空白（2026-11-03 主人截图实锤）。 */
       if (k2 > 0 && b.forced && b.top > cutY + 0.5) {
         cutY = b.top - b.mt; pgStart = b.top; lastTbl = null; tblCont = false;
         continue;
@@ -4081,6 +4353,349 @@ PAGED_SPLIT_TMPL = """
     }
     return false;
   }
+  /* v2.29.3 标题不落页尾：分页完成后定点搬标题。
+     为什么不用 v2.29.2 的 break-inside:avoid 整组包裹：Paged.js 对 avoid
+     元素做 rebuild 时会把「组」连同后面的内容一并顺延——实测指南 P19 还剩
+     75.9mm，装 51.3mm 的组绰绰有余，但（四）（五）两张图连着被推到下一页，
+     页尾空出 75.9mm（用户报「改个单标题把排版改乱了」）。而 CSS 的
+     break-after:avoid 它根本不实现（源码 createBreakToken 只认
+     page/always/left/right/recto/verso）。改成分页结果修正：某页最后一个
+     可见块若是 h2/h3/h4，把它挪到下一页内容最前面（图本来就在下一页），
+     页码随后由 __pgFill 按新位置重算。
+     v2.29.3→130 修正：删「下一页装不下就不动」豁免——真实环境（执行点
+     全跑、58 页）下一页被大图填满时豁免触发，孤标题复活（主人截图实锤
+     P14）。新规则：标题无条件跟着内容走；把下一页挤出溢出时，把溢出页
+     尾部可见块整盒继续往后顺延（级联），直到每页装得下。空白只允许留在
+     被搬空的页尾，不许留在标题与它的图中间。 */
+  window.__pgFixOrphanHeads = function(){
+    var pgs = document.querySelectorAll('.pagedjs_page');
+    if (pgs.length < 2) return 0;
+    var moved = 0;
+    var SEL = 'h1,h2,h3,h4,h5,h6,p,pre,table,ul,ol,blockquote,figure,.diagram';
+    var areaOf = function(pg){ return pg.querySelector('.pagedjs_page_content'); };
+    /* 量页：页心矩形、内容底、最后可见块（page_content 的直接子级可能是
+       撑满页高的包裹层，按 children 量恒等于页底——实测 v2.29.3 第一版
+       就是这个错，一页都没搬；必须按 SEL 下钻） */
+    var measure = function(area){
+      var ar = area.getBoundingClientRect();
+      var bot = ar.top, last = null, lastB = -1;
+      var cand = area.querySelectorAll(SEL);
+      for (var k = 0; k < cand.length; k++) {
+        var r = cand[k].getBoundingClientRect();
+        if (r.height < 1) continue;
+        if (r.bottom > bot) bot = r.bottom;
+        if (r.bottom > lastB) { lastB = r.bottom; last = cand[k]; }
+      }
+      return { ar: ar, bot: bot, last: last };
+    };
+    /* 挑盒：唯一可见子壳（pblk/mde-color）连壳整盒搬，免留带 margin 空盒 */
+    var pickBox = function(el, area){
+      var box = el, par = el.parentNode;
+      if (par && par !== area && par.classList &&
+          (par.classList.contains('pblk') || par.classList.contains('mde-color'))) {
+        var vis = 0;
+        for (var q = 0; q < par.children.length; q++)
+          if (par.children[q].getBoundingClientRect().height > 1) vis++;
+        if (vis <= 1) box = par;
+      }
+      return box;
+    };
+    /* 级联（130 新增）：从 pi 页起逐页查溢出，溢出页尾部可见块整盒搬到
+       下一页最前，推完复测本页；本页装下后继续查接收页。整页块
+       （.full-page）不可顺延、末页无接收页、守卫耗尽 → 记 __pgMoveErr。 */
+    var cascade = function(pi){
+      var pushes = 0, it = 0, cur = pi;
+      while (cur < pgs.length - 1 && pushes < 12 && it++ < 200) {
+        var area = areaOf(pgs[cur]);
+        if (!area) return;
+        var m = measure(area);
+        if (m.bot - m.ar.bottom <= 0.5) { cur++; continue; }
+        if (!m.last) { window.__pgMoveErr = 'cascade:无候选 pg' + (cur + 1); return; }
+        if (m.last.closest && m.last.closest('.full-page')) {
+          window.__pgMoveErr = 'cascade:整页块溢出 pg' + (cur + 1); return;
+        }
+        var nb = areaOf(pgs[cur + 1]);
+        if (!nb) return;
+        nb.insertBefore(pickBox(m.last, area), nb.firstChild);
+        pushes++;
+      }
+      if (pushes >= 12) window.__pgMoveErr = 'cascade:守卫耗尽 pg' + (cur + 1);
+    };
+    for (var i = 0; i < pgs.length - 1; i++) {
+      for (var guard = 0; guard < 4; guard++) {
+        var a = areaOf(pgs[i]), b = areaOf(pgs[i + 1]);
+        if (!a || !b) break;
+        var m = measure(a);
+        if (!m.last || !/^H[2-4]$/.test(m.last.tagName)) break;
+        /* 整页块（封面/page{noll} 区）里的标题绝不外搬 */
+        if (m.last.closest && m.last.closest('.full-page')) break;
+        /* 无条件搬（130 删豁免）：标题必须跟它的内容待在一起 */
+        b.insertBefore(pickBox(m.last, a), b.firstChild);
+        moved++;
+        cascade(i + 1);
+      }
+    }
+    return moved;
+  };
+  /* v2.29.5 表格残片拼页（131 新增）：v2.26.8 预拆模拟与 Paged.js 实排
+     存在一行级漂移——模拟预测首片装得下、实排溢出一行，Paged.js 对首片
+     原生二切（孤行落单页、续行无表头），叠加续片 break-before:page 强制
+     起新页，产出「孤行页 + 200mm 空白 + 带表头残片页」怪相（2026-11-03
+     主人截图实锤；前置标题+表的 G 变体最小复现 100% 触发）。分页结果
+     修正：前页尾表 T1 与后页首表 T2 判定为同表续片（列数同 + 表头同文
+     或 T2 缺表头）时，把 T2 的行逐行搬回 T1 直到装不下；T2 搬空连壳
+     移除；T2 缺表头从 T1 克隆补上。不追求预拆精度，让漂移无害化。 */
+  window.__pgFixTableFrags = function(){
+    var pgs = document.querySelectorAll('.pagedjs_page');
+    if (pgs.length < 2) return 0;
+    var SEL = 'h1,h2,h3,h4,h5,h6,p,pre,table,ul,ol,blockquote,figure,.diagram';
+    var areaOf = function(pg){ return pg.querySelector('.pagedjs_page_content'); };
+    var vis = function(area){
+      var out = [], cand = area.querySelectorAll(SEL);
+      for (var k = 0; k < cand.length; k++) {
+        var r = cand[k].getBoundingClientRect();
+        if (r.height > 1) out.push(cand[k]);
+      }
+      return out;
+    };
+    var txt = function(el){ return (el.textContent || '').replace(/\\s+/g, ''); };
+    var pulls = 0, touched = {};
+    /* 从最后一对页往前拼：前对腾出的空间留给更前面的拉行，链式收拢 */
+    for (var i = pgs.length - 2; i >= 0; i--) {
+      var a = areaOf(pgs[i]), b = areaOf(pgs[i + 1]);
+      if (!a || !b) continue;
+      var va = vis(a), vb = vis(b);
+      if (!va.length || !vb.length) continue;
+      var T1 = va[va.length - 1], T2 = vb[0];
+      if (!T1 || !T2 || T1.tagName !== 'TABLE' || T2.tagName !== 'TABLE') continue;
+      /* 整页块（封面/page{noll} 区）里的表不动 */
+      if ((T1.closest && T1.closest('.full-page')) ||
+          (T2.closest && T2.closest('.full-page'))) continue;
+      /* fail-closed 判据：列数一致 +（同文表头 或 T2 缺表头）；T1 缺表头
+         而 T2 有表头 = 两张独立表，不拼 */
+      var h1 = T1.tHead ? T1.tHead.rows[0] : T1.rows[0];
+      var h2 = T2.tHead ? T2.tHead.rows[0] : T2.rows[0];
+      if (!h1 || !h2 || h1.cells.length !== h2.cells.length) continue;
+      if (T1.tHead && T2.tHead) { if (txt(T1.tHead) !== txt(T2.tHead)) continue; }
+      else if (!T1.tHead && T2.tHead) { continue; }
+      /* 拉行：T2 的 tbody 行逐行搬回 T1，直到本页装不下。
+         v2.29.6 守卫：T1 可能是 Paged.js 二切残壳（thead-only、无 tbody），
+         直接下标取 tBodies[last] 会崩（探针4 实锤 TypeError）——补空 tbody。 */
+      if (T1 && !T1.tBodies.length) T1.appendChild(document.createElement('tbody'));
+      var ar = a.getBoundingClientRect();
+      var free = ar.bottom - T1.getBoundingClientRect().bottom -
+                 (parseFloat(getComputedStyle(T1).marginBottom) || 0) - 0.5;
+      var pairPulls = 0;
+      while (T2.tBodies.length && T2.tBodies[0].rows.length) {
+        var row = T2.tBodies[0].rows[0];
+        var rh = row.getBoundingClientRect().height;
+        if (!(rh > 1)) { T2.tBodies[0].removeChild(row); continue; }
+        if (rh > free + 0.5) {
+          /* v2.29.6（B）整页误拆兜底：前页被后文填满、一行都拉不动，而
+             T2 页仅剩这张续片表（页浅）→ 把 T1 整盒搬到 T2 页首连成整表，
+             前页留白。真漂移（G 变体一行级）前页必有空位，走不到这里。 */
+          if (pairPulls === 0 && i > 0 && vb.length === 1 &&
+              !(a.querySelector && a.querySelector('.full-page,.page-region')) &&
+              !(b.querySelector && b.querySelector('.full-page,.page-region'))) {
+            var box1 = T1, par1 = T1.parentNode;
+            if (par1 && par1 !== a && par1.classList &&
+                (par1.classList.contains('pblk') ||
+                 par1.classList.contains('mde-color'))) {
+              var vc = 0;
+              for (var q = 0; q < par1.children.length; q++)
+                if (par1.children[q].getBoundingClientRect().height > 1) vc++;
+              if (vc <= 1) box1 = par1;
+            }
+            b.insertBefore(box1, b.firstChild);
+            ar = b.getBoundingClientRect();
+            free = ar.bottom - T1.getBoundingClientRect().bottom -
+                   (parseFloat(getComputedStyle(T1).marginBottom) || 0) - 0.5;
+            touched[i] = 1;
+            if (rh > free + 0.5) break;   /* 新页仍装不下首行：放弃 */
+            continue;
+          }
+          break;
+        }
+        if (!T1.querySelector('colgroup')) {
+          var cg2 = T2.querySelector('colgroup');
+          if (cg2) T1.insertBefore(cg2.cloneNode(true), T1.firstChild);
+        }
+        T1.tBodies[T1.tBodies.length - 1].appendChild(row);
+        free -= rh; pulls++; pairPulls++;
+      }
+      /* T2 搬空 → 连壳（data-mde-frag）移除；还剩行但缺表头 → 从 T1 克隆 */
+      var wrap2 = T2.closest ? T2.closest('[data-mde-frag],[data-mde-orphan]') : null;
+      if (!T2.tBodies.length || !T2.tBodies[0].rows.length) {
+        (wrap2 || T2).parentNode.removeChild(wrap2 || T2);
+        touched[i + 1] = 1;
+      } else if (!T2.tHead && T1.tHead) {
+        var th = T1.tHead.cloneNode(true);
+        var cg = T2.querySelector('colgroup');
+        if (cg && cg.parentNode === T2) cg.parentNode.insertBefore(th, cg.nextSibling);
+        else T2.insertBefore(th, T2.firstChild);
+      }
+    }
+    /* 被拼空的页（内容全部上收）隐藏：页盒相互独立，打印即少一张空白纸；
+       首页（封面/元数据）永不隐藏。__pgFill 在本修正之后按实际页数算号 */
+    var hid = 0;
+    for (var j = 1; j < pgs.length; j++) {
+      if (!touched[j]) continue;
+      var aj = areaOf(pgs[j]);
+      if (!aj || aj.querySelector('.full-page,.page-region')) continue;
+      if (!vis(aj).length) {
+        pgs[j].style.display = 'none';
+        pgs[j].setAttribute('data-pg-hide', '1');
+        hid++;
+      }
+    }
+    if (hid) window.__pgHiddenPages = hid;
+    return pulls;
+  };
+  /* v2.29.7 浅页回拉（Paged.js 断页残迹自愈）：
+     预拆模拟只能预测 Paged.js 的断页点，而 Paged.js 有「avoid 块连带
+     顺延」缺陷——空壳/整表/续片等 avoid 块会让后续内容整体被推到下一
+     页，产出「页尾大片空白 + 下一块明明放得下却不在本页」（2026-11-03
+     主人截图两例：① ② 表被推到下一页、前页留约 150mm；② 语法速查表
+     被预拆成 4 片、每片独占一页。实测 P23：一张表 70.5mm 独占页，页底
+     剩 172mm，而下一块 P 仅 13.5mm）。
+     模拟精度无法根治（Paged.js 断点不可预测），故分页后自愈：把后页
+     首部原子块整块搬回前页，放得下才搬。
+     守卫：① 只搬前页尾空白 ≥60mm 的页；② 标题必须与其后继块成对搬
+     （避免造出页尾孤标题）；③ 跳过表格、表格续片壳（frag/orphan/
+     headfrag）、整页块、page-region——跨页搬表格会造成拼缝，另由
+     __pgFixTableFrags 负责；④ 必须保持阅读顺序（只搬后页的前缀块，
+     首块若不可搬则整页不搬）；⑤ 同容器才搬（不跨章搬）。 */
+  window.__pgPullBack = function(){
+    var pgs = document.querySelectorAll('.pagedjs_page');
+    if (pgs.length < 2) return 0;
+    var MM = 96 / 25.4;
+    var BLANK_MIN = 60;                 /* mm：页尾空白阈值 */
+    var areaOf = function(pg){ return pg.querySelector('.pagedjs_page_content'); };
+    /* 排版块口径与 onePass 一致：pblk（章级容器）的直接子元素才是块；
+       无 pblk 时退回 markdown-body 的直接子元素。 */
+    var blocksOf = function(area){
+      var root = area.querySelector('.markdown-body'), out = [], k, j;
+      if (!root) return [];
+      var conts = [];
+      for (k = 0; k < root.children.length; k++) {
+        var c = root.children[k];
+        if (c.classList && c.classList.contains('pblk')) {
+          for (j = 0; j < c.children.length; j++) conts.push(c.children[j]);
+        } else conts.push(c);
+      }
+      for (k = 0; k < conts.length; k++) {
+        var e = conts[k], r = e.getBoundingClientRect();
+        if (r.height > 1) out.push(e);
+      }
+      return out;
+    };
+    var inWrap = function(el){
+      return !!(el.closest && el.closest('[data-mde-frag],[data-mde-orphan],[data-mde-headfrag]'));
+    };
+    var pulled = 0, hidden = 0;
+    var DBG = window.__pgPullDbg = [];
+    for (var pass = 0; pass < 4; pass++) {
+      var passPulled = 0;
+      for (var i = 0; i < pgs.length - 1; i++) {
+        var a = areaOf(pgs[i]), b = areaOf(pgs[i + 1]);
+        var dbg0 = {i: i, skip: ''};
+        DBG.push(dbg0);
+        if (!a || !b) { dbg0.skip = 'noArea'; continue; }
+        if (i === 0) { dbg0.skip = 'cover'; continue; }    /* 封面不动 */
+        if (a.querySelector('.full-page,.page-region') ||
+            b.querySelector('.full-page,.page-region')) { dbg0.skip = 'fullpage'; continue; }
+        var ua = blocksOf(a);
+        if (!ua.length) { dbg0.skip = 'noBlocksA'; continue; }
+        var last = ua[ua.length - 1];
+        var parI = last.parentElement;
+        if (!parI || parI === a) { dbg0.skip = 'noParI'; continue; }
+        if (inWrap(parI)) { dbg0.skip = 'inWrapParI'; continue; }
+        var ar = a.getBoundingClientRect();
+        var lastBottom = last.getBoundingClientRect().bottom;
+        var blank = (ar.bottom - lastBottom) / MM;
+        if (blank < BLANK_MIN) { dbg0.skip = 'blank' + blank.toFixed(0); continue; }
+        var blocks = blocksOf(b);
+        var dbg = {i: i, blank: +blank.toFixed(1), nblk: blocks.length,
+                   lastTag: last.tagName, parICls: String(parI.className || ''),
+                   stop: ''};
+        DBG.push(dbg);
+        if (!blocks.length) { dbg.stop = 'noBlocks'; continue; }
+        var moved = [];
+        for (var bi = 0; bi < blocks.length; bi++) {
+          var el = blocks[bi];
+          /* 表格续片壳 / 含表格的块：不搬（拼缝另有 __pgFixTableFrags 负责） */
+          if (inWrap(el)) { dbg.stop = 'inWrap:' + el.tagName; break; }
+          if (el.tagName === 'TABLE' || el.querySelector('table')) {
+            dbg.stop = 'table:' + el.tagName; break;
+          }
+          var pair = [el], h = el.getBoundingClientRect().height;
+          var mt = parseFloat(getComputedStyle(el).marginTop) || 0;
+          /* 标题必须与其后继块成对搬（否则造出页尾孤标题） */
+          if (/^H[1-6]$/.test(el.tagName)) {
+            if (bi + 1 >= blocks.length) { dbg.stop = 'headNoNext'; break; }
+            var nx = blocks[bi + 1];
+            if (nx.tagName === 'TABLE' || nx.querySelector('table') || inWrap(nx)) {
+              dbg.stop = 'headNextBad'; break;
+            }
+            pair.push(nx);
+            h += nx.getBoundingClientRect().height +
+                 (parseFloat(getComputedStyle(nx).marginTop) || 0);
+            bi++;
+          }
+          if (lastBottom + mt + h + 2 > ar.bottom) { dbg.stop = 'nofit'; break; }
+          /* 同容器才搬（不跨章/不跨结构搬） */
+          var parN = el.parentElement;
+          if (!parN || parN === b) { dbg.stop = 'noParN'; break; }
+          if (parN.tagName !== parI.tagName ||
+              String(parN.className || '') !== String(parI.className || '')) {
+            dbg.stop = 'parMismatch:' + parN.tagName + '.' + String(parN.className || '') +
+                       ' vs ' + parI.tagName + '.' + String(parI.className || '');
+            break;
+          }
+          dbg.stop = 'moved:' + pair.length;
+          for (var pi = 0; pi < pair.length; pi++) {
+            parI.appendChild(pair[pi]);
+            moved.push(pair[pi]);
+            pulled++;
+            passPulled++;
+          }
+          var lr = pair[pair.length - 1].getBoundingClientRect();
+          lastBottom = lr.bottom;
+          if (moved.length >= 24) break;                   /* 安全上限 */
+        }
+        if (!moved.length) continue;
+        /* 溢出回退：搬完后若本页内容超出页底，撤回搬入的块 */
+        var aft = a.getBoundingClientRect();
+        var over = 0, all2 = blocksOf(a);
+        for (var q = 0; q < all2.length; q++) {
+          var rr = all2[q].getBoundingClientRect();
+          if (rr.bottom > aft.bottom + 1) over = rr.bottom - aft.bottom;
+        }
+        if (over > 0) {
+          for (var mi = moved.length - 1; mi >= 0; mi--) {
+            var node = moved[mi];
+            if (node.parentNode) node.parentNode.removeChild(node);
+            pulled--;
+            passPulled--;
+          }
+          dbg.stop += '(overflow-rolled-back)';
+          continue;
+        }
+        /* 后页被搬空 → 隐藏（与拼页同一套隐藏口径） */
+        if (!blocksOf(b).length) {
+          pgs[i + 1].style.display = 'none';
+          pgs[i + 1].setAttribute('data-pg-hide', '1');
+          hidden++;
+        }
+      }
+      if (!passPulled) break;     /* 不动点：没有新搬移即停 */
+    }
+    if (pulled) window.__pgPulled = pulled;
+    if (hidden) {
+      window.__pgHiddenPages = (window.__pgHiddenPages || 0) + hidden;
+    }
+    return pulled;
+  };
   function splitTable(T, pgBot, pvTop){
     T.setAttribute('data-mde-split', '1');
     try { (window.__mdeCalls = window.__mdeCalls || []).push({
@@ -4092,6 +4707,28 @@ PAGED_SPLIT_TMPL = """
       for (var ri = 0; ri < T.tBodies[bi].rows.length; ri++)
         bodyRows.push(T.tBodies[bi].rows[ri]);
     if (!bodyRows.length) return false;
+    /* v2.29.7 表自身高度优先（治本）：页位置模拟与 Paged.js 实排必然有偏差
+       （行高/孤行/avoid 连带顺延逐页累积，实测偏差可达半页），模拟一旦误判
+       「首行放不下」就会把整表推去下一页（orphan/break-before:page），
+       留下大片空白（2026-11-03 主人截图：② 表仅 51mm，页底却空 172mm）。
+       表自身一页装得下时，根本不该按位置拆——钉列宽 + 整表不可拆，让
+       Paged.js 把它放在放得下的位置（放不下则整表下移，留白 < 表高，
+       属正常排版；且不会被原生二切丢表头）。 */
+    var thAll = 0;
+    for (var hi = 0; hi < bodyRows.length; hi++)
+      thAll += bodyRows[hi].getBoundingClientRect().height;
+    var thH = T.tHead ? T.tHead.getBoundingClientRect().height : 0;
+    var tcs0 = window.getComputedStyle(T);
+    var tm0 = parseFloat(tcs0.marginTop) || 0, tmb0 = parseFloat(tcs0.marginBottom) || 0;
+    if (thAll + thH + tm0 + tmb0 <= PGH - 2) {
+      var colW0 = [], refR0 = T.rows[0];
+      for (var ci0 = 0; ci0 < refR0.cells.length; ci0++)
+        colW0.push(refR0.cells[ci0].getBoundingClientRect().width);
+      if (!T.querySelector('colgroup')) T.insertBefore(colgroupOf(T, colW0), T.firstChild);
+      T.setAttribute('data-mde-keep', '1');
+      try { window.__mdeCalls[window.__mdeCalls.length - 1].keep = 1; } catch (e1) {}
+      return false;
+    }
     /* 首页装得下的行数（行底 ≤ pgBot，行序单调故可顺序数） */
     var fit = 0;
     while (fit < bodyRows.length &&
@@ -4124,6 +4761,20 @@ PAGED_SPLIT_TMPL = """
     var _mt = parseFloat(_tcs.marginTop) || 0;
     var _mb = parseFloat(_tcs.marginBottom) || 0;
     var rest = fit, prev = T, budget = PGH - theadH - _mt - _mb - 2;
+    if (rest < bodyRows.length) {
+      /* v2.29.6（A'）首片不可拆壳：预拆 fit 按模拟位置算，实排位置漂移时
+         首片可能被 Paged.js 原生二切——表头壳与行分离（thead-only 表 +
+         无表头行表，2026-11-03 探针4 实锤），拼页判据 fail-closed 直接
+         拒拼。首片整盒 break-inside:avoid：放不下就整体推页，与续片同页
+         相邻，拼页拉行必然成功（漂移无害化，不依赖模拟精度）。 */
+      var hw = document.createElement('div');
+      hw.setAttribute('data-mde-headfrag', '1');
+      hw.style.width = PGW + 'px';
+      hw.style.maxWidth = PGW + 'px';
+      T.parentNode.insertBefore(hw, T);
+      hw.appendChild(T);
+      prev = hw;   /* 续片必须插在壳外（首片壳之后），不能进壳 */
+    }
     while (rest < bodyRows.length) {
       var take = 0, acc = 0;
       while (rest + take < bodyRows.length &&
@@ -4155,6 +4806,14 @@ PAGED_SPLIT_TMPL = """
     return true;
   }
   imgsReady(function(){
+    /* 诊断开关（v2.29.7，默认关闭）：window.__mdeNoSplit=1 时跳过静态预拆，
+       直接让 Paged.js 原生分页——用于评估「去预拆」路线（原生 thead 重复
+       + 自钉 colgroup 保列宽）是否成立。正式路径不设此变量，行为不变。 */
+    if (window.__mdeNoSplit) {
+      try { window.__mdeSplitErr = 'nosplit'; } catch (e0) {}
+      startPaged();
+      return;
+    }
     var splitErr = '';
     try {
       /* 关键：分页前的裸文档宽度=视口宽（不是版心），行高/列宽全部失真
@@ -4447,15 +5106,28 @@ def build_standalone_html(md_path, body_html, ts_css, page_cfg=None):
         'line-height:1.7;color:#222;}'
         'h1,h2{border-bottom:1px solid #eee;padding-bottom:.3em;}'
         'code{background:#f4f4f4;padding:.15em .4em;border-radius:4px;font-family:Consolas,monospace;}'
-        'pre{background:#f4f4f4;padding:14px;border-radius:8px;overflow:auto;}'
+        # v2.33.0 与预览/打印同口径：折行，不给横向滚动。三条通道一旦各写
+        # 一套，同一段代码在导出件里要拖才能看全、在纸上却是折好的。
+        'pre{background:#f4f4f4;padding:14px;border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;}'
         'blockquote{border-left:3px solid #4a6cf7;background:#f5f7ff;padding:.4em 1em;margin:1em 0;}'
-        'table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ddd;padding:7px 12px;}'
+        'table{border-collapse:collapse;width:100%;max-width:100%;table-layout:auto;}'
+        'th,td{border:1px solid #ddd;padding:7px 12px;overflow-wrap:anywhere;}'
+        # v2.33.0 @@ begin font：块级临时字体/字号。导出件没有别处提供
+        # .mde-font 规则，必须自带这四条，否则「预览里换了字体、导出后没换」。
+        # 特异性 (0,3,1) 压得过 ts_css 的 (0,1,1)。
+        '.markdown-body .mde-font[data-ff] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,table,pre,code,figcaption,td,th,.mde-tabcap){font-family:var(--mff) !important;}'
+        '.markdown-body .mde-font[data-ffw] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,table,pre,code,figcaption,td,th,.mde-tabcap){font-weight:var(--mff-w) !important;}'
+        '.markdown-body .mde-font[data-ffi] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,table,pre,code,figcaption,td,th,.mde-tabcap){font-style:italic !important;}'
+        '.markdown-body .mde-font[data-fs] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,table,pre,code,figcaption,td,th,.mde-tabcap){font-size:var(--mfs) !important;}'
         'li.u-solid{list-style-type:disc;}li.u-hollow{list-style-type:circle;}'
         'li.task{list-style:none;}'
         'p:has(>img){text-indent:0 !important;}'
         'p:has(>img[data-img-align="center"]){text-align:center !important;}'
         'p:has(>img[data-img-align="left"]){text-align:left !important;}'
         'p:has(>img[data-img-align="right"]){text-align:right !important;}'
+        '.diagram{margin:.9em 0;text-align:center;overflow:hidden;border:1px solid #ddd;border-radius:6px;padding:10px;background:#f8f9fb;}'
+        '.diagram svg{width:100% !important;max-width:100% !important;height:auto !important;display:block;margin:0 auto;}'
+        '.diagram .mde-fig-acts svg{width:14px !important;height:14px !important;display:inline-block !important;}'
         '.diagram[data-diagram-align="center"]{margin-left:auto;margin-right:auto;}'
         '.diagram[data-diagram-align="right"]{margin-left:auto;}'
         '.diagram[data-diagram-align="left"]{margin-right:auto;}'
@@ -4586,7 +5258,276 @@ def _ensure_docx_deps():
         "（应在 MarkdownEditor-app/docxdeps/ 内随应用分发）")
 
 
-def build_paged_html(md_path, body_html, ts_css, page_cfg):
+# ── 原生打印（v2.30.0）─────────────────────────────────────────────
+# 出片路径从「Paged.js 在浏览器里 JS 分页」改为「CSS 声明分页 + 浏览器原生
+# 打印引擎」。依据 2026-11-03 双路对照实测（同内容/同纸张/同 CSS）：
+#   Paged.js 路径 15 页、只排出 8/21 个 h2、8/25 张表（内容被吞），且有
+#   height:0 的空壳页；原生路径 57 页、21/21 h2、25/25 表、内容完整。
+# Paged.js 0.4.3 不实现 break-after:avoid / orphans / widows / thead 重复，
+# 这三条正是书册排版规则的骨架——此前所有几何补丁都是在对抗这个残缺引擎。
+# 原生引擎已实测支持：@page 的四向 margin box（counter(page)/counter(pages)）、
+# print-color-adjust:exact 强制打印背景、thead 跨页重复、标题随文、孤行控制。
+# 不支持：target-counter（目录页码）、leader()——目录页码列在原生模式下留空，
+# 由「点线到右缘」保持版式（后续接入两遍法再填）。
+def _css_quote(s):
+    """CSS content 的字符串字面量（含引号转义）"""
+    return json.dumps(s or "", ensure_ascii=False)
+
+
+def _pn_content(tpl, with_total=True):
+    """页码模板 -> CSS content 表达式。
+    '第 {p} 页 / 共 {P} 页' -> '"第 " counter(page) " 页 / 共 " counter(pages) " 页"'
+    {p}=当页页码，{P}=总页数；with_total=False 时丢弃 {P} 段（无总页数语境）。"""
+    parts = re.split(r"(\{p\}|\{P\})", tpl or "{p}")
+    out = []
+    for seg in parts:
+        if seg == "{p}":
+            out.append("counter(page)")
+        elif seg == "{P}":
+            if with_total:
+                out.append("counter(pages)")
+        elif seg:
+            out.append(_css_quote(seg))
+    return " ".join(out) if out else "counter(page)"
+
+
+def _native_page_css(size_str, mt, mr, mb, ml, pn, page_cfg, icb_w=174.0,
+                     paper_bg=""):
+    """原生打印的分页契约（对齐 Cogito_Scribit/typesetting 的 PRINT_CSS）。
+    规则来源：书册规范 STRUCTURE_GUIDE 6.2 + 成熟排版工程实测。
+
+    paper_bg：纸色。必须写在 @page 上，不能只写 body——CSS 背景只画在元素
+    border-box 内，而 @page 的 margin 区（页边距）不属于任何元素，所以
+    body{background} 打印出来只有版心是深色（实测四角 0/4）。写在 @page
+    上的背景铺满整张纸（四角 4/4），且配合 print-color-adjust:exact 后
+    用户不勾「背景图形」也照常输出（不加则 bgOFF 全白，实测判例）。"""
+    css = "@page{size:%s;margin:%smm %smm %smm %smm;%s" % (
+        size_str, mt, mr, mb, ml,
+        ("background:%s;" % paper_bg) if paper_bg else "")
+    pn_on = (pn.get("on") == "on")
+    sz = pn.get("size", 9)
+    if pn_on:
+        tpl = pn.get("tpl") or "{p}"
+        con = _pn_content(tpl, with_total=("{P}" in tpl))
+        pos = pn.get("pos", "outer")
+        if pos == "outer":
+            # 书册规范 6.4：外侧——奇数页右下、偶数页左下。
+            # Chromium 支持 :left/:right 分页伪类；四向 margin box 均可用。
+            css += ("@bottom-right{content:%s;font-size:%spt;color:#666;}"
+                    "@bottom-left{content:none;}" % (con, sz))
+        else:
+            box = PAGED_PAGE_BOX.get(pos, "@bottom-center")
+            css += "%s{content:%s;font-size:%spt;color:#666;}" % (box, con, sz)
+    css += "}"
+    # 页边距由 @page 负责，body/html 不得再带任何自带边距。浏览器默认
+    # body margin:8px——不清零则整篇内容下移 8px，独占页块（页心 -1mm 余量）
+    # 正好被顶出 4px，触发「刚断页又溢出」→ 封面后多一张整页空白（实测判例）。
+    # 宽度必须显式钉成版心宽（icb_w）：Chromium 打印态的 body 包含块按纸宽
+    # 解析，只靠 @page margin 定位会让右边超出页心被裁（实测：表格右列在纸外
+    # 截断）。这一条对齐 typesetting PRINT_CSS 的「内容盒治理」。
+    css += ("@media print{"
+            # 根元素底色会盖在 @page 之上（html 的底铺满页心），纸色由 @page
+            # 给，所以 html 必须透明。body 的底色不在这里定——它要按纸色深浅
+            # 二选一，由 build_paged_html 的 native 分支追加（那里才知道 _paper_bg）。
+            "html{margin:0 !important;padding:0 !important;"
+            "background-color:transparent !important;}"
+            "body{margin:0 !important;padding:0 !important;"
+            "width:%smm !important;max-width:%smm !important;}"
+            "}" % (icb_w, icb_w))
+    if pn_on and pn.get("pos", "outer") == "outer":
+        tpl = pn.get("tpl") or "{p}"
+        con = _pn_content(tpl, with_total=("{P}" in tpl))
+        sz = pn.get("size", 9)
+        # 奇页（右页）页码靠右，偶页（左页）靠左；对页各自只保留一个 box
+        css += ("@page:right{@bottom-right{content:%s;font-size:%spt;color:#666;}"
+                "@bottom-left{content:none;}}"
+                "@page:left{@bottom-left{content:%s;font-size:%spt;color:#666;}"
+                "@bottom-right{content:none;}}" % (con, sz, con, sz))
+
+    # 分页规则：与 typesetting PRINT_CSS 逐条对齐，另加三处本工程必需项
+    css += (
+        # 内容盒：padding 不得撑破版心（typesetting 同理，缺则代码块/表头
+        # 右侧顶出纸边被裁——实测 P9 代码块溢出 12mm）
+        "*{box-sizing:border-box !important;}"
+        # 表格收进版心 + 单元格可断行。
+        # v2.32.0：断行口径由 break-word 改为 anywhere，与预览侧同一条规则。
+        # 旧注记（2026-11-03）说 anywhere 会把窄列的 "Task" 拆成 "Tas/k"；
+        # 2026-11-04 复测：8% 列（79px）下 "Task" 仍是一行放不下才折成两行，
+        # 未见词内拆断——那次判例的列窄于单词本身，两种写法都会断。
+        # 改 anywhere 的理由是硬事实：break-word 的断点不计入 min-content，
+        # 长 URL 单元格把表格撑到 1754px、220 个连续 A 撑到 2224px（版心 986），
+        # 只有 anywhere 能让 table-layout:auto 的表格恒 ≤ 100%。
+        "table{width:100% !important;max-width:100% !important;"
+        "table-layout:auto;}"
+        "td,th{overflow-wrap:anywhere;}"
+        "pre,img,figure,.mde-fig{max-width:100% !important;}"
+        # 目录独立成页（目录后强制换页）
+        ".md-toc-wrap{break-after:page;}"
+        # 每篇独立起页；但文档首块不得因 break-before 催出空白首页
+        #（实测：.full-page 的 break-before 挂在下第一个元素上 → P1 整页空白）
+        "h1{break-before:page;}"
+        "#paged-content>:first-child h1:first-child{break-before:auto;}"
+        # 标题不落页末（原生引擎真正实现 avoid，无需 JS 搬家）
+        "h2,h3,h4{break-after:avoid;}"
+        # 段落防孤立行 2/2；单行 bullet 1/1（widows:2 会永久推页留白）
+        "p{orphans:2;widows:2;}li{orphans:1;widows:1;}"
+        # 分隔线不独占一页
+        "hr{break-inside:avoid;break-after:avoid;}"
+        # 纵向结构在行/单元之间拆页，横向结构整块不拆
+        "table{break-inside:auto;}"
+        "thead{display:table-header-group;}"     # ← 跨页自动重复表头（原生）
+        "tr{break-inside:avoid;}"                # 单行不被腰斩
+        "blockquote{break-inside:avoid;}"
+        # 页区：两端强制断页（页码是页级属性），末块撤 break-after 防尾页空白
+        ".page-region{break-before:page;break-after:page;}"
+        ".page-region:last-child{break-after:auto;}"
+        # 页区页码（v2.30.0，named pages 实测可用）：noll 区不出页码；
+        # i/I 区用罗马数字。限制：counter-reset 在元素上不生效（实测罗马
+        # 区从全局页序继续，非从 i 起）——编号重置需要两遍法，暂记在案。
+        ".page-region[data-pn=\"noll\"]{page:pn-noll;}"
+        "@page pn-noll{@bottom-center{content:none;}"
+        "@bottom-left{content:none;}@bottom-right{content:none;}}"
+        ".page-region[data-pn=\"i\"]{page:pn-roman;}"
+        ".page-region[data-pn=\"I\"]{page:pn-roman-uc;}"
+        "@page pn-roman{@bottom-center{content:counter(page,lower-roman);"
+        "font-size:9pt;color:#666;}}"
+        "@page pn-roman-uc{@bottom-center{content:counter(page,upper-roman);"
+        "font-size:9pt;color:#666;}}"
+        # 独占页块：起页靠自身 break-before，收尾靠「下一块 break-before」——
+        # 不用 break-after。实测 break-after:page 与后续块的上边距叠加会让
+        # 浏览器"刚断页又判定溢出"，多烧一张空白页（封面后 P2 整页空白，
+        # 2026-11-03 实测）。下一块 margin 清零同理，防止 1~2px 溢出再断一次。
+        ".full-page{break-before:page;}"
+        ".full-page + *{break-before:page;margin-top:0 !important;}"
+        "#paged-content > :first-child.full-page,"
+        "#paged-content > .pblk:first-child > .full-page{break-before:auto;}"
+        # 图片/图容器整块不拆
+        "figure,.mde-fig,img{break-inside:avoid;}"
+        # 表格标题（@@ caption）不与其表分离
+        ".mde-caption{break-before:avoid;}"
+    )
+    return css
+
+
+def _native_screen_css(tone, paper_w, paper_h, mt, mr, mb, ml):
+    """屏幕态：把连续流装扮成「一张纸」，颜色随纸色。
+    @page 只在打印态生效，屏幕上没有页边界——这是原生分页的固有代价：
+    屏幕看版式与纸宽，分页以打印预览为准（换来的是打印结果 100% 可预测）。
+    纸宽/页边距与实际打印逐项一致，屏幕上量出来的行宽就是纸上的行宽。
+
+    v2.30.1 full 块：屏幕上用负 margin 长到纸边（背景铺满整张纸），再用等量
+    padding 把内容推回版心。外盒高 = 纸高，减去上下负 margin 后占位 = 页心，
+    与打印侧「一页一块」逐像素对齐。打印侧不能这么做（Chromium 会裁掉页边距
+    区，实测四角 0/4），改由 @page 命名页背景接管，见 _native_fullbg。"""
+    paper = "#ffffff" if tone != "dark" else "#1a1a1c"
+    return (
+        "@media screen{"
+        "html{background:#e8eaed !important;padding:22px 0 !important;}"
+        "body{width:%smm !important;max-width:%smm !important;"
+        "margin:0 auto !important;background:%s !important;"
+        "padding:%smm %smm %smm %smm !important;box-sizing:border-box !important;"
+        "box-shadow:0 1px 2px rgba(0,0,0,.10),0 10px 30px rgba(0,0,0,.12) !important;}"
+        ".markdown-body .full-page{height:%smm !important;"
+        "width:auto !important;"
+        "margin:%smm -%smm %smm -%smm !important;"
+        "padding:%smm %smm %smm %smm !important;box-sizing:border-box !important;}"
+        "}" % (paper_w, paper_w, paper, mt, mr, mb, ml,
+               paper_h, mt, mr, mb, ml, mt, mr, mb, ml)
+    )
+
+
+# o/c/f 直接映射 object-fit：o=原始尺寸不缩放、c=撑满裁切、f=填充拉伸。
+# 旧版翻成 background-size:auto/cover/100% 100%，是为 @page 背景图服务的；
+# 改走 <img> 后这两张表只剩「九宫」一个用途，语义与 background-position
+# 完全一致，o/c/f 那半张表一并删掉（v2.31.0）。
+_FULL_FIT = {"o": "none", "c": "cover", "f": "fill"}
+_FULL_BG_POS = {"lt": "left top", "ct": "center top", "rt": "right top",
+                "lc": "left center", "cc": "center center", "rc": "right center",
+                "lb": "left bottom", "cb": "center bottom", "rb": "right bottom"}
+
+
+def _native_fullbg(body_html, paper_w, paper_h, mt, mr, mb, ml, paper_bg=""):
+    """把 full 块的背景图搬成「命名页 + 真实 <img>」，铺满整张纸。
+
+    v2.31.0 重做。前两版都错在同一个地方——指望 @page 的 background-image：
+
+      版一：元素负 margin 撑到纸边。Chromium 打印把页边距区裁掉（四角 0/4）。
+      版二：@page 命名页 background-image。勾「背景图形」时正常，**不勾就整页
+            空白**（同一产物 bgOFF 实测 P1 四角全白、P2 纸色仍在）。而 Chrome/
+            Edge 打印对话框里「背景图形」默认不勾——等于默认失效。更冤的是
+            为了让它在 @page 上画出来，还把图转成了 base64 data URI（大图还得
+            PIL 降级）——这层转换现在整条删掉，因为 <img> 根本不需要内嵌。
+
+    现在走事实：**背景图和背景色受的是两个开关**。<img> 是元素内容，不受
+    「背景图形」影响；实测同一产物 printBackground=True/False 输出字节完全相同
+    （1547791 bytes 对 1547791 bytes），P1 四角都是图像内容。
+
+    几何怎么来的：@page 命名页单独把 margin 设 0，该页内容区 = 整张纸，
+    于是 .full-page 可以写死 width=纸宽、height=纸高，img 绝对定位铺满，
+    再用 padding=页边距把内容推回版心。命名页只作用于挂了 page 的那几页
+    （实测 P1 有、P2 无），正文页仍走带边距的 @page。
+
+    o/c/f 与九宫不用再翻译成 background-size/position——直接对应
+    object-fit(none/cover/fill) 与 object-position(九宫)，语义一一对齐。
+
+    返回 (css, body)：css 含 @page 与 page 绑定；body 里对应 div 加了
+    data-mde-pg 并插入 <img>。同一张图多处复用按 (url,fit,pos) 去重。
+    """
+    combos = {}
+    css = []
+    out = []
+    last = 0
+    for m in re.finditer(r'<div class="full-page"([^>]*)>', body_html):
+        attrs = m.group(1)
+        mi = re.search(r'data-bg-img="([^"]*)"', attrs)
+        if not mi:
+            continue
+        url = html_module.unescape(mi.group(1))
+        mo = re.search(r'data-bg-mode="([^"]*)"', attrs)
+        mp = re.search(r'data-bg-pos="([^"]*)"', attrs)
+        fit = _FULL_FIT.get(mo.group(1) if mo else "c", "cover")
+        pos = _FULL_BG_POS.get(mp.group(1) if mp else "cc", "center center")
+        key = (url, fit, pos)
+        name = combos.get(key)
+        if name is None:
+            name = "mdefbg%d" % (len(combos) + 1)
+            combos[key] = name
+            # 命名页 margin 归零：这一页的内容区就是整张纸，元素才量得出
+            # 纸宽/纸高。background 与基础 @page 同色，避免页内出现接缝。
+            css.append('@page %s{margin:0;%s}' % (
+                name, ("background:%s;" % paper_bg) if paper_bg else ""))
+            css.append(
+                '.full-page[data-mde-pg="%s"]{page:%s;'
+                'width:%smm !important;height:%smm !important;'
+                'margin:0 !important;'
+                'padding:%smm %smm %smm %smm !important;'
+                'position:relative !important;overflow:hidden !important;'
+                'box-sizing:border-box !important;}'
+                % (name, name, paper_w, paper_h, mt, mr, mb, ml))
+            # img 必须 print-only 生效：屏幕态的拟页块另有几何（_native_screen_css），
+            # 两套同时作用会把块撑成纸宽再叠一层图。
+            css.append(
+                '@media print{'
+                '.full-page[data-mde-pg="%s"]{background-image:none !important;}'
+                '.full-page[data-mde-pg="%s"]>img.mde-pgimg{'
+                'position:absolute !important;left:0 !important;top:0 !important;'
+                'width:100%% !important;height:100%% !important;'
+                'max-width:none !important;max-height:none !important;'
+                'margin:0 !important;padding:0 !important;'
+                'object-fit:%s;object-position:%s;z-index:0;}'
+                '.full-page[data-mde-pg="%s"]>*:not(img.mde-pgimg){'
+                'position:relative;z-index:1;}'
+                '}' % (name, name, fit, pos, name))
+        out.append(body_html[last:m.start()])
+        out.append('<div class="full-page" data-mde-pg="%s"%s>'
+                   '<img class="mde-pgimg" src="%s" alt="">'
+                   % (name, attrs, html_module.escape(url, quote=True)))
+        last = m.end()
+    out.append(body_html[last:])
+    return "".join(css), "".join(out)
+
+
+def build_paged_html(md_path, body_html, ts_css, page_cfg, native=False):
     paper = page_cfg.get("paper", "A4")
     pw, ph = page_cfg.get("pw", ""), page_cfg.get("ph", "")
     if paper == "custom" and pw and ph:
@@ -4661,6 +5602,12 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
         ".md-toc-wrap{break-after:page;}"
         "h1{break-before:page;}"
         "h2,h3,h4{break-after:avoid;}"
+        # v2.29.3 Paged.js **不认 break-after:avoid**（源码 createBreakToken 里
+        # 只处理 page/always/left/right/recto/verso，avoid 被显式排除），上面的
+        # h2,h3,h4 规则只对浏览器原生打印/HTML 导出有效。分页器这侧改由
+        # window.__pgFixOrphanHeads 在排版完成后把页尾孤标题搬到下一页开头
+        # （v2.29.2 试过 break-inside:avoid 整组包裹，Paged.js 会把后续内容
+        #  连带顺延，页尾留出 75.9mm 空白，已撤）。
         "p{orphans:2;widows:2;}li{orphans:1;widows:1;}"
         "hr{break-inside:avoid;break-after:avoid;}"
         "table{break-inside:auto;}blockquote{break-inside:avoid;}"
@@ -4669,12 +5616,29 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
         # break-before 无视（2026-11-02 实测）；片内表额外margin 清零
         "div[data-mde-frag],div[data-mde-orphan]{break-before:page;}"
         "div[data-mde-frag] table,div[data-mde-orphan] table{margin-top:0;margin-bottom:0;}"
+        # v2.29.6（A'）首片不可拆壳：实排位置漂移时首片整体推页（不二切），
+        # 与续片同页相邻后由拼页合并。margin 不清零（首片保留原表间距）。
+        "div[data-mde-headfrag]{break-inside:avoid;}"
+        # v2.29.7 单页可容的表：整表不可拆——放不下就整表下移（留白 < 表高，
+        # 属正常排版），既不会被 Paged.js 原生二切丢表头，也不会因位置模拟
+        # 误判被整表推页（实测偏差可达半页 → 主人截图的大片空白）
+        "table[data-mde-keep]{break-inside:avoid;}"
         # v2.17.0 页区：起止两端都强制断页——页码是页级属性，一页只能有
         # 一个数字，边界落在页中必然有一方的号是错的。区域若是文末最后
         # 一块，撤掉 break-after，否则末尾会多催一张空白页。
         ".page-region{break-before:page;break-after:page;}"
         ".page-region:last-child{break-after:auto;}"
     )
+
+    # v2.30.0 原生分页：整块替换上面的分页契约。原生路径不存在预拆片/表头壳/
+    # 拼页单元（data-mde-frag 等一个都不会出现），那套规则在此既无对象也不该
+    # 生效——保留 Paged.js 分支的构造只为 native=False 回退时可用。
+    if native:
+        # 纸色走 @page 背景（见 _native_page_css 注释）：深色纸时整张纸都深，
+        # 页边距不再留白。浅色纸不写，保持浏览器默认白纸。
+        _paper_bg = "#1a1a1c" if str(page_cfg.get("tone") or "") == "dark" else ""
+        page_css = _native_page_css(size_str, mt, mr, mb, ml, pn, page_cfg,
+                                    icb_w, paper_bg=_paper_bg)
 
     # TOC + 锚点
     # v2.21.0 级别排除：排版设置「不计入目录」勾选 #/##/### 后，对应级别的
@@ -4700,6 +5664,19 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
 
     heads = []
 
+    def _full_spans(src):
+        """v2.29.1 full 独占页块的字符区间（div 深度配对，不数到第一个 </div>）。"""
+        out = []
+        for _m in re.finditer(r'<div class="[^"]*\bfull-page\b[^"]*"[^>]*>', src):
+            _depth, _pos = 1, _m.end()
+            for _t in re.finditer(r'<div\b|</div>', src[_m.end():]):
+                _depth += -1 if _t.group(0) == '</div>' else 1
+                if _depth == 0:
+                    _pos = _m.end() + _t.end()
+                    break
+            out.append((_m.start(), _pos))
+        return out
+
     def _head(m):
         lvl = int(m.group(1))
         if lvl in toc_ex:
@@ -4720,9 +5697,28 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
         toc_html = ('<div class="md-toc-wrap" style="%s"><nav class="md-toc">'
                     '<div class="md-toc-title">%s</div>%s</nav></div>') % (solo, toc_title, items)
         if toc_cfg.get("pos", "top") == "afterh1":
-            body = re.sub(r"(<h1[\s\S]*?</h1>)", lambda m: m.group(1) + toc_html, body, count=1)
+            # v2.29.1 目录不得侵入「独占一页」块：第一个 # 若落在 full 块里，
+            # 目录必须插到该块**闭合之后**。原实现一律插在 </h1> 后面，封面
+            # 独占页（@@ begin full）里的 # 会把目录塞进封面的 flex 盒，
+            # 封面页变成「封面 + 目录」两堆内容（2026-11-03 判例）。
+            _m = re.search(r"<h1[\s\S]*?</h1>", body)
+            _cut = _m.end() if _m else None
+            if _m:
+                for _s, _e in _full_spans(body):
+                    if _s <= _m.start() < _e:
+                        _cut = _e
+                        break
+            if _cut is None:
+                body = toc_html + body
+            else:
+                body = body[:_cut] + toc_html + body[_cut:]
         else:
             body = toc_html + body
+
+    # v2.29.2 分页预览里 ⋯ 按钮会被一起克隆上纸面：@media print 只约束「真
+    # 打印」，屏幕上那层 .pagedjs_page 不受它管，于是打印预览页里每张图右上
+    # 都挂着一颗点不动的按钮（真打印件里没有，预览与成品不一致）。剥掉。
+    body = re.sub(r'<div class="mde-fig-acts"[\s\S]*?</div>', '', body)
 
     # 引用编号索引表识别（STYLE_GUIDE 1.2）：表头 = 编号|引用|出处 → ref-table 固定列宽
     body = re.sub(
@@ -4861,6 +5857,32 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
     # 作用；根治靠推演精度专项）。
     paged_cfg = ('window.PagedConfig={auto:false,after:function(){'
                  'return new Promise(function(res){setTimeout(function(){'
+                 # v2.29.3 页尾孤标题先搬家，再回填页码（页码按搬完的位置算）
+                 # 几何可用性轮询：after 触发时（preview() resolve 后 ~110ms）
+                 # 页盒高度实测仍为 0，搬家一个也搬不动。等首屏页盒量出
+                 # 真实高度再动（最多 6s，不挡 res）。
+                 'try{(function(){var _t=0,_last=-1,_same=0;function _tk(){'
+                 'var _p=document.querySelectorAll(".pagedjs_page");'
+                 'if(_p.length===_last&&_p.length>1)_same++;else{_same=0;_last=_p.length;}'
+                 'var _ok=_p.length>1&&_p[0].getBoundingClientRect().height>100&&_same>=3;'
+                 'if(!_ok&&++_t<60){setTimeout(_tk,150);return;}'
+                 'window.__pgGeom={n:_p.length,h:_p.length?_p[0].getBoundingClientRect().height:0,tries:_t,same:_same};'
+                 # v2.29.5 表格残片拼页先跑（腾出的空间/空页要让孤标题搬家与
+                 # 页码回填看到的是拼完后的状态），再孤标题搬家，最后页码
+                 'try{window.__pgFixTableFrags&&window.__pgFixTableFrags();}catch(e){if(!window.__pgMoveErr)window.__pgMoveErr="tbl:"+String(e);}'
+                 # v2.29.7 浅页回拉：把后页首部「明明放得下」的块搬回前页
+                 # （Paged.js avoid 连带顺延造成的页尾大片空白），在孤标题
+                 # 搬家之前跑——两者都看到搬完后的最终状态
+                 'try{window.__pgPullBack&&window.__pgPullBack();}catch(e){if(!window.__pgMoveErr)window.__pgMoveErr="pull:"+String(e);}'
+                 'try{window.__pgMovedHeads=window.__pgFixOrphanHeads?window.__pgFixOrphanHeads():-1;}catch(e){window.__pgMoveErr=String(e);}'
+                 'try{window.__pgFill&&window.__pgFill();}catch(e){}'
+                 # v2.29.3 回归修复：__pgBgOnce 独立 tick 只给 100×60ms≈6s，
+                 # 而几何轮询（60×150ms=9s）+孤标题搬家把分页完成推到 6s 之后，
+                 # tick 烧完时 full-page 还没进页盒 → 背景永远贴不上（实测
+                 # data-bg-done=0、页盒 background=none）。几何稳定后再给一个
+                 # 补贴窗口（40×120ms≈5s），与快速路径 tick 双保险。
+                 'try{(function(){var _bn=0;function _btk(){window.__pgBgOnce&&window.__pgBgOnce();if(++_bn<40)setTimeout(_btk,120);}_btk();})();}catch(e){}'
+                 '}_tk();})();}catch(e){}'
                  'try{window.__pgFill&&window.__pgFill();}catch(e){}'
                  'try{(function(){'
                  'var _ots=document.querySelectorAll('
@@ -4901,6 +5923,9 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
                  'hit++;'
                  '}'
                  'return hit;}'
+                 # v2.29.3 补跑挂载：几何轮询完成后要再补一轮贴底（分页完成
+                 # 晚于快速路径 tick 的 6s 预算时），必须能从 window 引到它
+                 'window.__pgBgOnce=__pgBgOnce;'
                  'var __tries=0;'
                  'if(document.querySelectorAll(".full-page[data-bg-img]").length){'
                  '(function tick(){'
@@ -4954,6 +5979,55 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg):
     m1 = re.search(r"<h1[^>]*>([\s\S]*?)</h1>", body)
     title = _strip_tags(m1.group(1)) if m1 else "未命名文档"
     title = title.strip() or "未命名文档"
+
+    if native:
+        # 原生打印产物：只有 CSS 契约与内容，一行脚本都没有——分页完全交给
+        # 浏览器打印引擎。print-color-adjust:exact 是纸色/封面背景能印出来的
+        # 前提（实测：同文档不加则输出纯白纸，加了背景照原样输出）。
+        _npaper = paper_css
+        if "print-color-adjust" not in _npaper:
+            _npaper += ("*{-webkit-print-color-adjust:exact;"
+                        "print-color-adjust:exact;}")
+        # 纸色只能靠 @page（2026-11-04 三变体对比：给 html 上底色、去掉
+        # @page background 后，正文页四角立刻回到白纸，只有版心是深的——
+        # 说明 html/body 的底色在打印里只覆盖页心，页边距不属于任何元素）。
+        # html 必须透明：它的底色会盖在 @page 之上，表现为「纸色对了、封面
+        # 图却被一块版心矩形压住」。body 反而**保留**纸色当双保险——@page
+        # 万一在某些内核上失效，至少版心还是深的，不会整张白纸；同色时接缝
+        # 不可见，不构成视觉损失。
+        _npaper += "@media print{html{background-color:transparent !important;}}"
+        _bodyfill = _paper_bg if _paper_bg else "transparent"
+        _npaper += ("@media print{body,body.markdown-body,"
+                    "body.markdown-body.md-tone-dark,"
+                    "body.markdown-body.md-tone-light"
+                    "{background-color:%s !important;}}" % _bodyfill)
+        try:
+            _paper_w = icb_w + float(mr) + float(ml)
+        except (TypeError, ValueError):
+            _paper_w = 210.0
+        # full 块：背景图搬成「命名页 + 真实 <img>」，铺满整张纸且不受打印
+        # 对话框「背景图形」开关影响，见 _native_fullbg。
+        _fullbg_css, body = _native_fullbg(body, _paper_w, paper_h,
+                                           mt, mr, mb, ml, _paper_bg)
+        html = (
+            '<!DOCTYPE html>\n<html lang="zh-CN"><head><meta charset="UTF-8"><title>%s</title>'
+            "<style>%s</style><style>%s</style><style>%s%s%s%s</style>"
+            '</head><body class="markdown-body %s"><div id="paged-content" class="markdown-body %s">%s</div>'
+            "</body></html>"
+        ) % (
+            html_module.escape(title),
+            page_css,
+            base_css,
+            katex_css,
+            toc_css,
+            ts_css,
+            _npaper + _native_screen_css(_tone, _paper_w, paper_h,
+                                         mt, mr, mb, ml) + _fullbg_css,
+            tone_cls,
+            tone_cls,
+            body,
+        )
+        return html
 
     html = (
         '<!DOCTYPE html>\n<html lang="zh-CN"><head><meta charset="UTF-8"><title>%s</title>'

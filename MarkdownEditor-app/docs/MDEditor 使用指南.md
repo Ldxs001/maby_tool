@@ -1,8 +1,9 @@
 @@ meta
 
-@@ begin full{m:![](MDEditor 使用指南.assets/20261103_010158_8502.png) f cc} color w
+@@ begin full{m:![](MDEditor 使用指南.assets/20261103_010158_8502.png) f cc} font{25} color w
 # MDEditor 使用指南
-@@ end full color
+@@ blank{3}
+@@ end full font color
 
 **本工具由 AI 辅助生成**：零依赖单文件 Markdown 编辑器，左侧写作、右侧实时渲染，全程本地运行。
 
@@ -24,7 +25,7 @@ The interface is bilingual. The small **EN / 中** button in the status bar swit
 | Image output | **TS → Image output**: *Original* (default, untouched), *300 dpi* or *150 dpi*. Export copies are downscaled to each image's real printed width (`width_mm ÷ 25.4 × dpi`), never upscaled, and only when it actually saves bytes. Print/PDF, `.html` and `.docx` all follow; the files on disk are never modified and the preview always uses thumbnails. |
 | Language | Status bar **EN / 中**, remembered on this machine. |
 | Offline | KaTeX, Paged.js and the four diagram engines (Mermaid, Graphviz, WaveDrom, Vega-Lite) are bundled; only remote images and links need the network. |
-| Extensions | `@@ begin fill {50\|50}` … `@@ end fill` (columns), `@@ blank{n}` (exact vertical space), `@@ begin full` (own page on print), `@@ begin page{noll\|1\|i\|I}` (page-number regions: no numbers / arabic / roman, `{p}` page, `{P}` total, `{N}` pages in this region; `page`+`full`+`color` can be combined in one block, write `fill` nested), `@@ MDE_…` (Python data points). The cheat sheet at the end carries an English note on every row. |
+| Extensions | `@@ begin fill {50\|50}` … `@@ end fill` (columns), `@@ blank{n}` (exact vertical space), `@@ begin full` (own page on print), `@@ begin page{noll\|1\|i\|I}` (page-number regions: no numbers / arabic / roman, `{p}` page, `{P}` total, `{N}` pages in this region; `@@ begin font{"Name" 12pt}` … `@@ end font` (block font and size override; size in pt, 6–72), `page`+`full`+`font`+`color` can be combined in one block, write `fill` nested), `@@ MDE_…` (Python data points). The cheat sheet at the end carries an English note on every row. |
 
 ## 一、基础语法
 
@@ -699,18 +700,16 @@ run 库里的 `plotimg` 用工具自带的 Pillow 直接把编辑区的数据画
 
 @@ MDE__月度{标题 == 门店月度销量, 单位 == 元, 一月 == 128000, 二月 == 143500, 三月 == 152300, 四月 == 167900}
 
+@@ begin fill
 **① 柱状图**
-
 @@ MDE from plotimg import bar is 月度
 
 **② 折线图**
-
 @@ MDE from plotimg import line is 月度
 
-**③ 圆环图**（看占比，图例带百分比）
-
+**③ 圆环图**（看占比）
 @@ MDE from plotimg import donut is 月度
-
+@@ end fill
 - **图是 run 自己写的**：`plotimg` 把 `门店月度销量-柱状图.png` 存进本文档的资产目录，再返回 `![](门店月度销量-柱状图.png)`；框架只负责让这个相对路径在预览区显示出来，不替它画一个像素
 - **改一个数字、重跑，图就变了**——没有缓存，每次都是重新画；同名覆盖，资产目录不会越跑越多
 - 配置键就五个：`标题`、`单位`、`宽`、`高`、`配色`（金 / 蓝 / 绿 / 紫 / 灰，默认金）；其余键一律当「标签 == 数值」
@@ -735,7 +734,8 @@ run 库里的 `plotimg` 用工具自带的 Pillow 直接把编辑区的数据画
 
 ## 九、排版（工具栏「排版」按钮）
 
-- 每种元素（正文 / H1 / H2 / H3~H6 / 引用 / 列表 / 表格 / 代码）可分别设置**字体、字号、对齐**；**图片**元素只有**对齐**档（图片无字体字号语义），单图可用 `{N c/l/r}` 后缀覆盖
+- 每种元素（正文 / H1 / H2 / H3~H6 / 引用 / 列表 / 表格 / 代码）可分别设置**字体、字号、对齐**；**字号一律以 `pt` 为单位（1 pt = 1 磅）**，范围 6–72，留空＝自动；**图片**元素只有**对齐**档（图片无字体字号语义），单图可用 `{N c/l/r}` 后缀覆盖
+- **单位分工（v2.34.0 统一口径）**：字号一律 **pt**（每个字号框右侧固定标 `pt`，留空＝自动，即沿用该元素的默认档）；纸张与页边距 **mm**；段落缩进 **字符**（随字号自动换算）；统一段间距 **倍**（1 倍 = 一个正文字号高）；图片输出 **像素／dpi**。界面里不会再出现 `px`——那是屏幕像素，只在内部布局计算里用，预览参考线标注的四边距也是 mm
 - 对齐支持：默认 / 左 / **居中** / 右 / 两端
 - 段落缩进按元素独立：**正文**提供首行缩进或悬挂缩进（字符数可调，随字号自动换算）；**列表**与**引用**各只有一个「**整体缩进**」档——整项 / 整块一起右移 N 字符，不再分首行与悬挂
 - 「整体缩进」是容器级缩进：会被 `<<<` 缩进包围块的继承链使用（见下方「缩进包围块」）
@@ -743,10 +743,10 @@ run 库里的 `plotimg` 用工具自带的 Pillow 直接把编辑区的数据画
 - **列表标记外凸**（v2.14.0，默认关闭）：勾上后列表改为「标记站到文字块外面」的排法，序号/圆点让进左侧的标记槽里，**多行项的续行与首行文字左沿对齐**（`1. □xxxx` 下面的 `□zzzz` 正好落在首行 □ 的位置）。关掉则回到上面的顶格口径，存量文档一字不变
   - 这个开关**只改列表容器的定位**：档位数字含义不变，正文的首行/悬挂缩进、`<<<` 缩进包围块都不受影响
   - 打开后**嵌套列表首次出现水平缩进**（每层一个标记槽）：此前嵌套只靠圆点/圆圈形状区分层级、没有水平缩进
-  - 标记槽宽度跟随列表字号（面板「列表」那一行的磅值），有序列表留得比无序宽——要给两位数编号留位置
+  - 标记槽宽度跟随列表字号（面板「列表」那一行的 pt 值），有序列表留得比无序宽——要给两位数编号留位置
   - 三条导出通道都跟随：打印/PDF 与 `.html` 用同一份样式表；docx 按同一组数值换算成 Word 的悬挂缩进，不会出现「Word 里又缩回去」
 - 排版等界面设置保存在**编辑器目录 `runtime/ui-settings.json`**（本机文件，跨重启保留；浏览器缓存仅作会话内副本）
-- **统一段间距**：一个勾选 + 一个数值（单位 em＝正文字号，0~3，默认 0.85），**默认关闭**。打开后正文块（段落、列表、引用、代码块、表格、图容器、图表、分隔线、分栏行、块级公式）统一吃这个上下间距；**标题与题注不在其列**（它们跟随自己的字号档）；`@@ blank{n}` 可逐处硬控并**压过**它
+- **统一段间距**：一个勾选 + 一个数值（**单位：倍，1 倍 = 一个正文字号高**，0~3，默认 0.85），**默认关闭**。打开后正文块（段落、列表、引用、代码块、表格、图容器、图表、分隔线、分栏行、块级公式）统一吃这个上下间距；**标题与题注不在其列**（它们跟随自己的字号档）；`@@ blank{n}` 可逐处硬控并**压过**它
 - 表格样式：三线表、表头底色、首列底色（颜色可选）
 - **纸张底色**（v2.27.0，「页面 · 纸张与边距」最后一行）：浅色（白纸黑字，默认）/ 深色（深底浅字）两档，作用于**预览、`.html` 导出、打印 / PDF** 三处，Word 不跟（Word 自己管主题）
   - **与界面暗/亮色完全脱钩**：界面是暗色时纸照样可以是白的，界面亮色时纸也可以是深的。纸是**产出物**，不是界面皮肤，两件事不该互相绑
@@ -939,7 +939,7 @@ note: 第一卷草稿
 - 非首行的 `---…---` 一律不算元数据
 - 元数据区只在预览出现：打印／PDF 与 `.docx` 整块删除；`.html` 导出还原成源码块（`<pre class="mde-fm-src">`），保留原文但不渲染成元数据卡片
 
-## 十一、独占一页 `@@ begin full`、硬控空白 `@@ blank`、页区页码与并写
+## 十一、独占一页 `@@ begin full`、硬控空白 `@@ blank`、页区页码、块级字体与并写
 
 ### （一）独占一页 `@@ begin full{t|m|b}` 与整页背景图
 
@@ -1045,7 +1045,7 @@ note: 第一卷草稿
 - 正文页脚 `1` 对应的可能是物理第 3 张纸（前言用了 `i`、`ii`）。这是分册书的常态，PDF 阅读器显示的页码是物理页序，两者本来就不同
 - `noll` 区的页**算进** `{P}`（它们物理存在，只是不印号），但不占任何 `{p}` 序号
 
-### （四）并写 `@@ begin page{…} full{t} color{X}`
+### （四）并写 `@@ begin page{…} full{t} font{…} color{X}`
 
 封面／扉页最常要的两件事是「**单独一页**」和「**不写页码**」。这两个诉求现在一行说完：
 
@@ -1056,15 +1056,16 @@ note: 第一卷草稿
 @@ end page full
 ```
 
-**并写就是嵌套的简写**。`@@ begin page{noll} full{t}` 实际展开成 `page` 套 `full` 两层容器（一层一个 div），书写顺序锁死为 `page → full → color`（也是嵌套顺序）：
+**并写就是嵌套的简写**。`@@ begin page{noll} full{t}` 实际展开成 `page` 套 `full` 两层容器（一层一个 div），书写顺序锁死为 `page → full → font → color`（也是嵌套顺序）：
 
 | 家族 | 加的东西 | 生效范围 |
 |---|---|---|
 | `page{noll\|1\|i\|I}` | 断页 + 页码体系 | 打印／PDF |
 | `full{t\|m\|b}` | 撑满页心 + 垂直定位 | 打印／PDF |
+| `font{"字体名" 字号}` | 块内字体与字号（v2.33.0） | 预览／导出／打印／Word |
 | `color{X}` | 继承色 | 预览／导出／打印 |
 
-- **书写顺序锁死 `page → full → color`**：展开后的嵌套顺序就是书写顺序。写反了（如 `@@ begin full page`）整行按原文露出，不猜意图；`color` 的色值写 `{r}` 或裸写 `r` 都行
+- **书写顺序锁死 `page → full → font → color`**：展开后的嵌套顺序就是书写顺序。写反了（如 `@@ begin full page`、`@@ begin color r font{12}`）整行按原文露出，不猜意图；`color` 的色值写 `{r}` 或裸写 `r` 都行
 - **end 也是集合并写（v2.19.0）**：`@@ end X` 只关 X，`@@ end X Y` 同关 X 和 Y，关剩下的家族**继续收内容**（后续内容按剩余层级重开内层容器）。end 成员的书写顺序无所谓；end 了没开的家族整块 fail-closed。上面示例里 `@@ end page full` 一次关两层，拆成 `@@ end full` 换行 `@@ end page` 也等价
 - **`fill` 不参与并写**：它要横向分栏，`full` 要纵向居中，两种布局意图压不进同一个元素。要「整页 + 左右分栏」就嵌套写（见下）
 - **noll 区标题不进目录（v2.19.0）**：目录只收编了号的区的标题——`noll` 区（如封面）的 h1/h2/h3 不出现在目录里，后面的标题编号也不受它影响
@@ -1073,7 +1074,7 @@ note: 第一卷草稿
 
 1. **同族一律不许自己套自己**——`full` 套 `full`、`page` 套 `page`、`fill` 套 `fill`、`color` 块套 `color` 块都算违规。套了自己，外层会被内层的 `@@ end` 提前关掉，标记直接印到纸上（实测）。`color` 不需要套自己：行内 `@@ color r{文字}` 本来就是就近覆盖。
 2. **主链严格递增：`page`（最外）> `full`（中）> `fill`（最内）**——不管嵌套几层、中间缺谁，出现的都要保持这个相对顺序。`page` 哪怕只和 `fill` 嵌套，`page` 也必须是外层。跳级合法（`page` 直套 `fill`、`full` 直套 `fill` 都行），逆序不行（`fill` 里套 `full`、`full` 里套 `page`）。
-3. **`color` 不占主链**——它只改颜色、不布局，与任何家族自由组合、放哪层都行：`color` 块里套 `full`、`fill` 栏里套 `color` 都正常。
+3. **`color` 与 `font` 不占主链**——`color` 只改颜色、`font` 只改字体与字号，都不建立新的布局容器，与任何家族自由组合、放哪层都行：`color` 块里套 `full`、`fill` 栏里套 `font` 都正常。两者唯一的硬约束是**并写时的先后**：`font` 必须写在 `full` 之后、`color` 之前（字号决定断行与页数，度量先于上色）。
 4. **违规的可见形态**：begin 行与配对的 end 行**都**按原文露出（对称、不吞字），中间内容照常渲染。
 
 **并写外层 + 嵌套内层**（扉页左图右文，整页居中且不编号）：
@@ -1089,6 +1090,27 @@ note: 第一卷草稿
 ```
 
 **fail-closed**：同族重复（`page{noll} page{1}`）、书写顺序错（`full page`）、参数非法（`page{x}`、`full{q}`、`color zz`）、未闭合（关剩家族没关完）、end 了没开的家族、嵌套违规——标记行按原文露出（嵌套违规时 begin/end 成对露出），内容照常渲染，一个字段都不猜。
+
+### （五）块级字体 `@@ begin font{"字体名" 字号}`
+
+排版面板按**元素类型**改字体（正文一套、各级标题各一套）；`@@ begin font` 改的是**某一段正文**——一本书里夹一页引文用仿宋、一段谱例用等宽，用它比在面板里调全局更省事。
+
+```
+@@ begin font{"Microsoft YaHei Light" 10.5}
+这一段用雅黑 Light、10.5 pt，到 `@@ end font` 为止
+@@ end font
+```
+
+- **字体名**：名字里有空格就用引号包起来；没空格可以裸写（`font{楷体 10.5}`）
+- **字号**：**单位 pt**，写 `12pt` 或只写 `12` 都行（无单位即 pt）；范围 **6–72**，与排版面板同界；写 `px`、`em` 一律判非法
+- **token 顺序不限**：`{12pt 楷体}` 与 `{楷体 12pt}` 等价——**最后一个看起来像数字的 token 当字号，其余拼成字体名**
+- **两项至少写一项**：只写字体（`font{楷体}`）＝只换字体、字号不动；只写字号（`font{12}`）＝只换字号、字体不动。两项都不写整块 fail-closed
+- **字重按字体文件的真值生效**：写 `Microsoft YaHei Light` 得到的就是 Light 那个面（不是把雅黑压细），同族的 `Semibold`、`Black` 同理——本机装了哪个面就能用哪个面
+- **作用面**：预览、HTML 导出、打印／PDF、Word(.docx) 四处一致；Word 里也落到 run 级字体，改完还能继续编辑
+- **块内字号是统一的**：块里的 h1~h6、代码、表格单元格一律用这一个字号，不按各自的元素档位再分（这是刻意的取舍——「这一段整体放大」比「标题相对正文再放大一级」更符合临时改版的意图）
+- **嵌套**：可与 `page`／`full`／`color` 并写或嵌套，位次见上一节；同族不许自己套自己
+
+fail-closed 两种：参数解析不出（D215）、`@@ end font` 没写（D216）——标记行都按原文露出，内容照常渲染。
 
 ## 十二、缩进包围块 `<<< ... <<<`
 
@@ -1372,7 +1394,8 @@ AI 解释（批注弹窗内一键按钮）可请 AI 解读当前标注片段。�
 | `^{内容}` / `_{内容}` | 上标 / 下标（角标）：正文直写、不用 `$`；须紧跟花括号，不跨行、不嵌套 | 「基础语法 · 上下标」 | Super / subscript |
 | `@@ color x{内容}` | 行内文字着色；x = 简写字母（`r g b y o p c m k w a`）或 3/6/8 位 HEX（不带 `#`，8 位末两位是透明度） | 「基础语法 · 文字颜色」 | Inline text colour |
 | `@@ begin color x` … `@@ end color` | 块级着色，块内可再用行内写法局部覆盖（花括号写法 `@@ begin color {x}` 等价） | 「基础语法 · 文字颜色」 | Block colour |
-| `@@ begin page{noll} full{t} color{r}` … `@@ end <关剩的>` | 并写：嵌套的简写，展开成 page＞full＞color 嵌套容器（书写顺序锁死）；end 也是并写——`@@ end X` 只关 X、`@@ end X Y` 同关多个、关剩的继续收内容；`fill` 不参与（用嵌套）。嵌套：同族禁套、主链 page＞full＞fill 严格递增、color 任意层 | 「并写」 | Combine containers |
+| `@@ begin font{"字体名" 字号}` … `@@ end font` | 块级改字体与字号：字体名带空格要加引号、没空格可裸写；字号**单位 pt**（`12` 即 `12pt`），范围 6–72，`px`／`em` 判非法；token 顺序不限，最后一个数字 token 当字号；两项至少写一项 | 「块级字体」 | Block font override |
+| `@@ begin page{noll} full{t} color{r}` … `@@ end <关剩的>` | 并写：嵌套的简写，展开成 page＞full＞font＞color 嵌套容器（书写顺序锁死）；end 也是并写——`@@ end X` 只关 X、`@@ end X Y` 同关多个、关剩的继续收内容；`fill` 不参与（用嵌套）。嵌套：同族禁套、主链 page＞full＞fill 严格递增、font 与 color 任意层但 font 须在 color 之前 | 「并写」 | Combine containers |
 | `$...$` / `$$...$$` | 行内 / 块级 LaTeX 公式 | 「数学公式」 | Inline / block LaTeX |
 | `<<< ... <<<` | 缩进包围块：块内容以上一段的缩进位置为起点整体右移；紧邻连续块逐级递进，空行/其他块打断 | 「缩进包围块」 | Indent block |
 

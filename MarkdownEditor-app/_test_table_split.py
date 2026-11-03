@@ -17,7 +17,7 @@ function check(name, cond, detail) {
   if (cond) { PASS++; console.log('PASS ' + name); }
   else { FAIL++; console.log('FAIL ' + name + (detail ? ' :: ' + detail : '')); }
 }
-''' + grab('escapeHtml') + grab('escAttr') + grab('sanitizeUrl') + grab('splitRow') + grab('parseInline') + grab('parseTable') + r'''
+''' + grab('escapeHtml') + grab('escAttr') + grab('sanitizeUrl') + grab('_tickScan') + grab('splitRow') + grab('parseInline') + grab('parseTable') + r'''
 // ---- T1: 行内代码内的 \| 不切列，还原为字面 | ----
 var r1 = splitRow('| A | B | 围栏错配+引用表`\\|`切列已修）；待后台手动四步发布 |');
 check('T1 格数=3（不多切）', r1.length === 3, 'n=' + r1.length);

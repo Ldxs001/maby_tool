@@ -15,7 +15,10 @@ const { parseMarkdown } = require('./md-parser.js');
 const html = fs.readFileSync('markdown-editor.html', 'utf8');
 const m = html.match(/function splitBlocks\(src\)\{[\s\S]*?return blocks;\s*\n  \}/);
 if (!m) { console.log('FAIL  splitBlocks 函数抽取失败'); process.exit(1); }
-const splitBlocks = new Function('return (' + m[0].replace(/^function /, 'function ') + ')')();
+/* splitBlocks 依赖 _fenceStep（fence 状态机），必须一并抽出来放进同一闭包 */
+const fm = html.match(/function _fenceStep\(line, st\)\{[\s\S]*?\n  \}/);
+if (!fm) { console.log('FAIL  _fenceStep 函数抽取失败'); process.exit(1); }
+const splitBlocks = new Function('return (function(){' + fm[0] + '\nreturn (' + m[0] + ');})()')();
 
 let pass = 0, fail = 0;
 function t(name, fn) {

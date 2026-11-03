@@ -167,9 +167,11 @@ try:
               "正=%s 1.=%s" % (r["pX"], r["li1X"]))
         check("<<< 阶梯边界 0/0/37.33px（px 域叠加）",
               r["blks"] == [0, 0, 37], str(r["blks"]))
-        # 第三层：pv 内边距 32 + 块边界 37 + ul 档 37.33 ≈ 106.67
-        check("第三层「+」= 块边界+档（≈107px）",
-              r["plusX"] is not None and abs(r["plusX"] - 107) <= 2,
+        # 第三层：块边界 37 + ul 档 37.33 ≈ 75（v2.32.0 起关参考线时
+        # #preview 宽=版心、padding:0，原先那 32px 网页内衬不再存在，
+        # 旧断言 107 = 32+37+37.33 已失效）
+        check("第三层「+」= 块边界+档（≈75px）",
+              r["plusX"] is not None and abs(r["plusX"] - 75) <= 2,
               "+=%s" % r["plusX"])
 
         # --- 导出 HTML：ts-style px 绝对值随导出，无 em 漂移 ---

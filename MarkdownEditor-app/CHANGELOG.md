@@ -11,6 +11,288 @@
 
 ---
 
+## v2.34.0（2026-11-04）
+
+**本次变更：排版单位口径统一——字号一律 pt，段间距一律「倍」，用户可见面不再出现磅 / em / px 混说**
+
+**变更**
+
+- **字号单位标注**：现象——排版面板 12 处字号输入只有 placeholder 一个「磅」字，填数后单位即消失；同一条能力的 `@@ begin font` 语法提示与 D215 报错却写「6–72pt」，面板与语法两套说法。根因——单位只写在占位符里，没有固定后缀，也没有一处说明把它钉死。修法——12 处字号输入改为固定后缀 `pt`（含公式 KaTeX / 图题 / 表题），placeholder 由「磅」改「自动」（与左侧字体下拉的「默认」不再撞词），字体卡片头补一次性说明「字号单位 pt，1 pt = 1 磅」；页码字号后缀同步由「磅」改 `pt`。渲染口径零改动，只动标注。
+- **段间距单位**：现象——面板同一格里 `placeholder="em"` 与后缀 `<i>em</i>` 双标，说明文字又写「单位 em＝正文字号」。修法——去掉双重标注只留后缀「倍」，说明改「1 倍 = 一个正文字号高」，数值语义不变（内部仍按正文字号换算）。
+- **术语收口**：i18n 删掉死键 `"磅": "pt"` 与已被卡片头取代的旧说明行条目，中文界面此后不再出现「磅」字——只在卡片头保留一次「1 pt = 1 磅」的等价桥接，之后全工具一个词。
+
+**说明**
+
+- 纸张与页边距维持 **mm**（物理纸张惯例）、图片输出维持「像素 / dpi」、段落缩进维持「字符」——三类语义各自独立，不并入 pt。
+- `px` 只存在于 CSS 与几何计算层，不进入任何 placeholder、title、提示文字；参考线四边距标注本来就是 mm。
+
+**测试**
+
+- **过期断言随实现更新（六处，均非本次功能改动）**：`splitBlocks` 抽取未带新依赖 `_fenceStep` → 两个 cjs 全项 ReferenceError（`_test_splitblocks_wrap` / `_test_v2181_splitblocks`，改为同闭包并抽）；`ind-blk` 内联缩进自 v2.13.x 起由 em 改 px 直写 → `_test_persist` / `_test_ind_apply` 仍断言 `2em` 与已删除的 `__IND_EM__`（改判「px 值 + 字符数线性」「等于 `__IND_PX__.li`」）；v2.32.0 关参考线后 `#preview` 宽=版心、`padding:0` → `_test_indent_align` 第三层几何 107→75px；v2.26.8 起 `PagedConfig` 为 `auto:false` 且 polyfill 内联串不再含 `PagedConfig||{auto` → `_test_v2191_filler` 三段顺序锚失效（改判「预置/回填各恰一处 + 手动 preview 恰一处」）。
+- 断言更新只改锚串与判据基准（即时生效、缩进档生效、回填幂等三条语义不变），不删用例、不放宽到「有值即可」。
+
+**验证**
+
+- 新增 `_probe_units.py`（playwright 真实浏览器）9/9 PASS：pt 后缀 13 处、`placeholder=磅` 归零、段间距后缀为「倍」、字号框可输入、无行级横向溢出、卡片头带说明、无页面错误。
+- `_test_paged_e2e.py` 回归 64 项 5 FAIL，与基线同数同项（E7 / E24 / E36 / E43 / E44），无新增。
+- 使用指南「九、排版」同步三处：字号单位说明、标记槽 pt 值、段间距倍数口径。
+
+---
+
+## v2.33.0（2026-11-04）
+
+**本次变更：字体字重按字体文件真值生效；新增 `@@ begin font`；导出 HTML 断行口径统一**
+
+**新增**
+
+- **`@@ begin font{"字体名" 字号}` … `@@ end font`**：块级临时改字体与字号。字体名可加引号也可裸写（`font{楷体 10.5}`，最后一个 token 视为字号），token 顺序不限（`{12pt 楷体}` 同样成立）。字号只收 pt（无单位即 pt），范围 6–72 与排版面板同界，px/em 判非法。两项至少要有一项，否则整块 fail-closed、标记行原样露出（错误码 D215/D216）。
+- **并写位次**：`page → full → font → color`。字重与字号决定度量（断行、页数），比纯上色的 `color` 更靠内。`@@ begin page{noll} font{"楷体" 14pt} color{#c0392b}` 一行成立，`end` 仍为集合语义。
+- **三个通道同源生效**：预览 `#preview .mde-font[data-ff] :is(...)`（特异性 1,2,1）、打印与导出 HTML `.markdown-body .mde-font[data-ff] :is(...)`（0,3,1）。容器同时写 CSS 变量（给 `:is()` 规则）与真实属性（给 docx 与导出 HTML 的解析）——只写一种必然有一头失效：内联无 `!important`，压不过排版面板给 `p/h1…` 设的 `!important`（1,0,1）；而只写变量，docx 读不到。
+
+**修复**
+
+- **字重选了不生效且无提示**：旧 `/api/fonts` 把注册表 value 名按 `&` 拆开直接当字体名返回，于是 `"Microsoft YaHei Light"` 与 `"Microsoft YaHei"` 并列。实测（DOM 宽度判定，100px「永和九年岁在癸丑AAA111」）：`font-family:"Microsoft YaHei Light"` → 1119.20（命中 Light）；`font-family:"Arial Bold"` → 1187.02（= sans-serif，静默回落）；`font-family:"Arial"+font-weight:700` → 1172.47（命中）。同一个「带样式后缀的名字」，Light 有效、Bold 无效——非 RIBBI 字重是独立 family 名，RIBBI 不是，靠词表猜后缀必然出错。
+- **改为读字体文件自身的 name / OS/2 表**：取 `fam1`（name ID 1）、`sub2`（ID 2）、`full`（ID 4）、`usWeightClass`（OS/2 偏移 4）。CSS 写 `font-family:'<fam1>',sans-serif` + `font-weight:<usWeightClass>`，按 `(fam1, weight, italic)` 去重后共 764 个真实面（旧口径 482 个「名字」）。判例：`msyhl.ttc` 的 `usWeightClass` 是 **290** 而不是 300，取真值而不写整百。不引入 fontTools——便携发行版 `python/Lib/site-packages` 里没有它，为读三个表拉 10MB 依赖不划算；改为自行解析 sfnt/ttc 表目录，只 seek 读 name 与 OS/2，全量 0.55s，结果落 `runtime/fonts-cache.json`（键为注册表条目数 + 文件 mtime 之和，装删字体自动失效）。
+- **字体下拉值编码**：`<CSS 字体栈>|<weight>|<italic>`。旧配置没有后两段，`_ffParts` 返回空、生成结果与从前逐字节相同；选中态按「老值是某个新选项值的前缀」认一次，不静默改写配置。
+- **导出 HTML 与预览、打印不同源**：`th,td` 补 `overflow-wrap:anywhere`；`pre` 去掉 `overflow:auto`、改 `white-space:pre-wrap; overflow-wrap:anywhere`。此前长 URL 表格在导出件里宽 2005px 而 `body` 只有 658px，既未折行也没有滚动容器，整页被撑出横向滚动。公式保留 `overflow-x:auto`（数学式断开即错，打印侧同此处理）。
+- **docx 的块级字体**：`_apply_run_style` 合并 `.mde-font` 容器的样式上下文（`threading.local`，逐导出隔离），元素自身声明优先。前端 `inlineStylesInto` 已把计算样式内联到每个元素，这条是第二道保险——覆盖 tail 文本挂在无 style 容器等情形。
+
+**说明**
+
+- docx 侧字体命名不需要拼后缀：Light 面的 `fam1` 本身就是 `Microsoft YaHei Light`，Word 字体列表里有这一条；Bold 面的 `fam1` 是 `Arial`，靠 `w:b` 表达。两条既有规则（取第一个真实名、weight ≥ 600 加粗）恰好都正确，故未改动。
+
+**测试**
+
+- 新增 `_probe_v233_weight2.py`（DOM 宽度判命中）、`_probe_v233_weight3.py`（双保险栈 4/4）、`_probe_v233_facename.py`（name 表）、`_probe_v233_fontprev.py`（预览 19 项）、`_probe_v233_fontprint.py`（打印 + PDF 15 项）、`_probe_v233_export.py`（HTML 12 项 + docx 6 项），全部 PASS。
+- PDF 实据：出现 `MicrosoftYaHeiLight` 字体名、块内文字 11.86pt（＝12pt）、块外 14pt、块内标题未按 ts 的 22pt 输出。
+- `_test_v230_native_print.py` 36/36 PASS；`_test_paged_e2e.py` 64 项 5 FAIL（E7/E24/E36/E43/E44），与 v2.32.0 基线同数同项。
+
+---
+
+## v2.32.0（2026-11-04）
+
+**本次变更：预览不再显示页边距外的溢出；表格与代码块的断行口径三处统一**
+
+**变更**
+
+- **预览只显示版心**：不开「页边参考线」时 `#preview` 宽等于版心，`@@ begin full` 块靠负边距向两侧长到纸宽；溢出部分落在预览容器的横向滚动区里，而 `scrollLeft` 不能为负——左溢出被切、右溢出滚一滚就看得见，表现即「左侧按版心切、右侧不切」。改为关参考线时 `#preview{overflow-x:clip}`：full 块的负边距、`o/c/f` 与九宫定位仍以整张纸为基准计算，只由容器裁掉左右各一个 `ml`/`mr`。`clip` 不建立滚动容器，不产生横向滚动条。开参考线时不加此条。实测关：`#preview` 986px、`overflow-x:clip`、full 块 1123px 居中溢出被裁；开：1123px = 纸宽、`visible`、full 块与原 `#preview` 完全重合，正文宽恒为 986px。
+- **撤销 v2.31.0 的预览栏左右补白**：那段 padding 是为「让溢出的部分看得见」加的；溢出不再显示后，它只会把版心挤偏。实测 `#previewPane` 的 `scrollWidth` 1780 = `clientWidth` 1780，无横向滚动条。
+
+**修复**
+
+- **表格被不可断长串撑破版心**：单元格里有长 URL 或连续英文时，`table-layout:auto` 的 min-content 由最长不可断串决定，与 `@@ table{N}` 无关。版心 986px 实测：长 URL 表 1754px、220 个连续 `A` 2224px，长中文（可断行）986px。预览 `th,td` 补 `overflow-wrap:anywhere`。
+- **打印侧同一缺陷**：`PAGED_BASE_CSS` 的 `th,td` 从来没有断词属性。同文件上方注释写着「keep-all+anywhere」，规则里并不存在——`_test_paged_e2e.py` 的 E7 长期失败即测的这句注释承诺。补 `overflow-wrap:anywhere`；`keep-all` 未加，它会让中文长句不在字间断行、反而更易溢出，需单独验证后再定。
+- **代码块预览与打印不同源**：预览 `pre{overflow:auto}`，盒 986px、`scrollWidth` 1616px，630px 内容藏在内部滚动里；打印侧 `white-space:pre-wrap; overflow-wrap:anywhere`，折行全可见。预览改为去掉 `overflow:auto` 并补同两条，与打印侧逐字同口径。实测 `scrollWidth` 984 = `clientWidth` 984。
+- **出片复验**：URL 行右沿 501.5 ≤ 544.25（版心右沿），代码折 4 行，溢出 span 0 个。
+
+**说明**
+
+- `anywhere` 的代价是长 URL 表格自动分配列宽时窄列被压到单字宽（实测 939/46，「备注」竖成一条）。用 `@@ table{100l:r(70|30)}` 指定列宽可解，实测 690/296。
+- 导出 HTML 的 `th,td` 仍未加 `anywhere`，与本版口径不一致。产物侧实测：长 URL 表格在导出 HTML 里宽 2005px、右沿 2376px，而 `body` 只有 658px，整页被撑出横向滚动且表格越过正文右界——既未折行，也没有滚动容器。
+
+**测试**
+
+- `_test_v230_native_print.py` 36/36 PASS；`_test_paged_e2e.py` 64 项 5 FAIL（E7/E24/E36/E43/E44），与 v2.30.0 基线同数同项。
+
+---
+
+## v2.31.0（2026-11-04）
+
+**本次变更：整页背景图改由 `<img>` 承载；预览栏左右溢出对称；去掉打印中间态**
+
+**修复**
+
+- **整页背景图在不勾「背景图形」时整页消失**：同一份产物只切换该开关做对照——`@page` 的 `background-color` 两档都在，`@page` 的 `background-image` 不勾选时整条不绘制（封面四角全白、正文页纸色仍在），且无任何报错。Chrome/Edge 打印对话框默认不勾此项，因此用 `@page` 承载封面图等于默认失效。改为 `@page <name>{margin:0}` 让该页内容区等于整张纸，块固定为纸宽 × 纸高，内含真实 `<img>`——元素内容不受背景开关影响。`o/c/f` 直接映射 `object-fit` 的 `none`/`cover`/`fill`，九宫直接映射 `object-position`，不再换算成 `background-size`/`background-position`。实测勾与不勾背景图形两份 PDF 字节完全相同，P1 四角为图像内容、P2 起四角为纸色。
+- 随之删除为 `@page` 背景图服务的 base64 内嵌与 PIL 降级整条链路（`_img_data_uri`）。该链路只解决「图怎么画出来」，而失效点在「开关不勾就不画」；改走 `<img>` 后不再需要。产物从 258KB 降到 37KB。
+
+**变更**
+
+- **纸色与版心色分离**：元素底色只能画在自身 border-box 内，铺不到页边距，因此纸色改由 `@page{background}` 承载；打印态 `html`/`body` 显式透明，否则更高特异性的 `background-color:!important` 会盖住 `@page`，表现为「整页图铺好了，中间版心一块死板纸色」。该透明规则必须排在纸色规则之后——同特异性 `!important` 后写者胜。
+- **预览栏左右溢出对称**：full 块靠负边距向两侧长到纸宽，`#preview` 只有版心宽且居中，横向溢出落在 `#previewPane` 的 `overflow-x:auto` 里；滚动条只能向右滚（`scrollLeft` 不能为负），左边滚出即够不着。给 pane 补对称的左右 padding（取较大侧边距）。实测窗口 1200 与 1600 两种宽度下，full 块左沿均落在 pane 左沿。（v2.32.0 撤销）
+- **去掉打印中间态**：`@page` 只在打印管线生效，屏幕上的 HTML 永远是连续纸，给不出分页信息；保留一个「看着像、其实不是」的中间态没有意义。点「打印」改为生成打印版后放进屏幕外隐藏 iframe（`fixed` + `left:-300vw`，1200×900——尺寸不能给 0，否则 Chromium 按 0 宽布局、页数算错），直接调起系统打印，预览栏全程不动。删除 `#pagedWrap`/`#pagedBar`/`#pagedStat`、打印与退出两个按钮、`enterPagedMode`/`exitPagedMode`/`printPaged` 与 250ms 轮询。
+
+**测试**
+
+- `_test_v230_native_print.py` 36/36 PASS（新增 9 条 full 整页断言，改 3 条口径变更断言）。
+- 真实《MDEditor 使用指南》出片 30 页，70 个标题逐个对照 0 缺失。
+- `_test_paged_e2e.py` 64 项 5 FAIL，与基线同数同项。
+
+---
+
+## v2.30.1（2026-11-03）
+
+**本次变更：深色纸铺满整张纸；`full` 背景覆盖整页；点一次「打印」直达系统对话框**
+
+**修复**
+
+- **深色纸只覆盖版心**：`body{background}` 只能画在元素 border-box 内，页边距不属于任何元素，打印后四边留白。改为 `@page{background:#1a1a1c}` + `print-color-adjust:exact`。真实指南 32 页实测四角全深色，且不勾「背景图形」也生效。
+- **`full` 背景图只到版心、右侧留一条纸色**：元素背景同样受 border-box 限制。改为 `@page` 命名页承载（`@page mdefbgN{...}` + `.full-page{page:mdefbgN}`），实测封面四角全是图像内容、P2 起恢复纯纸色且不外溢。负 margin 撑到纸边的方案被证伪：Chromium 打印会裁掉页边距区（四角 0/4）。
+- **`@page` 上写 `background-repeat:no-repeat` 会让整条背景失效**：带这一条时 Chromium 丢弃整条背景规则，无报错，四角全是纸色；去掉即恢复。`cover` 与 `100% 100%` 本身铺满，repeat 无视觉影响。
+
+**变更**
+
+- **点「打印」直接调起系统打印**：生成完自动触发，不再要求用户在中间态里再点一次；分页与页码即刻可见。
+
+**说明**
+
+- 深色纸满版依赖 `print-color-adjust:exact`。该属性下 `@page` 的背景色仍输出、背景图不输出——这是 v2.31.0 改用 `<img>` 的直接原因。
+
+---
+
+## v2.30.0（2026-11-03）
+
+**本次变更：出片路径改为原生 CSS 分页，Paged.js 保留为回退**
+
+**修复**
+
+- **Paged.js 0.4.3 吞内容**：同内容、同纸张、同 CSS 双路对照——Paged.js 路径 15 页只排出 8/21 个 h2、8/25 张表，DOM 里 h2 仅剩 8 个，另有 `height:0` 的空壳页；原生 CSS 路径 57 页、21/21 h2、25/25 表、内容完整到速查表。根因在引擎能力：Paged.js 不实现 `break-after:avoid`/`orphans`/`widows`/`thead` 重复（`createBreakToken` 显式跳过 `avoid`），书册规则骨架全靠这几条，逐轮补丁都在对抗残缺引擎。
+
+**变更**
+
+- `build_paged_html(..., native=...)`：native 分支产出零脚本静态页，`@page` 契约整块替换，Paged.js 分支原样保留作回退。`/api/export-paged` 读 `mode`，`native` 出 `document.print.html`，缺省仍为 `paged`。
+- 引擎能力实测（Edge/WebView2 156）：支持 `@page` 四向 margin box、`counter(page)`/`counter(pages)`、`:left`/`:right`、命名页、`counter(page,lower-roman)`、`thead{display:table-header-group}` 跨页重复、`break-after:avoid`、`print-color-adjust:exact`；不支持 `target-counter`（目录页码）与 `leader()`，元素上的 `counter-reset:page` 不重置页序。
+
+**修复**
+
+- **body 默认 margin 8px**：独占页块被顶出 4px，封面后多一张整页空白。`@media print{html,body{margin:0!important}}`。
+- **打印态 body 宽度按纸宽解析**（而非版心）：表格与代码块右侧出纸被裁。`@media print{body{width:<版心>mm!important}}`，版心宽参数化。
+- **`overflow-wrap:anywhere` 用在 td/th**：min-content 降到单字符，窄列里的 `Task` 被拆成 `Tas/k`，改 `break-word`。（v2.32.0 按实测重新评估：`anywhere` 在窄列与 `break-word` 表现一致，改用 `anywhere`）
+- **`.full-page` 双断页**：自身 `break-after:page` 与后续块 margin 叠加会各断一次。改为自身 `break-before` + 下一块 `break-before:page`，首块撤销 `break-before`。
+
+**测试**
+
+- 真实指南 54 页、零空白页、页码 54/54、文字右溢出 0、跨页表头在 P2/P3 重复。
+- `_test_v230_native_print.py` 25/25 PASS。
+- `_test_paged_e2e.py`：改动前 133 = 64 项 5 FAIL，改动后 134 = 同样 5 FAIL（E7/E24/E36/E43/E44），零回归。
+
+**说明**
+
+- 本版已知限制：封面背景只在版心内；目录页码拿不到（`target-counter` 不支持）；页区罗马数字不从 i 起（`counter-reset` 对 page 无效）。前两条由 v2.30.1 与 v2.31.0 解决。
+
+---
+
+## v2.29.7（2026-11-03）
+
+**本次变更：一页装得下的表整表不拆；断页残迹按实测自愈**
+
+**修复**
+
+- **小表被拆成「首片一两行 + 续片独占页 + 约 200mm 空白」**：v2.26.8 的静态预拆按「页位置模拟」决定拆点，而模拟与 Paged.js 实排存在整页级偏差——模拟把 `break-before:page` 之后的续片起点算在**同一页**，实排里它必然起新页，于是后继小表被误判「距页底只装得下 1 行」而拆开；实排里那张表本可在下一页顶部完整放下。改为表自身高度优先：行高和 + 表头 + margin ≤ 页心时不拆不推页，钉 `colgroup` 并加 `data-mde-keep` + `table[data-mde-keep]{break-inside:avoid}`，由 Paged.js 原生分页接管。真实指南实测 P23 页底 74.2mm → 241.7mm，总页数 58 → 55，隐藏空页 5 → 1。
+- **浅页回拉** `__pgPullBack`：分页完成后对尾部留白超过阈值的可见页，把后页首部「明明放得下」的原子块搬回（成对处理 keep-with-next 组合、跳过 frag/orphan/headfrag 包装、逐块放得下才搬、搬后复测溢出可回退、搬空的页隐藏），不触碰 Paged.js 的断点决策。
+
+**说明**
+
+- 预拆的三项职责经 A/B 对照复核：钉列宽未兑现（12 处列宽漂移）、表头重复多余（CSS 的 `thead{display:table-header-group}` 已实测 9/9 原生重复）、决定拆点有害（模拟偏差导致上述碎片）。同文档同路径下「开预拆 55 页 / 标题 73/73 / 丢行 0」与「关预拆 55 页 / 73/73 / 丢行 0」逐项相同，此前「关预拆会截断大表（17 页 vs 58 页）」的结论系探针采样过早，已推翻。
+- 指南仍有 7 处浅页（封面、P12、P16、P17、P20、P28、P55）。其中 P28 是 H2 后跟 238.5mm 长列表，列表剩余 217mm > 页剩余 203.9mm，属 Paged.js 对不可拆块的保守推页，非缺陷。
+
+**测试**
+
+- `_test_v2296_frag_page.py` 18/18（真实指南 ①..⑤ 区域 pad ∈ {0,9,15,18}，浅页 0、`__pgMoveErr` 空、页首续表带表头、6 行不丢不重）。
+- 全量回归 19 套 PASS。
+
+---
+
+## v2.29.6（2026-11-03）
+
+**本次变更：预拆模拟的整页级误差归零；拉不动的续片允许整盒搬迁**
+
+**修复**
+
+- **A 段（治本）**：`onePass` 对 `data-mde-frag`/`data-mde-orphan` 强制断页单元无条件起新页（`cutY = b.top - mt`、`pgStart = b.top`，并复位 `lastTbl`/`tblCont`）。原实现「装得下就同页 continue」使模拟坐标比实排提前最多一整页，误差累积到后续小表即触发误拆。H1 与 `.full-page` 保持原路径。
+- **A′ 段**：Paged.js 对首片二切会丢表头。`splitTable` 给首片套 `div[data-mde-headfrag]`（`break-inside:avoid`、`forced=false`），`onePass` 的 drill 也把该壳当原子单元。
+- **B 段（兜底）**：`__pgFixTableFrags` 在拉行循环前加整盒搬迁——当前页一行都拉不回（`pairPulls == 0`）且续片页只有续片一个可见块时，把首片整盒搬到续片页首，再重算空间继续拉行；搬空的页标记隐藏。守卫：非首页、无 `.full-page`/`.page-region`。
+- **tbody 守卫**：拉行遇首片无 `tbody` 时先克隆 `colgroup` 并建 `tbody`，否则行无处可放。
+
+**测试**
+
+- `_test_v2296_frag_page.py` 真实指南 ①..⑤ 区域 pad ∈ {0,9,15,18}：浅页 0、`__pgMoveErr` 空、页首续表带表头、6 行不丢不重，18/18。
+- 真实指南 57 页审计：`hidden=1`、`moveErr=None`、`movedHeads=0`，「续片独占页 + 200mm 空白」形态已消除。
+
+**说明**
+
+- 残留一处浅页：P23 只有「你写 | run 收到」表（页底 74.2mm），尾部空白 172mm。链条为「预拆误判 → 续片 `break-before:page` 强制断页 → 事后拉行拼回表」，表完整了但强制断页的事实残留。由 v2.29.7 的表自身高度优先解决。
+
+---
+
+## v2.29.5（2026-11-03）
+
+**本次变更：跨页表格的残片拼页自愈**
+
+**修复**
+
+- **孤行页 + 200mm 空白 + 带表头残片页**：v2.26.8 预拆模拟与 Paged.js 实排存在一行级漂移——模拟判定首片装得下，实排溢出一行，Paged.js 对首片原生二切（孤行落单页、续行无表头），续片（克隆表头 + `break-before:page`）又强制起新页。新增 `__pgFixTableFrags`，在分页后、孤标题搬家前、页码回填前运行：前页尾表与后页首表按 fail-closed 判同表续片（列数相同，且表头同文或后表缺表头；前表缺头而后表有头视为独立表），通过后把后表 `tbody` 行逐行搬回前表直到装不下（前表无 `colgroup` 则从后表克隆以钉住列宽），后表搬空后连壳移除、缺表头者从前表克隆补上；被搬空的页隐藏（首页、`.full-page`、`.page-region` 豁免），记入 `__pgHiddenPages`。
+- 思路是不修预拆精度，而让漂移的后果无害化：无论模拟算得准不准，实排结果都会被自愈成一张完整的表。
+- 真实指南实测：P54 从「45.9mm 残片 + 201mm 空白」变为「157.7mm 整片、带表头」，空白消失。
+
+**测试**
+
+- `_test_v2295_table_frag.py` 9/9（G 变体最小复现：行不丢不重、续表页首带表头、无残片拼缝、无可见空页、`__pgMoveErr` 空）。
+- `_test_v2292_vega_keep.py` 17/17（新增 K8 无表格残片拼缝、K9 空页已隐藏）。
+
+**说明**
+
+- 拼页只能治「前页还有空间」的漂移。前页被后文填满、一行都拉不回时无效，属 v2.29.6 B 段的整盒搬迁范围。
+
+---
+
+## v2.29.3（2026-11-03）
+
+**本次变更：标题不落页尾改为分页后定点搬运；代码作图尺寸口径统一；贴页背景补跑**
+
+**修复**
+
+- **标题孤在页尾、图在下一页**：v2.29.2 用 `break-inside:avoid` 把「标题 + 紧随块」整组包裹，Paged.js 会把后续内容一并拖走，且真实环境（执行点全部运行、58 页）里仍出现孤标题。改为分页完成后定点搬运标题，并删除 v2.29.2 的「下一页装不下就不动」豁免——正是该豁免在真实文档触发孤标题。搬迁后溢出走级联（溢出页尾部可见块整盒顺延，守卫 12 次 / 200 次迭代，`.full-page` 整页块与末页止步，守卫耗尽记 `__pgMoveErr`）。
+- **`full` 背景贴在页盒上的时机丢失**：`__pgBgOnce` 独立 tick 只有 100×60ms ≈ 6s，分页流程在 v2.29.3 变长（几何轮询最多 9s + 标题搬家）后 tick 烧尽，块还没进页盒，表现为 `data-bg-done=0`、页盒 `background:none`。修法：`__pgBgOnce` 挂到 `window`（原在 IIFE 内，外部引不到），并在几何轮询完成后补跑 40×120ms ≈ 5s，双保险。
+- **四种代码作图尺寸口径不一**（Mermaid / Graphviz / WaveDrom / Vega）：容器与 `svg` 统一到与本地图片 `{N}` 同一套规则，预览 `.diagram` 与打印侧共用一条。
+
+**变更**
+
+- 分页预览里 `.pagedjs_page` 不受 `@media print` 约束，图表右上角 `⋯` 按钮会被克隆上纸面。`build_paged_html` 在产物里剥掉 `div.mde-fig-acts`。
+
+**测试**
+
+- `_test_v2292_vega_keep.py` 14/14（K3b 判据重构：选择器补 `.mde-fm` 与 `.md-toc-wrap`；非末页留白 > 60mm 时验证「下一页首块是否真的放不进留白」，放不下即合规；目录/元数据/整页壳的页豁免）。
+- 全量回归 16/16 套 PASS。
+- 测试自身两处假失败已修：图表 `⋯` 例外规则含 `.mde-fig-acts` 字样使子串检查误伤（改为先剥 `<style>`/`<script>` 再查）；`Paged.js` 沙箱里两个 `const blocks` 撞名。
+
+---
+
+## v2.29.2（2026-11-03）
+
+**本次变更：Vega 图内文字重叠与图框空余；标题孤行的首版处理**
+
+**修复**
+
+- **Vega 图内文字重叠**（表现为轴标题压在刻度标签上）：根因不在 CSS 布局——vega 用 SVG 表现属性写 `font-size="10px"`（刻度）与 `"11px"`（轴标题），并按这两个字号计算轴布局；而 `mermaid.min.js` 渲染时向 `document` 注入全局 `text{font-size:11pt;font-family:Helvetica}`，11pt = 14.6667px 覆盖了 10px，标签实际变宽而 vega 仍按 25.5px 预留空间，重叠 8px。只要文档里有 Mermaid 图就会触发，这解释了「为什么有时有」。修法：`_vegaSyncText` 把 `font-size`/`font-family`/`font-weight`/`font-style` 表现属性原样搬到 inline style（优先级高于作者规则）。实测重叠标签 2 → 0，计算字号回到 10px。
+- **Vega 外框比图大很多**：`{50}` 只定义容器宽，vega-lite 离散轴默认 `step = 20`，7 个分类合计 198px，而卡片内容宽 306.8px。修法：spec 未指定 `width`/`autosize` 时补 `width:'container'` 与 `autosize:{type:'fit',contain:'padding'}`，并且必须渲染到「宽度 = 内容宽」的宿主层——vega 取 `clientWidth`（含 10px padding），直接渲染会宽出 20px 并撑出横向滚动条。实测 `svg` 306.8 = 内容宽，无溢出。另加 `ResizeObserver`（`data-vg-w` 记渲染宽，差 > 4px 重新 embed，防抖 200ms）。
+- **标题孤在页尾**：`h2,h3,h4{break-after:avoid}` 早已写入打印 CSS，但 Paged.js 不实现它——`createBreakToken` 只认 `page`/`always`/`left`/`right`/`recto`/`verso`，`avoid` 被显式跳过。改为分页前 `keepHeadings` 把「标题 + 紧随不可断块（图表、图、分栏行、单图片段）」包进 `div[data-mde-keep]`，用 Paged.js 真正支持的 `break-inside:avoid`，且只在两块总高 ≤ 页心时包裹。实测 keep 6 组、孤标题 0、第 18 页标题与图同页。（该方案在真实文档失效，由 v2.29.3 改为定点搬运）
+
+**测试**
+
+- `_test_v2292_vega_keep.py` 12/12。
+
+---
+
+## v2.29.1（2026-11-03）
+
+**本次变更：Word 导出恢复 `@@ begin full` 独占一页；目录不再侵入独占页**
+
+**修复**
+
+- **Word 里 `full` 独占一页与上中下垂直对齐从未生效**：根因三重。其一，前端出件前 `removeAttribute("class")`，docx payload 里 `full-page` 出现 0 次，只剩 `data-full-pos`，旧判定 `"full-page" in class.split()` 是死代码。其二，`full` 被 `div.pblk`（导出后 `div[data-h]`）包着，不在 `markdown-body` 顶层。其三，`python-docx` 的 `add_section()` 返回的是**之后**那一节，旧实现把 `vAlign` 写给了错误的节。修法：按 `data-full-pos`（`t`/`m`/`b`）识别；`_lift()` 拆壳（壳内混排兄弟内容用 `_rebox` 包回原壳以保样式）；`_end_section(val)` 把 `vAlign` 写到段落里的克隆 `sectPr` 并显式 `w:type=nextPage`，承载段落能并进前一段就并掉。文首 `full` 不预加节，文末 `full` 写 body sentinel。
+- **目录侵入 `full` 独占页**：`build_paged_html` 用正则在 `</h1>` 之后插入目录，第一个 `#` 落在 `full` 块里时目录被塞进封面页。改为先定位第一个 `h1`，若落在 `full` 区间（`_full_spans` 按 div 深度配对，不数到第一个 `</div>`）内，插入点改到该块闭合之后。
+
+**测试**
+
+- `_test_v2291_full_docx_toc.py` 15/15：文首 / 中间 / 文末 × `t`/`m`/`b` 全部落对节，相邻两 `full`、只有 `full`、空文档、无 `full` 对照组（单节）均正常；指南真实 payload 从 1 节变为 2 节（封面居中）；LibreOffice 转 PDF 2 页，P1 只有封面。目录侧 3 页 = 封面 / 目录 / 正文，无空白页，`solo` 开与关一致。
+
+**说明**
+
+- 边界：LibreOffice 不还原 `w:vAlign`，文字仍在页顶；Word 支持。不能用 LO 出片当判据。
+- `page-region`（`noll` 封面区）同理可能被目录侵入，未动——整篇被包进 `page-region` 时目录会被推到文末，需单独设计。
+
+---
+
 ## v2.28.0（2026-11-02）
 
 **本次变更：预览页边参考线；`.smdm` 母版与「存为母版」；表格题注与表同宽同边；图表操作菜单与 WaveDrom 偶发空白**

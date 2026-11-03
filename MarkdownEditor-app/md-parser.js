@@ -31,6 +31,180 @@
    填充脚本靠它区分「同一个区的续页」与「另一个区」（两个相邻 {1} 区各自
    从 1 起）。只增不复位——同一次渲染内唯一即可，多处递归解析也不会撞号。 */
 var _pgRegSeq=0;
+/* v2.26.6 full 背景参数解析：{[tmb]:![](图) [o|c|f] [九宫]}。
+   返回 {pos:'t'|'m'|'b', bg:null|{img,mode,pos}}；参数非法返回 null（fail-closed，
+   标记行按原文露出）。':' 是新旧文法判别器：无 ':' 只认老单字符 t/m/b（逐字
+   兼容 v2.13）。mode 短写 o=原始尺寸 c=撑满(cover) f=填充(100% 100%)，长名
+   同义；九宫两字母 l/c/r × t/m/b（背景图在页上的位置，与内容位置 t/m/b 分属
+   两个槽位，勿混）。图片走正文图片同一条 /img?path= 管线。 */
+var FULL_BG_SIZE={o:'auto',c:'cover',f:'100% 100%'};
+var FULL_BG_POS={lt:'left top',ct:'center top',rt:'right top',
+  lc:'left center',cc:'center center',rc:'right center',
+  lb:'left bottom',cb:'center bottom',rb:'right bottom'};
+function _fullParseParam(raw){
+  if(raw===null||raw===undefined){return {pos:'m',bg:null};}
+  var s=String(raw);
+  var ci=s.indexOf(':');
+  if(ci<0){
+    var t0=s.trim();
+    if(!t0){return {pos:'m',bg:null};}
+    if(!/^[tmb]$/.test(t0)){return null;}
+    return {pos:t0,bg:null};
+  }
+  var lp=s.slice(0,ci).trim(),rp=s.slice(ci+1).trim();
+  if(lp&&!/^[tmb]$/.test(lp)){return null;}
+  /* v2.27.0 两种写法并存：
+     ① 完整图片语法 m:![](C:/a/b.png) [o|c|f] [九宫]
+     ② 裸路径       m:C:/a/b.png      [o|c|f] [九宫]
+     裸路径必须先于参数剥离判定，且剥离后剩余段必须仍像路径（含 \ / .），
+     否则 "c" 这种文件名会被误当成 cover 参数剥空。 */
+  var m=rp.match(/^!\[[^\]]*\]\(([^()]*)\)(?:[ \t]+([^ \t]+))?(?:[ \t]+([^ \t]+))?[ \t]*$/);
+  var imgPath=null,tokMode=null,tokPos=null;
+  if(m&&m[1]){
+    imgPath=m[1];tokMode=m[2]||null;tokPos=m[3]||null;
+  }else{
+    var toks=rp.split(/[ \t]+/);
+    if(toks.length>1&&FULL_BG_POS[toks[toks.length-1]]){
+      tokPos=toks.pop();
+    }
+    if(toks.length>1&&/^(o|origin|c|cover|f|fill)$/i.test(toks[toks.length-1])){
+      var restPath=toks.slice(0,-1).join(' ');
+      if(/[\\/.]/.test(restPath)){tokMode=toks.pop();}
+    }
+    imgPath=toks.join(' ').replace(/^["']|["']$/g,'');
+    if(!imgPath){return null;}
+  }
+  var mode='c',pos='cc';
+  if(tokMode){
+    if(/^(o|origin)$/i.test(tokMode)){mode='o';}
+    else if(/^(c|cover)$/i.test(tokMode)){mode='c';}
+    else if(/^(f|fill)$/i.test(tokMode)){mode='f';}
+    else{return null;}
+  }
+  if(tokPos){
+    if(FULL_BG_POS[tokPos]){pos=tokPos;}
+    else{return null;}
+  }
+  return {pos:(lp||'m'),bg:{img:imgPath,mode:mode,pos:pos}};
+}
+/* full 背景属性 + 内联样式：预览/HTML 导出走块衬（同一份内联样式随克隆走）；
+   打印/分页由 Paged.js 后处理读 data-bg-* 贴到页盒（整页含边距），块内联背景
+   在后处理里清 none 防双画。 */
+function _fullBgHtml(bg){
+  if(!bg){return '';}
+  var url='/img?path='+encodeURIComponent(bg.img).replace(/'/g,'%27');
+  return ' data-bg-img="'+url+'" data-bg-mode="'+bg.mode+'" data-bg-pos="'+bg.pos+'"'+
+    ' style="background-image:url(\''+url+'\');background-size:'+FULL_BG_SIZE[bg.mode]+
+    ';background-position:'+FULL_BG_POS[bg.pos]+';background-repeat:no-repeat;"';
+}
+/* ── v2.27.0 @@ table{表参:列宽方案} ──────────────────────────────
+   新增的独立指令，与 @@ caption 同一个记账方式（只作用于紧随其后的那一个
+   表格），但位置相反：table 行在前、caption 行在后，两者可只写其一。
+
+     @@ table{50l:r(50|30|20)}          表宽 50% 左对齐；三列依次 50/30/20
+     @@ table{50l:s(1x30,5x10)}         表宽 50% 左对齐；第 1 列 30%、第 5 列 10%，其余自适应
+     @@ caption{c t s0.3} 表 1 标题
+     | 表头 | … |
+     |------|…|
+
+   表参 = [1..100 的数字][l|c|r]，两段都可省；列宽方案二选一：
+     r(...)  全列方案：按列序每列一项，项数必须 = 表格列数，合计必须 = 100
+     s(...)  指定列方案：第 N 列占表宽 P%；未列出的列自适应；生效列合计 ≤ 85
+   两条硬规矩：任何非法形态 fail-closed（整行按原文露出、表格按原样渲染，
+   不猜不补）；r 与 s 同时出现、或出现其他形态，同样整体作废。
+   为什么 s 的上限是 85：表宽可以小到 30%~50%，留白不足时自适应列会被压成
+   一条缝。按版心 657.6px 折算，15% ≈ 98.6px ≈ 6 个中文字；表宽一半时
+   仍有约 3 字，是"还用得了"的下限。1% 在窄表上只剩 3px，等于删列。 */
+function _tabSpec(raw){
+  if(raw===null||raw===undefined){return null;}
+  var s=String(raw).trim();
+  if(!s){return null;}
+  var w=100,align='',plan=null;
+  var ci=s.indexOf(':');
+  var head=s,body=null;
+  if(ci>=0){head=s.slice(0,ci).trim();body=s.slice(ci+1).trim();}
+  /* 省略表参、直接写方案：{r(50|30|20)} */
+  if(body===null&&/^[rs]\(/.test(head)){body=head;head='';}
+  if(head){
+    var hm=head.match(/^(\d{1,3})?([lcr])?$/);
+    if(!hm||(!hm[1]&&!hm[2])){return null;}
+    if(hm[1]){
+      w=parseInt(hm[1],10);
+      if(!(w>=1&&w<=100)){return null;}
+    }
+    if(hm[2]){align=hm[2];}
+  }
+  if(body!==null){
+    var rm=body.match(/^r\(([^()]*)\)$/);
+    var sm=body.match(/^s\(([^()]*)\)$/);
+    if(rm&&sm){return null;}
+    if(rm){
+      var parts=rm[1].split('|'),cols=[];
+      for(var i=0;i<parts.length;i++){
+        var t=parts[i].trim();
+        if(!/^\d+(\.\d+)?$/.test(t)){return null;}
+        cols.push(parseFloat(t));
+      }
+      if(!cols.length){return null;}
+      plan={mode:'r',cols:cols};
+    }else if(sm){
+      var segs=sm[1].split(','),map=[];
+      for(var j=0;j<segs.length;j++){
+        var t2=segs[j].trim();
+        if(!t2){continue;}
+        var mm=t2.match(/^(\d+)x(\d+(?:\.\d+)?)$/);
+        if(!mm){return null;}
+        var c=parseInt(mm[1],10),pv=parseFloat(mm[2]);
+        if(c<1||!(pv>0&&pv<=100)){return null;}
+        map.push({col:c,pct:pv});
+      }
+      if(!map.length){return null;}
+      plan={mode:'s',map:map};
+    }else{
+      return null;
+    }
+  }
+  return {w:w,align:align,plan:plan};
+}
+/* 把 spec 落成具体列宽。返回 null = 这一处作废（列数不符/合计不合规），
+   调用方负责原文露出。越界的 s 列直接忽略，不计入合计。
+   r 走 table-layout:fixed（全列都有宽度，fixed 才能逐像素兑现）；
+   s 保持 auto——未列出的列要按内容自适应，fixed 会把它们等分掉。 */
+function _tabCols(spec,ncol){
+  if(!spec||!ncol){return null;}
+  /* v2.28.0 「占多宽、靠哪边」与「表格自身排版」分家：
+     box  = width + margin（这块表占的横向地盘）
+     style = table-layout 等真正属于 <table> 的属性
+     有题注时 box 挂到 .mde-tblwrap 上、<table> 填满包裹层——题注才会与表同宽
+     同边。之前 box 写在 <table> 上、wrap 恒占版心，实测 50l 的题注中心偏 +164px、
+     60r 偏 −132px；居中时两中心恰好重合，才一直没被发现。 */
+  var out={fixed:false,widths:[],style:'',box:''};
+  if(spec.w!==100){out.box+='width:'+spec.w+'%;';}
+  if(spec.align==='l'){out.box+='margin-left:0;margin-right:auto;';}
+  else if(spec.align==='r'){out.box+='margin-left:auto;margin-right:0;';}
+  else if(spec.align==='c'){out.box+='margin-left:auto;margin-right:auto;';}
+  if(!spec.plan){return out;}
+  if(spec.plan.mode==='r'){
+    if(spec.plan.cols.length!==ncol){return null;}
+    var sum=0;
+    for(var i=0;i<spec.plan.cols.length;i++){sum+=spec.plan.cols[i];}
+    if(Math.abs(sum-100)>0.01){return null;}
+    out.fixed=true;
+    out.widths=spec.plan.cols.slice();
+    out.style+='table-layout:fixed;';
+    return out;
+  }
+  var map={},sum2=0;
+  for(var j=0;j<spec.plan.map.length;j++){
+    var it=spec.plan.map[j];
+    if(it.col>ncol){continue;}
+    map[it.col]=it.pct;
+    sum2+=it.pct;
+  }
+  if(sum2>85.01){return null;}
+  for(var k=1;k<=ncol;k++){out.widths.push(map[k]||0);}
+  return out;
+}
 function escapeHtml(s){
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -240,6 +414,85 @@ function _colorVal(s){
   if(/^[0-9a-f]{6}$/.test(s)||/^[0-9a-f]{8}$/.test(s))return '#'+s;
   return '';
 }
+/* ---- v2.33.0 @@ begin font{"字体名" 字号} 的参数解析 ----
+   两种写法都收，与主人给的语法一致：
+     font{"Microsoft YaHei Light" 12pt}   引号包名（名里有空格时用这个）
+     font{楷体 10.5}                      裸名，最后一个 token 是字号
+   token 顺序不限：{12pt 楷体} 同样成立。字号只认 pt（无单位即 pt），
+   与排版面板同一把尺；px/em 一律判非法——面板不产出这两档，放进来只会
+   让「预览与打印同尺寸」这件事失去唯一口径。
+   两项至少要有一项，否则视为非法（fail-closed，原样露出），与 page/full
+   的参数纪律一致。返回 {ff, fs}，ff 是**字面名**（还没映射到 family），
+   映射放在 mdeFontOpen 里做——那一步要查本机字体表，表可能还没加载。 */
+function _fontParseParam(raw){
+  var s=String(raw==null?'':raw).replace(/\u3000/g,' ').trim();
+  if(!s)return null;
+  var ff='',fs='',rest=s;
+  var qi=s.match(/"([^"]+)"|\u201c([^\u201d]+)\u201d/);
+  if(qi){
+    ff=(qi[1]!==undefined?qi[1]:qi[2]).trim();
+    rest=(s.slice(0,qi.index)+' '+s.slice(qi.index+qi[0].length)).trim();
+  }
+  var toks=rest?rest.split(/\s+/):[];
+  var keep=[];
+  for(var i=0;i<toks.length;i++){
+    var mt=/^(\d+(?:\.\d+)?)(pt)?$/i.exec(toks[i]);
+    if(mt&&!fs){
+      var n=parseFloat(mt[1]);
+      if(!(n>=6&&n<=72))return null;      /* 与面板 min/max 同步 */
+      fs=String(n);
+    }else{
+      keep.push(toks[i]);
+    }
+  }
+  if(!ff)ff=keep.join(' ').trim();
+  else if(keep.length)return null;        /* 有引号名又有多余裸词 → 非法 */
+  if(!ff&&!fs)return null;
+  return {ff:ff,fs:fs};
+}
+/* 字面名 → 本机真实面。先比显示名（full），再比 family——主人可能是照着
+   下拉里的名字手写的，也可能是照着「微软雅黑」这类族名写的。
+   查不到就原样当 family 用（不加字重），不拦——用户机器上没装那个字体时，
+   浏览器本来就会回落，这与直接写 CSS 的行为一致。 */
+function _fontLookup(nm){
+  if(!nm)return null;
+  var want=String(nm).trim().toLowerCase();
+  var arr=window._sysFaces||[];
+  for(var i=0;i<arr.length;i++){
+    if(arr[i]&&typeof arr[i]==='object'&&String(arr[i].n||'').toLowerCase()===want)return arr[i];
+  }
+  for(var j=0;j<arr.length;j++){
+    if(arr[j]&&typeof arr[j]==='object'&&String(arr[j].f||'').toLowerCase()===want)return arr[j];
+  }
+  return null;
+}
+/* 生成 .mde-font 容器。内联两套值：
+     --mff/--mfs/--mff-w  → 预览与打印的 :is() 规则（!important，压过
+                             ts-style 给 p/h1… 各自设的字体字号）
+     font-family/…/font-size → docx 与导出 HTML 的解析入口
+   两套必须同时写：docx 读不了 CSS 变量，而只写真实属性又压不过
+   ts-style 的 !important（内联无 !important，特异性输给它）。 */
+function mdeFontOpen(p){
+  var face=p.ff?_fontLookup(p.ff):null;
+  var fam=face?face.f:(p.ff||'');
+  var w=face?(face.w||''):'';
+  var it=face?(face.i?1:0):0;
+  var at='',vars='',css='';
+  if(p.ff){
+    var q="'"+String(fam).replace(/'/g,"\\'")+"',sans-serif";
+    vars+='--mff:'+q+';';
+    css+='font-family:'+q+';';
+    at+=' data-ff="1"';
+    if(w){vars+='--mff-w:'+w+';';css+='font-weight:'+w+';';at+=' data-ffw="1"';}
+    if(it){css+='font-style:italic;';at+=' data-ffi="1"';}
+  }
+  if(p.fs){
+    vars+='--mfs:'+p.fs+'pt;';
+    css+='font-size:'+p.fs+'pt;';
+    at+=' data-fs="1"';
+  }
+  return '<div class="mde-font"'+at+' style="'+vars+css+'">';
+}
 function mdeDpSpan(body,hidden,alias,parsed){
   var pr=parsed||mdeParseBody(body);
   var disp='';
@@ -343,15 +596,17 @@ function _isHrLine(line){
 /* v2.10.0 表格题注包裹：题注与表格装进同一个 div，先后由 t/b 定。
    这里按 side 直接拼 DOM 顺序（不用 flex —— 表格变成 flex item 会被
    压宽），docx 侧再按 data-tab-side 独立决定段落先后，两边一致。 */
-function _wrapTabCap(tbl,c){
+function _wrapTabCap(tbl,c,box){
   var o=_figCap(c.tok);
   var side=o.side||'t';
   var gap=o.gap||'0.3';
   var capSty=o.al?(' style="text-align:'+_alCss(o.al)+' !important"'):'';
   var capEl='<div class="mde-tabcap" data-tab-cap="1"'+capSty+'>'
     +parseInline(c.txt)+'</div>';
+  /* box = 宽度与对齐（原写在 <table> 上，v2.28.0 搬到包裹层）。题注因此与表
+     同宽、同边——图片那边 figure/figcaption 天然就是这个关系。 */
   return '<div class="mde-tblwrap" data-tab-wrap="1" data-tab-side="'+side
-    +'" data-tab-gap="'+gap+'" style="--tabgap:'+gap+';">'
+    +'" data-tab-gap="'+gap+'" style="--tabgap:'+gap+';'+(box||'')+'">'
     +(side==='b'?tbl+capEl:capEl+tbl)+'</div>';
 }
 /* 围栏行判定：行首连续反引号 ≧3 才算围栏，返回其个数（否则 0）。
@@ -682,8 +937,15 @@ function splitRow(r){
   if(arr.length>0 && arr[arr.length-1]===''){arr.pop();}
   return arr;
 }
-function parseTable(lines,start){
+function parseTable(lines,start,spec,wrap){
   var head=splitRow(lines[start]);
+  /* v2.27.0 @@ table：先算列宽（列数校验在这一步，不符返回 null 交调用方
+     原文露出），再照旧拼行列 */
+  var calc=null;
+  if(spec){
+    calc=_tabCols(spec,head.length);
+    if(!calc){return null;}
+  }
   var sep=splitRow(lines[start+1]);
   var aligns=sep.map(function(c){
     var l=c.charAt(0)===':', r=c.charAt(c.length-1)===':';
@@ -709,7 +971,26 @@ function parseTable(lines,start){
   var thead='<thead><tr>'+head.map(function(c,ci){
     return '<th'+(aligns[ci]?' style="text-align:'+aligns[ci]+'"':'')+'>'+parseInline(c)+'</th>';
   }).join('')+'</tr></thead>';
-  return ['<table>'+thead+'<tbody>'+body+'</tbody></table>',i];
+  var tStyle='',colHtml='',tAttr='';
+  if(calc){
+    /* 会被题注包裹（wrap=true）时，横向地盘归包裹层：表填满它，题注才与表同宽。
+       无题注时保持旧行为——宽度与对齐直接写在表上。 */
+    var own=(wrap?'width:100%;margin-left:0;margin-right:0;':calc.box)+calc.style;
+    if(own){tStyle=' style="'+own+'"';}
+    if(calc.widths.length){
+      colHtml='<colgroup>'+calc.widths.map(function(x){
+        return x?('<col style="width:'+x+'%">'):'<col>';
+      }).join('')+'</colgroup>';
+      /* 列宽签名跟着表格属性走：Paged.js 拆表时用 cloneNode(false) 重建
+         续片——内联 style 会留存，colgroup 子节点却丢了，续片列宽退化成
+         等分（实测 50/30/20 → 33/33/33）。分页后钩子据此属性补齐。 */
+      tAttr=' data-mde-cols="'+calc.widths.map(function(x){
+        return x?(x+'%'):'0';
+      }).join(',')+'"';
+    }
+  }
+  return ['<table'+tStyle+tAttr+'>'+colHtml+thead+'<tbody>'+body+'</tbody></table>',i,
+          calc?calc.box:''];
 }
 /* 围栏语言行解析：```lang {N} —— N=版面百分比，与图片 {N} 同一规矩（空白可选、>100 钳 100）。
    非法形态（{0}/非数字/多余词）→ 整体视为 lang 原样返回、width=0（fail-closed：字面可见不吞错）。
@@ -754,11 +1035,13 @@ function parseFenceLang(raw){
    的层级同构。end 同为集合并写：@@ end X 只关 X，@@ end X Y 同关多个，
    关剩的继续收内容（详见并写分支头注释）。 */
 var _LV={page:1,full:2,fill:3};      /* 嵌套层级（外→内），color 不参与 */
-var _MGORD={page:0,full:1,color:2};  /* 并写书写顺序，必须单调递增 */
+/* v2.33.0 加 font：字重/字号决定度量（断行、页数），比纯上色的 color
+   更「靠内」，故排在 color 之前：page → full → font → color。 */
+var _MGORD={page:0,full:1,font:2,color:3};  /* 并写书写顺序，必须单调递增 */
 /* 从 @@ begin 之后那段文字里按出现顺序取家族名。只用于判断「是不是自己套
    自己」，不做参数校验（各家族的参数仍由各自分支严格匹配）。 */
 function _beginFams(rest){
-  var o=[],re=/(page|full|color|fill)\b/g,m;
+  var o=[],re=/(page|full|font|color|fill)\b/g,m;
   while((m=re.exec(rest))!==null){o.push(m[1]);}
   return o;
 }
@@ -851,6 +1134,8 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
   var IPX=(opts&&opts.indents)||(typeof window!=='undefined'&&window.__IND_PX__)||{p:0,quote:0,li:0};
   var curInd=0;
   var pendCap=null;   /* v2.10.0 @@ caption 暂存：只作用于紧随其后的那一个表格 */
+  var pendTab=null;   /* v2.27.0 @@ table 暂存：作用于紧随其后的表格，
+                         中间可隔一行 @@ caption（table 在前、caption 在后） */
   var _dgHit=false;
   /* ── v2.23.0 元数据：两条互斥通道 ────────────────────────────────
      通道 A（兼容模式）：文首 --- … --- 的 YAML 平铺键值，值就在正文里。
@@ -1035,6 +1320,25 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
   while(i<lines.length){
     var line=lines[i];
     _dgHit=false;
+    /* v2.27.0 @@ table{表参:列宽方案}：表格宽度与列宽分配，参数见 _tabSpec。
+       位置契约：本行在 @@ caption 的上一行（table → caption → 表格），
+       也可以直接接表格（table → 表格）。紧贴的下一行既不是表格也不是
+       @@ caption 时，整行按原文露出（fail-closed，不猜意图、不吞字）。 */
+    var _tabM=/^[ ]{0,3}@@\s*table\b[ \t]*(?:\{([^{}\n]*)\})?[ \t]*$/.exec(line);
+    if(_tabM){
+      var _tabSp=_tabSpec(_tabM[1]);
+      var _tn1=lines[i+1]||'',_tn2=lines[i+2]||'';
+      var _isTabLine=(_tn1.indexOf('|')>=0
+        &&/^[ ]*\|?[-|: ]+\|?[ ]*$/.test(_tn2)&&_tn2.indexOf('-')>=0);
+      if(_tabSp&&(_isTabLine||/^[ ]{0,3}@@\s*caption\b/.test(_tn1))){
+        _tabSp.raw=line;
+        pendTab={spec:_tabSp,at:i+1};
+        i++;continue;
+      }
+      _dgE(i,'D407','@@ table 未生效：参数非法，或其后既不是表格也不是 @@ caption');
+      html+='<p>'+parseInline(line)+'</p>';
+      i++;continue;
+    }
     /* v2.10.0 表格题注：@@ caption{l c t n s0.3} 表 1　标题
        必须先于竖线/表格/段落判断消费掉，否则整行会被当普通段落渲染。
        只认「下一行起就是表格」这一种位置——后面不是表格则整行按普通
@@ -1043,8 +1347,18 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
     if(_capM){
       var _t1=lines[i+1]||'',_t2=lines[i+2]||'';
       if(_t1.indexOf('|')>=0&&/^[ ]*\|?[-|: ]+\|?[ ]*$/.test(_t2)&&_t2.indexOf('-')>=0){
-        pendCap={tok:_capM[1]||'',txt:(_capM[2]||'').trim(),at:i+1};
+        /* 上一行若是 @@ table，把规格一并转交（table 在前、caption 在后） */
+        var _capSpec=(pendTab&&pendTab.at===i)?pendTab.spec:null;
+        pendCap={tok:_capM[1]||'',txt:(_capM[2]||'').trim(),at:i+1,spec:_capSpec};
+        pendTab=null;
         i++;continue;
+      }
+      /* @@ table 后面跟了个没接上表格的 caption：table 行原文露出 */
+      if(pendTab&&pendTab.at===i){
+        if(pendTab.spec&&pendTab.spec.raw){
+          html+='<p>'+parseInline(pendTab.spec.raw)+'</p>';
+        }
+        pendTab=null;
       }
     }
     /* v2.13.2 @@ blank{n}：硬控段间空白。n = 正文行数（1 = 一个正文行高，
@@ -1349,18 +1663,52 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
         continue;
       }
     }
+    /* v2.33.0 @@ begin font{"字体名" 字号} … @@ end font：块级临时改字体/字号。
+       与 @@ begin color 同构（div 容器 + 内容按完整 markdown 渲染），但**必须**
+       靠高特异性规则才生效：ts-style 给 p/h1…/li 各自写了 font-family 与
+       font-size 且带 !important，纯继承一个都改不动。所以容器把值写进 CSS
+       变量，由 #preview .mde-font[data-ff] :is(...) 这类规则压过去。
+       字号只收 pt，与排版面板同一把尺；字体名可带引号也可裸写（裸写时最后
+       一个 token 视为字号，见 _fontParseParam）。
+       不嵌套、不跨缩进层（与 fill/color 同口径）。 */
+    var fm=line.match(/^[ ]{0,3}@@\s*begin\s+font\s*\{([^{}]*)\}[ \t]*$/);
+    if(fm){
+      var fpar=_fontParseParam(fm[1]);
+      var fr2=_scanBeginBlock(lines,i+1,['font']);
+      var finner=fr2.inner,fclosed=fr2.closed,fj=fr2.next;
+      if(!fclosed){_dgE(i,'D216','font 未闭合：缺 @@ end font，内容照常渲染');_dgHit=true;}
+      _dgZw(finner);
+      if(fpar&&fclosed){
+        html+=mdeFontOpen(fpar)+
+          parseMarkdown(finner.join('\n'),_lv,opts,_base+i+1,_lv3)+'</div>';
+        i=fj;
+        continue;
+      }
+      if(fclosed){
+        if(!fpar)_dgE(i,'D215','font 参数非法：{...} 须为 {"字体名" 字号}，字号 6–72pt');
+        html+='<p>'+parseInline(line)+'</p>';
+        var ftxt=finner.join('\n');
+        if(ftxt.trim()){html+=parseMarkdown(ftxt,_lv,opts,_base+i+1,_lv3);}
+        i=fj;
+        continue;
+      }
+    }
     /* v2.13 @@ begin full{t|m|b} / @@ begin full（缺省 m）… @@ end full：
        独占一页块。t=居上 m=居中 b=居下（页内垂直位置，分页导出生效）；
+       v2.26.6 背景图：full{[tmb]:![](图) [o|c|f] [九宫]}——解析见
+       _fullParseParam，预览拟页块 + HTML 导出块衬 + 分页导出页盒衬底
+       （docx 出背景，出骨架：独占一页 + 上中下）。
        左右不参数化——块内元素按排版面板既有对齐档走。内容按完整
        markdown 渲染（可嵌 fill/图表/表格/列表，空行在其中保留普通
-       打断语义）。预览与 HTML 导出无页概念，按普通块渲染；分页导出
+       打断语义）。预览无页概念但按拟页块渲染（v2.26.6）；分页导出
        由 .full-page CSS 撑满页心并按 data-full-pos 垂直定位。
        curInd 不清零、不写 margin-left（页级块与缩进链解耦，继承语义
        与 color 块同口径）；编号区域不清零（空行才打断）。
-       参数非 t/m/b（正则不匹配）或未闭合 → 标记行按原文、内容照常
+       参数非法（_fullParseParam null）或未闭合 → 标记行按原文、内容照常
        渲染（fail-closed，结束行按文本露出）。 */
-    var um=line.match(/^[ ]{0,3}@@\s*begin\s+full\s*(?:\{([tmb])\})?\s*$/);
-    if(um){
+    var um=line.match(/^[ ]{0,3}@@\s*begin\s+full\s*(?:\{([^}\n]*)\})?\s*$/);
+    var _fp=um?_fullParseParam(um[1]):null;
+    if(um&&_fp){
       if(!(_LV.full>_lv)){
         _dgE(i,'D221','full 不能在这里再开：full 套 full，或 fill 区里开 full（主链层级 page＞full＞fill）');
         /* v2.18.0 越界/同族：full 是主链中层（rank 2），_lv>=2 时不可再开
@@ -1376,7 +1724,7 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
       var uinner=_ur.inner,uclosed=_ur.closed,uj=_ur.next;
       _dgZw(uinner);
       if(uclosed){
-        html+='<div class="full-page" data-full-pos="'+(um[1]||'m')+'">'+
+        html+='<div class="full-page" data-full-pos="'+_fp.pos+'"'+_fullBgHtml(_fp.bg)+'>'+
           parseMarkdown(uinner.join('\n'),_LV.full,opts,_base+i+1,_lv3)+'</div>';
         i=uj;
         continue;
@@ -1461,7 +1809,7 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
     var _mgt=line.match(/^[ ]{0,3}@@\s*begin\s+([\s\S]*?)[ \t]*$/);
     if(_mgt){
       var _mgs=_mgt[1],_mgpos=0,_mgl=[],_mgbad=false,_mgm;
-      var _mgone=/[ \t]*(page|full|color)\b[ \t]*(\{[^{}\n]*\})?/g;
+      var _mgone=/[ \t]*(page|full|font|color)\b[ \t]*(\{[^{}\n]*\})?/g;
       while((_mgm=_mgone.exec(_mgs))!==null){
         if(_mgm.index!==_mgpos){_mgbad=true;break;}
         var _mga=null;
@@ -1470,7 +1818,7 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
           /* color 允许裸词色值（@@ begin color r）。裸词只能给 color——
              否则 @@ begin full color r 里的 color 会被当成 full 的参数 */
           var _raw=/^[ \t]*([\w#]+)/.exec(_mgs.slice(_mgone.lastIndex));
-          if(_raw&&!/^(page|full|color)$/.test(_raw[1])){
+          if(_raw&&!/^(page|full|font|color)$/.test(_raw[1])){
             _mga=_raw[1];_mgone.lastIndex+=_raw[0].length;
           }
         }
@@ -1489,8 +1837,18 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
             if(!(_ma==='noll'||_ma==='1'||_ma==='i'||_ma==='I')){_mgOk=false;break;}
             _mgA.page=_ma;
           }else if(_mf==='full'){
-            if(!(_ma===null||_ma==='t'||_ma==='m'||_ma==='b')){_mgOk=false;break;}
-            _mgA.full=(_ma||'m');
+            /* v2.26.6 full 参数支持背景文法（与 solo 同一 _fullParseParam）；
+               非法 → 并写整体不成立（D241），fail-closed */
+            var _mfp2=_fullParseParam(_ma);
+            if(!_mfp2){_mgOk=false;break;}
+            _mgA.full=_mfp2.pos;
+            if(_mfp2.bg){_mgA.fullBg=_mfp2.bg;}
+          }else if(_mf==='font'){
+            /* v2.33.0 并写里的 font：参数与 solo 同一 _fontParseParam，
+               非法 → 整组不成立（与 full 同纪律，不半生效） */
+            var _mfp3=_fontParseParam(_ma);
+            if(!_mfp3){_mgOk=false;break;}
+            _mgA.font=_mfp3;
           }else{
             var _mcv=_colorVal(_ma);
             if(!_mcv){_mgOk=false;break;}
@@ -1499,7 +1857,7 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
         }
         if(_mgOk){
           /* 分段扫描：per-family 深度计数 + openSet */
-          var _mgSegs=[],_mgBuf=[],_mgOpen={},_mgDepth={page:0,full:0,fill:0,color:0},_mgOpenN=_mgl.length,_mgOk2=true,_mgK2=i+1,_mgSegAt=i+1;
+          var _mgSegs=[],_mgBuf=[],_mgOpen={},_mgDepth={page:0,full:0,font:0,fill:0,color:0},_mgOpenN=_mgl.length,_mgOk2=true,_mgK2=i+1,_mgSegAt=i+1;
           for(var _md=0;_md<_mgl.length;_md++){_mgOpen[_mgl[_md].f]=true;_mgDepth[_mgl[_md].f]=1;}
           while(_mgK2<lines.length){
             var _mln=lines[_mgK2];
@@ -1507,11 +1865,11 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
             if(_mgBm){
               /* begin 行：行内家族词各 +1（并写 begin 行含多个家族词；
                  参数花括号与裸词色值不会混进——page{noll} 的 { 断词界） */
-              var _mgWd=_mgBm[1].match(/(?:^|[^\w])(page|full|fill|color)\b/g);
+              var _mgWd=_mgBm[1].match(/(?:^|[^\w])(page|full|font|fill|color)\b/g);
               if(_mgWd){for(var _mw=0;_mw<_mgWd.length;_mw++){_mgDepth[_mgWd[_mw].replace(/^[^\w]+/,'')]++;}}
               _mgBuf.push(_mln);_mgK2++;continue;
             }
-            var _mgEm=_mln.match(/^[ ]{0,3}@@\s*end\s+((?:page|full|fill|color)(?:[ \t]+(?:page|full|fill|color))*)[ \t]*$/);
+            var _mgEm=_mln.match(/^[ ]{0,3}@@\s*end\s+((?:page|full|font|fill|color)(?:[ \t]+(?:page|full|font|fill|color))*)[ \t]*$/);
             if(_mgEm){
               var _mgFs=_mgEm[1].split(/[ \t]+/),_mgClose=[];
               for(var _mf2=0;_mf2<_mgFs.length;_mf2++){
@@ -1559,7 +1917,9 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
                   _pgRegSeq++;
                   _mgHtml+='<div class="page-region" data-pn="'+_mgA.page+'" data-pr-id="pr'+_pgRegSeq+'">';
                 }else if(_so[_op]==='full'){
-                  _mgHtml+='<div class="full-page" data-full-pos="'+_mgA.full+'">';
+                  _mgHtml+='<div class="full-page" data-full-pos="'+_mgA.full+'"'+_fullBgHtml(_mgA.fullBg)+'>';
+                }else if(_so[_op]==='font'){
+                  _mgHtml+=mdeFontOpen(_mgA.font);
                 }else{
                   _mgHtml+='<div class="mde-color" style="color:'+_mgA.color+'">';
                 }
@@ -1656,10 +2016,22 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
       continue;
     }
     if(line.indexOf('|')>=0 && i+1<lines.length && /^[ ]*\|?[-|: ]+\|?[ ]*$/.test(lines[i+1]) && lines[i+1].indexOf('-')>=0){
-      var t=parseTable(lines,i);
+      /* v2.27.0 本表吃到的 @@ table 规格（可能经 @@ caption 转交） */
+      var _hereSpec=null;
+      var _willWrap=!!(pendCap&&pendCap.at===i);   /* 有题注才有 wrap */
+      if(pendCap&&pendCap.at===i){_hereSpec=pendCap.spec||null;}
+      else if(pendTab&&pendTab.at===i){_hereSpec=pendTab.spec||null;}
+      var t=parseTable(lines,i,_hereSpec,_willWrap);
+      if(!t){
+        /* 列数与 r 项数不符、合计≠100、生效列合计>85 —— 整组作废：
+           规格行按原文露出，表格按原样渲染（fail-closed，不猜不补） */
+        _dgE(i,'D408','@@ table 未生效：列数与表格不符，或百分比合计不合规');
+        if(_hereSpec&&_hereSpec.raw){html+='<p>'+parseInline(_hereSpec.raw)+'</p>';}
+        t=parseTable(lines,i,null,_willWrap);
+      }
       var _tb=t[0];
-      if(pendCap&&pendCap.at===i){_tb=_wrapTabCap(_tb,pendCap);}
-      pendCap=null;
+      if(pendCap&&pendCap.at===i){_tb=_wrapTabCap(_tb,pendCap,t[2]);}
+      pendCap=null;pendTab=null;
       html+=_tb;i=t[1];curInd=0;continue;
     }
     if(/^[ ]*([-+]|[0-9]+\.)[ ]+/.test(line)){
