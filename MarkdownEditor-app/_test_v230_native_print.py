@@ -56,14 +56,23 @@ def main():
     html = m.build_paged_html(None, BODY, "", CFG, native=True)
 
     print("\n[一] 产物形态")
-    chk("产物不含任何 <script>", "<script" not in html.lower(),
-        html.lower().count("<script"))
+    # v2.35.0 起：页码两遍法需要一段**页内**脚本（零三方包、零外部进程），
+    # 所以"不含任何 script"这条旧口径作废，改判"只含页码脚本、无外链、无 Paged.js"。
+    _low = html.lower()
+    chk("产物无外链脚本", "<script src" not in _low and "<script  src" not in _low,
+        _low.count("<script src"))
+    chk("产物脚本仅页码脚本", _low.count("<script") == _low.count("</script"),
+        (_low.count("<script"), _low.count("</script")))
+    chk("闭合标签没被转义成 <\\/script（旧事故：标签不闭合，后续脚本变纯文本）",
+        "<\\/script" not in _low and "</script" in _low)
+    chk("脚本带 __PNCFG 与就绪标记",
+        "__PNCFG" in html and "__pnReady" in html)
     chk("产物不引用 Paged.js 运行时",
         "PagedPolyfill" not in html and "paged.polyfill" not in html)
 
     print("\n[二] 页码（@page margin box）")
     chk("@page 声明存在", bool(re.search(r"@page\s*\{", html)))
-    chk("页码用 counter(page)", "counter(page)" in html)
+    chk("页码用 counter(pnout)", "counter(pnout)" in html)
     chk("总页数用 counter(pages)", "counter(pages)" in html)
     chk("外侧页码分奇偶页",
         "@page:right" in html and "@page:left" in html)

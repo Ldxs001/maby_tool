@@ -25,6 +25,7 @@ import sys
 import json
 import re
 import struct
+import zlib
 import atexit
 import zipfile
 import urllib.parse
@@ -65,7 +66,7 @@ except Exception as _e:
 PORT = 18766
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 138  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 145  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 # MSIX 商城版判定（微软商店政策 11.16 的"报告 AI 生成内容"入口用）：
 # 商城包与侧载包恒落在 WindowsApps 之下，Release 安装包/便携形态不会。
@@ -1914,6 +1915,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 ".html": "text/html; charset=utf-8", ".png": "image/png",
                 ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
                 ".svg": "image/svg+xml", ".ico": "image/x-icon",
+                # PDF 必须按 application/pdf 发，浏览器/内核才会内嵌查看器；
+                # 发 octet-stream 会变成「下载」。分页预览（v2.39.0）就是把
+                # 打印引擎出的 PDF 直接显示在预览栏里。
+                ".pdf": "application/pdf",
             }
             ctype = ctypes_map.get(os.path.splitext(full)[1].lower(),
                                    "application/octet-stream")
@@ -3017,7 +3022,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 html = build_standalone_html(obj.get("mdPath") or obj.get("path") or None,
                                               obj.get("bodyHtml", ""),
                                               obj.get("tsCss", ""),
-                                              obj.get("page") or None)
+                                              obj.get("page") or None,
+                                              default_font=obj.get("defaultFont"))
                 # 优先写到用户"另存为"所选路径；未提供时回退可写 runtime
                 # （兼容老调用；商城包安装目录只读，不能落 HERE）
                 out = obj.get("path") or os.path.join(RUNTIME_DIR, "document.html")
@@ -3041,7 +3047,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 data = docx_export.build_docx(obj.get("mdPath") or obj.get("path"),
                                               obj.get("bodyHtml", ""),
                                               obj.get("tsCss", ""),
-                                              obj.get("page") or None)
+                                              obj.get("page") or None,
+                                              default_font=obj.get("defaultFont"))
                 # 优先写到用户"另存为"所选路径；未提供时回退可写 runtime
                 # （兼容老调用；商城包安装目录只读，不能落 HERE）
                 out = obj.get("path") or os.path.join(RUNTIME_DIR, "document.docx")
@@ -3064,12 +3071,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 body_html = obj.get("bodyHtml", "")
                 ts_css = obj.get("tsCss", "")
                 page_cfg = obj.get("cfg", {}) or {}
+                # truePages 两种键位都认：老调用方放顶层，新前端放 cfg 内。
+                # 只在 cfg 里取过（白名单）而前端放顶层，真值就静默丢失。
+                if not page_cfg.get("truePages") and isinstance(
+                        obj.get("truePages"), dict):
+                    page_cfg = dict(page_cfg)
+                    page_cfg["truePages"] = obj["truePages"]
                 # v2.30.0 出片路径：mode=native 走原生 CSS 分页（前端默认值），
                 # 缺省/其他值仍走 Paged.js——保证旧调用方与既有测试行为不变。
                 mode = str(obj.get("mode") or "paged").lower()
                 native = (mode == "native")
                 html = build_paged_html(md_path, body_html, ts_css, page_cfg,
-                                        native=native)
+                                        native=native,
+                                        default_font=obj.get("defaultFont"))
                 # /static/ 路由两级查找（HERE → RUNTIME_DIR），产物落可写
                 # runtime 即可用 /static/<name> 取回——商城包安装目录只读
                 name = ("document.print.html" if native
@@ -4998,7 +5012,8 @@ def _strip_tags(s):
 
 
 
-def build_standalone_html(md_path, body_html, ts_css, page_cfg=None):
+def build_standalone_html(md_path, body_html, ts_css, page_cfg=None,
+                          default_font=None):
     """普通 .html 导出组装（py 全权：图片路径还原 + katex css + 排版样式）。
     版心宽度按排版 page 节（纸宽−左右边距，mm），与预览栏/打印版口径一致
     （此前写死 max-width:820px，{N} 图片宽度语义随版心漂移）。"""
@@ -5101,7 +5116,7 @@ def build_standalone_html(md_path, body_html, ts_css, page_cfg=None):
     html = ('<!DOCTYPE html>\n<html lang="zh-CN"><head><meta charset="UTF-8"><title>__TITLE__</title>'
         "<style>__KATEX__</style><style>div.md-math-block{overflow-x:auto;margin:.8em 0;}"
         "span.md-math-inline{white-space:nowrap;}__TS__</style>"
-        '<style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;width:__CONTENTW__mm;max-width:none;'
+        '<style>body{font-family:__DEFFONT__;width:__CONTENTW__mm;max-width:none;'
         'margin:40px auto;padding:0;'
         'line-height:1.7;color:#222;}'
         'h1,h2{border-bottom:1px solid #eee;padding-bottom:.3em;}'
@@ -5187,6 +5202,13 @@ def build_standalone_html(md_path, body_html, ts_css, page_cfg=None):
     html = html.replace("__TITLE__", html_module.escape(title))
     html = html.replace("__KATEX__", katex_css)
     html = html.replace("__TS__", ts)
+    # v2.35.1 默认字体显性传递（同 build_paged_html 注释）：探出的预览
+    # 实际字体写进 body 栈；探不出（环境回退不在候选表）维持纯泛型栈。
+    _dfont = str(default_font or "").strip().replace('"', "")
+    html = html.replace("__DEFFONT__",
+                        ('-apple-system,BlinkMacSystemFont,"%s",sans-serif' % _dfont)
+                        if _dfont
+                        else "-apple-system,BlinkMacSystemFont,sans-serif")
     html = html.replace("__FIGCAP__", FIGCAP_BASE_CSS)
     # v2.27.1 纸张底色：正文取色由前端 ts_css 的 .markdown-body.md-tone-* 单源
     # 提供（同一份 ts-style 也进打印），这里只补「纸」本身——导出件是独立
@@ -5274,25 +5296,526 @@ def _css_quote(s):
     return json.dumps(s or "", ensure_ascii=False)
 
 
-def _pn_content(tpl, with_total=True):
-    """页码模板 -> CSS content 表达式。
+def _pn_content(tpl, with_total=True, total_value=None):
+    """页码模板 -> CSS content 表达式。**这是兜底值，不是最终值。**
+
     '第 {p} 页 / 共 {P} 页' -> '"第 " counter(page) " 页 / 共 " counter(pages) " 页"'
-    {p}=当页页码，{P}=总页数；with_total=False 时丢弃 {P} 段（无总页数语境）。"""
-    parts = re.split(r"(\{p\}|\{P\})", tpl or "{p}")
+
+    {p}=当页页码（CSS 计数器，准）、{P}=参与编号的总页数、{N}=本区总页数。
+    {p} 走独立计数器 pnout（区外连续号，目录页/noll 区页/区页都 increment 0
+    跳过，语义与预览侧 PAGED_FILLER 的 shown[] 一致——见 _native_page_css）。
+    {P}/{N} 这里只能先填占位（{P}=counter(pages)=物理页数；{N} 用未定义计数器
+    占位），因为 CSS 的 pages 计数器减不掉不编号的前件；真值由打印页里的
+    __pnFill 量出来后整段改写（见 _PN_FILL_JS）。改写失败时留在这里的兜底值
+    仍是一份合法页脚——不会印出占位符，只是总页数偏大。
+    with_total=False 时丢弃 {P}/{N} 段（无总页数语境，Paged.js 旧路径用）。
+    **判据必须是「模板里有 {P} 或 {N}」**：只按 {P} 判会让「{p} / {N}」这种
+    只写 {N} 的模板整段丢掉 N，印出「3 / 」（2026-11-04 主人实测判例）。"""
+    parts = re.split(r"(\{p\}|\{P\}|\{N\})", tpl or "{p}")
     out = []
+    # 第二遍（宿主已量出真值）时 total_value = 纸面真实页数：{P}/{N} 直接
+    # 写成字面量，**不再依赖页内脚本改写 CSS**。此前靠 __pnFill 把
+    # counter(pn-region-pages) 换成数字，脚本一旦没跑完（时序/异常）页脚
+    # 就印成「1 / 0」——数字该在出片时就定死，不该寄望运行时补救。
+    _tv = str(int(total_value)) if total_value else ""
     for seg in parts:
         if seg == "{p}":
-            out.append("counter(page)")
+            out.append("counter(pnout)")
         elif seg == "{P}":
             if with_total:
-                out.append("counter(pages)")
+                out.append(_css_quote(_tv) if _tv else "counter(pages)")
+        elif seg == "{N}":
+            # {N}=本区总页数。区外与 {P} 同值；有真值就写字面量，没有则用
+            # 一个未定义的自定义计数器占位（合法 CSS，脚本改写前显示 0）。
+            if with_total:
+                out.append(_css_quote(_tv) if _tv
+                           else "counter(pn-region-pages)")
         elif seg:
             out.append(_css_quote(seg))
     return " ".join(out) if out else "counter(page)"
 
 
+# 罗马 1~3999（与页内脚本 toRoman 同表同序；之外回落阿拉伯——同口径）
+_ROMAN_TBL = ((1000, "m"), (900, "cm"), (500, "d"), (400, "cd"), (100, "c"),
+              (90, "xc"), (50, "l"), (40, "xl"), (10, "x"), (9, "ix"),
+              (5, "v"), (4, "iv"), (1, "i"))
+
+
+def _pn_roman(n):
+    """整数 -> 小写罗马串。区静态规则的 {N} 用（罗马区的 N 也按罗马印）。"""
+    n = int(n)
+    if n <= 0 or n > 3999:
+        return str(n)
+    out = []
+    for _v, _s in _ROMAN_TBL:
+        while n >= _v:
+            out.append(_s)
+            n -= _v
+    return "".join(out)
+
+
+def _pn_region_content(tpl, P, nval, pexpr):
+    """区页脚 content 表达式：与页内脚本 contentFor 严格同构——
+    {p}=调用方给的区计数器表达式（counter(pnregK[,roman])）、
+    {P}=全文参与编号页数（字面量）、{N}=本区页数（字面量，罗马区已转罗马）。"""
+    parts = re.split(r"(\{p\}|\{P\}|\{N\})", tpl or "{p}")
+    out = []
+    for seg in parts:
+        if seg == "{p}":
+            out.append(pexpr)
+        elif seg == "{P}":
+            out.append(_css_quote(str(P)) if P else "counter(pages)")
+        elif seg == "{N}":
+            out.append(_css_quote(str(nval)))
+        elif seg:
+            out.append(_css_quote(seg))
+    return " ".join(out) if out else pexpr
+
+
+_PN_FILL_JS = r"""
+(function(){
+  var CFG = window.__PNCFG || {};
+  var CW = +CFG.cw || 0, CH = +CFG.ch || 0;
+  function ready(err){
+    if (err) { try { window.__pnFail = String(err); } catch(e){} }
+    window.__pnReady = 1;
+  }
+  if (!CW || !CH) { ready('no-geom'); return; }
+
+  function q(s){
+    return '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+  }
+  /* 罗马数字（与预览侧 PAGED_FILLER 同一张表；1~3999 之外回落阿拉伯） */
+  function toRoman(v, up){
+    var n = Math.floor(v);
+    if(!(n > 0) || n > 3999) return String(v);
+    var M = [[1000,'m'],[900,'cm'],[500,'d'],[400,'cd'],[100,'c'],[90,'xc'],
+             [50,'l'],[40,'xl'],[10,'x'],[9,'ix'],[5,'v'],[4,'iv'],[1,'i']];
+    var s = '';
+    for(var k=0;k<M.length;k++){ while(n >= M[k][0]){ s += M[k][1]; n -= M[k][0]; } }
+    return up ? s.toUpperCase() : s;
+  }
+  /* 模板 -> content 值。{p} 用调用方给的计数器表达式（区外 counter(pnout)、
+     区内 counter(pnregK[,roman])）；{P}/{N} 由 JS 实测后以静态字符串传入，
+     必须包成字符串字面量：content 不接受裸数字（`content:"共 " 3 " 页"`
+     整条声明会被丢弃，实测判例），一律走 q()。 */
+  function contentFor(total, regN, pExpr){
+    var parts = String(CFG.tpl || '{p}').split(/(\{p\}|\{P\}|\{N\})/);
+    var out = [];
+    for (var i = 0; i < parts.length; i++){
+      var s = parts[i];
+      if (!s) continue;
+      if (s === '{p}') { out.push(pExpr || 'counter(pnout)'); }
+      else if (s === '{P}') { out.push(q(total)); }
+      else if (s === '{N}') { out.push(q(regN)); }
+      else { out.push(q(s)); }
+    }
+    return out.length ? out.join(' ') : (pExpr || 'counter(pnout)');
+  }
+  function boxRule(sel, content){
+    return sel + '{content:' + content + ';font-size:' + (+CFG.size || 9)
+         + 'pt;color:#666;}';
+  }
+  /* 一整套页脚规则；name 空 = 默认页，非空 = 页区命名页；incr = 该页的
+     counter-increment 声明（页上下文，每页执行一次：默认页 pnout +1，
+     目录/noll 页 pnout 0 跳号，区页 pnout 0 + 区计数器 +1）。 */
+  function pageRules(name, content, incr){
+    var base = name ? ('@page ' + name) : '@page';
+    var css = base + '{' + (incr || '');
+    if (CFG.pos === 'outer'){
+      css += boxRule('@bottom-right', content) + '@bottom-left{content:none;}';
+    } else {
+      css += boxRule(CFG.box || '@bottom-center', content);
+    }
+    css += '}';
+    if (CFG.pos === 'outer'){
+      css += base + ':right{' + boxRule('@bottom-right', content)
+           + '@bottom-left{content:none;}}';
+      css += base + ':left{' + boxRule('@bottom-left', content)
+           + '@bottom-right{content:none;}}';
+    }
+    return css;
+  }
+
+  /* 测量盒的断页规则——打印里每一条 break-*:page 都要在这里镜像成 column。
+     漏一条就少一页（2026-11-04 实测：漏了 .page-region 的 break-after，
+     真值 7 页量出 5 页，逐个标题错 1~2 页）。加打印规则时同步加这里。 */
+  var MEAS_CSS = ''
+    + '#pnmeas h1,#pnmeas .page-region,#pnmeas .full-page,#pnmeas .full-page + *,'
+    + '#pnmeas .md-toc-wrap{break-before:column !important;}'
+    + '#pnmeas .page-region,#pnmeas .md-toc-wrap{break-after:column !important;}'
+    + '#pnmeas .page-region:last-child{break-after:auto !important;}'
+    /* 整页块：打印走命名页（margin 0、整张纸），多列里没有命名页可用，
+       按「独占一列」处理；屏幕态那套负 margin 撑到纸边的规则要清掉。 */
+    + '#pnmeas .full-page{margin:0 !important;padding:0 !important;'
+    + 'width:auto !important;min-height:0 !important;height:' + CH + 'px !important;'
+    + 'max-height:' + CH + 'px !important;overflow:hidden !important;}'
+    + '#pnmeas img{max-width:100% !important;}'
+    + '#pnmeas .mde-fig-acts{display:none !important;}';
+    /* 注意：不要把 h2/h3{break-after:avoid}、orphans/widows、tr/blockquote
+       break-inside 镜像进来——2026-11-04 实测加了之后 65 页指南的测量从
+       少 1 页变成少 2 页：多列上下文对这些规则的执行比打印分页**更激进**，
+       镜像反而扩大漂移。漂移只能从分片差异个案修（见 _drift_cols 插桩）。 */
+
+  function colOf(el, x0){
+    return Math.round((el.getBoundingClientRect().left - x0) / CW) + 1;
+  }
+
+  /* 逐页归类编号——与预览侧 PAGED_FILLER 完全同语义：
+     front（目录页 + 全部 noll 区页）不编号不占号；区页按区重编（区内跨页
+     续算）；区外连续号跳过以上所有页。实施不走 counter-reset（挂命名页会
+     把整区冻在同一号，实测判例），靠 CSS 侧 pnout/pnregK 的 increment 0/1
+     完成跳号与重编；这里量出每页的「显示号」供目录条目与 {P}/{N} 使用。 */
+  function measure(box){
+    var x0 = box.getBoundingClientRect().left;
+    var total = Math.max(1, Math.round(box.scrollWidth / CW));
+    var i, k;
+    /* 标题落页（目录条目的号从这儿来）。
+       真值优先：CFG.truePages.headPages 是宿主从打印引擎的 PDF 文本里读出的
+       「标题在纸面第几页」。测量盒只能按列宽除，表头重复/孤行/禁断块这些
+       打印规则它一概不知，长表之后整体偏早（实测页脚真值 P=4 而目录写 3）。
+       没有真值的标题退回估算。 */
+    var head = {};
+    var hs = box.querySelectorAll('[id^="md-h-"]');
+    var THP = (CFG && CFG.truePages && CFG.truePages.headPages) || null;
+    if (THP){
+      /* 保护：估算与真值差距过大时整体不用真值。硬用会让落页越过 kind[]
+         的范围，那些条目会拿到错号甚至空号，比统一估算更难排查。 */
+      var mx = 0;
+      for (var hq in THP){ var hv = +THP[hq]; if (hv > mx) mx = hv; }
+      if (mx > total + 2) THP = null;
+    }
+    for (i = 0; i < hs.length; i++){
+      var hp = THP ? +THP[hs[i].id] : 0;
+      var hcol = hp > 0 ? hp : colOf(hs[i], x0);
+      head[hs[i].id] = hcol;
+      if (hcol > total) total = hcol;      /* 落页越界时扩表，别留空洞 */
+    }
+    /* 目录页跨度（目录可跨页；条目回填会改行宽，所以要量在回填之后） */
+    var tocLo = 0, tocHi = 0;
+    var tw = box.querySelector('.md-toc-wrap');
+    if (tw){
+      tocLo = tocHi = colOf(tw, x0);
+      var tk = tw.querySelectorAll('*');
+      for (k = 0; k < tk.length; k++){
+        var tc = colOf(tk[k], x0);
+        if (tc < tocLo) tocLo = tc;
+        if (tc > tocHi) tocHi = tc;
+      }
+    }
+    /* 页区跨度：非 noll 区要生成命名页；noll 区只记跨度（不编号不占号） */
+    var regs = [], noll = [];
+    var rs = box.querySelectorAll('.page-region[data-pr-id]');
+    for (i = 0; i < rs.length; i++){
+      var r = rs[i], pn = r.getAttribute('data-pn') || '';
+      var lo = colOf(r, x0), hi = lo;
+      var kids = r.querySelectorAll('*');
+      for (k = 0; k < kids.length; k++){
+        var c = colOf(kids[k], x0);
+        if (c < lo) lo = c;
+        if (c > hi) hi = c;
+      }
+      if (pn === 'noll') { noll.push({lo: lo, hi: hi}); }
+      else {
+        regs.push({id: r.getAttribute('data-pr-id') || '', pn: pn,
+                   pages: Math.max(1, hi - lo + 1), lo: lo, hi: hi});
+      }
+    }
+    var kind = [], no = [], rom = [];
+    var outCnt = 0, regCnt = [], ri;
+    for (i = 0; i <= total; i++){ kind[i] = 'f'; no[i] = 0; rom[i] = false; }
+    for (i = 0; i < regs.length; i++) regCnt[i] = 0;
+    for (i = 1; i <= total; i++){
+      if (tocLo > 0 && i >= tocLo && i <= tocHi) continue;
+      var inN = false;
+      for (k = 0; k < noll.length; k++)
+        if (i >= noll[k].lo && i <= noll[k].hi){ inN = true; break; }
+      if (inN) continue;
+      var inR = -1;
+      for (ri = 0; ri < regs.length; ri++)
+        if (i >= regs[ri].lo && i <= regs[ri].hi){ inR = ri; break; }
+      if (inR >= 0){
+        regCnt[inR]++;
+        kind[i] = 'r' + inR; no[i] = regCnt[inR];
+        rom[i] = (regs[inR].pn === 'i' || regs[inR].pn === 'I');
+      } else {
+        outCnt++;
+        kind[i] = 'o'; no[i] = outCnt;
+      }
+    }
+    /* {P}=参与编号的页数 = 区外页 + 非 noll 区页（目录页与 noll 页不计，
+       与预览侧 P 的口径一致） */
+    var P = outCnt;
+    for (i = 0; i < regs.length; i++) P += regs[i].pages;
+    /* 标题显示串：区外阿拉伯、区内按档位（罗马区条目写 iii）、前件不给号 */
+    var headDisp = {};
+    for (var id in head){
+      var c = head[id], kk = kind[c];
+      if (!kk || kk === 'f'){ headDisp[id] = ''; continue; }
+      if (kk === 'o'){ headDisp[id] = String(no[c]); continue; }
+      /* 区页：kk='rK'。regs[K] 必须存在——真值把标题页号推到测量盒范围外
+         时索引会越界，越界就退回阿拉伯号，别让一个 undefined 把整段目录
+         回填打断（目录页码与页脚是两件事，不能一起死）。 */
+      var _ri = +('' + kk).slice(1), _rr = regs[_ri];
+      headDisp[id] = (rom[c] && _rr)
+                   ? toRoman(no[c], _rr.pn === 'I')
+                   : String(no[c]);
+    }
+    return {total: total, headDisp: headDisp, regs: regs, P: Math.max(1, P)};
+  }
+
+  /* 目录条目回填：点线 + 页码（显示串与页脚严格同源：罗马区条目写 iii、
+     前件条目不给号——不会出现「页脚 iii 目录 3」） */
+  function fillToc(m){
+    var links = document.querySelectorAll('.md-toc a[href^="#md-h-"]');
+    for (var i = 0; i < links.length; i++){
+      var a = links[i];
+      var href = a.getAttribute('href') || '';
+      var id = href.slice(1);
+      try { id = decodeURIComponent(id); } catch(e){}
+      var n = m.headDisp[id];
+      if (!n) continue;                 /* 前件/不编号区里的标题不给页码 */
+      var dots = a.querySelector('.toc-dots');
+      var sp = a.querySelector('.md-toc-pg');
+      if (!dots){ dots = document.createElement('span'); dots.className = 'toc-dots'; a.appendChild(dots); }
+      if (!sp){ sp = document.createElement('span'); sp.className = 'md-toc-pg'; a.appendChild(sp); }
+      sp.textContent = n;
+    }
+  }
+
+  /* 前端那个 <style id="pnpage"> 里已经写好了默认页（counter-increment:pnout 1
+     与 {p}=counter(pnout)）与目录/noll 命名页。**不新增一条默认页规则**——
+     实测：后写的无名 @page 会盖掉先前所有命名页的 margin box（目录页又出
+     页码、封底也出页码）。正确做法是就地改它：把 {P}/{N} 的占位计数器换成
+     实测静态数字。 */
+  function rewriteBase(P){
+    var st = document.getElementById('pnpage');
+    if (!st) return false;
+    var t = st.textContent || '';
+    t = t.replace(/counter\(pages\)/g, q(String(P)))
+         .replace(/counter\(pn-region-pages\)/g, q(String(P)));
+    st.textContent = t;
+    return true;
+  }
+
+  function applyCss(m){
+    var pnon = +CFG.pnon ? true : false;
+    var css = '';
+    /* 默认页的 {P}/{N} 占位改实测值；#pnpage 缺席时补一条完整默认规则 */
+    if (pnon && !rewriteBase(m.P)){
+      css += pageRules('', contentFor(m.P, m.P, 'counter(pnout)'),
+                       'counter-increment:pnout 1;');
+    }
+    /* 每个非 noll 页区一套命名页：区计数器 pnregK 未定义即 0，区页每页 +1
+       → 区内从 1/i 重编、跨页续算（increment 不存在 reset 的冻号问题）；
+       区页 pnout increment 0 → 区外连续号跳过区页（与预览侧 shown[] 同义）。
+       页码关掉时一条都不生成——只开目录也得跑脚本（目录要回填页码），
+       但绝不因此凭空造出页脚。 */
+    if (!pnon) m.regs = [];
+    for (var i = 0; i < m.regs.length; i++){
+      var r = m.regs[i], id = String(r.id || '');
+      if (!id) continue;
+      var name = 'pnr' + i, ctr = 'pnreg' + i;
+      /* 探针档（第一遍）：区页 {p} 一律阿拉伯，页脚才能被零依赖探针按
+         p(\\d+) 解析；第二遍恢复用户档位（罗马区写 iii）。 */
+      var pExpr = (+CFG.probe) ? ('counter(' + ctr + ')')
+                : r.pn === 'i' ? ('counter(' + ctr + ',lower-roman)')
+                : r.pn === 'I' ? ('counter(' + ctr + ',upper-roman)')
+                : ('counter(' + ctr + ')');
+      /* {N} 只表示**本页区（page 包围盒）内**的页数，不是全文页数；
+         形态随区档位：罗马区写 iii、阿拉伯区写 3。{p} 走 CSS 计数器自带
+         罗马格式，{N} 是实测出来的静态数字，必须在这里显式转罗马——
+         否则罗马区会印成「i / 1」（2026-11-04 主人实测判例）。 */
+      var regN = (r.pn === 'i') ? toRoman(r.pages, false)
+               : (r.pn === 'I') ? toRoman(r.pages, true)
+               : String(r.pages);
+      css += pageRules(name, contentFor(m.P, regN, pExpr),
+                       'counter-increment:pnout 0 ' + ctr + ' 1;');
+      /* 绑定规则与皮肤的 data-pn 规则同权重（0,2,0），本样式表在后 → 胜出 */
+      css += '.page-region[data-pr-id="' + id.replace(/"/g, '\\"')
+           + '"]{page:' + name + ';}';
+    }
+    var st = document.getElementById('pnfill');
+    if (!st){
+      st = document.createElement('style');
+      st.id = 'pnfill';
+      document.head.appendChild(st);
+    }
+    st.textContent = css;
+  }
+
+  function run(){
+    var src = document.getElementById('paged-content');
+    if (!src) { ready('no-content'); return; }
+    var mc = document.createElement('style');
+    mc.textContent = MEAS_CSS;
+    document.head.appendChild(mc);
+    var box = document.createElement('div');
+    box.id = 'pnmeas';
+    box.className = 'markdown-body ' + (document.body.className || '');
+    box.style.cssText = 'position:absolute;left:0;top:0;width:' + CW + 'px;'
+      + 'height:' + CH + 'px;column-width:' + CW + 'px;column-gap:0;'
+      + 'column-fill:auto;overflow:visible;visibility:hidden;';
+    box.innerHTML = src.innerHTML;
+    document.body.appendChild(box);
+    /* 三步各自裹 try：量页/回填目录/写页脚规则是三个独立交付物，任何一步
+       炸掉都不许拖死另外两个。此前三段写在一条链上，中间一抛异常后面
+       全不执行——症状就是「目录没有页码 + 页脚 {N} 印 0 + 区页不编号」
+       同时出现，看着像三个 bug，其实是一个异常。 */
+    var m = null, errs = [];
+    try { m = measure(box); } catch(e){ errs.push('measure: ' + e); }
+    if (m){
+      try { fillToc(m); } catch(e){ errs.push('toc: ' + e); }
+      /* 回填会改变目录行宽，极端情况下换行→目录多一页。把填好的目录同步进
+         测量盒再量一次，变了就按新值重填（收敛即停）。 */
+      try {
+        var rt = document.querySelector('.md-toc-wrap');
+        var ct = box.querySelector('.md-toc-wrap');
+        if (rt && ct){ ct.innerHTML = rt.innerHTML; }
+        var m2 = measure(box);
+        if (m2.total !== m.total || m2.P !== m.P){
+          fillToc(m2);
+          m = m2;
+        }
+      } catch(e){ errs.push('remeasure: ' + e); }
+      /* v2.37.0 两遍法·第二遍：真值覆盖。
+         CFG.truePages 由宿主用**打印引擎**（WebView2 PrintToPdfAsync）实测后传入：
+         {P: 参与编号总页数, toc: 前件页数, regions: {prId: 该区页数}}。
+         测量盒只是"事前预测"，与真实分页有 1~3 页残差；有真值就一律以真值为准，
+         页脚上的数字才是纸上那个数。 */
+      try {
+        var TP = CFG.truePages || null;
+        if (TP){
+          if (+TP.P > 0) m.P = +TP.P;
+          if (TP.regions){
+            for (var qi = 0; qi < m.regs.length; qi++){
+              var tv = +TP.regions[m.regs[qi].id];
+              if (tv > 0) m.regs[qi].pages = tv;
+            }
+          }
+        }
+      } catch(e){ errs.push('truepages: ' + e); }
+      try { applyCss(m); } catch(e){ errs.push('css: ' + e); }
+    }
+    if (box.parentNode) box.parentNode.removeChild(box);
+    if (mc.parentNode) mc.parentNode.removeChild(mc);
+    ready(errs.length ? errs.join('; ') : null);
+  }
+
+  function boot(){
+    if (document.fonts && document.fonts.ready && document.fonts.ready.then){
+      document.fonts.ready.then(function(){ setTimeout(function(){
+        try { run(); } catch(e){ ready(e); }
+      }, 30); });
+    } else {
+      setTimeout(function(){ try { run(); } catch(e){ ready(e); } }, 30);
+    }
+  }
+  if (document.readyState === 'complete') boot();
+  else window.addEventListener('load', boot);
+})();
+
+"""
+
+
+
+_PRINT_AUTO_JS = r"""
+(function(){
+  /* 打印页自触发（v2.38.0：打印在**真浏览器**里完成）。
+     只在 URL 带 print=1 时启动——那是「打印」按钮打开的页面；同一条路由
+     不带参数时就是普通预览页，什么都不做。
+     2026-11-04 更正：应用内 WebView2 的打印预览没有「页眉和页脚」开关，
+     所以打印版现在交给系统浏览器（Edge）。浏览器标签页里 window.close()
+     无效，收尾改成顶部提示条，不再指望自动关窗。 */
+  try{
+    if (new URLSearchParams(location.search).get('print') !== '1') return;
+  }catch(e){ return; }
+
+  var fired = false, done = false, printed = false;
+
+  /* 兜底提示条：脚本调 print() 若被环境拦掉（极少数策略/版本），页面
+     就只是静静停着。宁可显式喊一句「按 Ctrl+P」，也不让人对着文档页
+     发懵。beforeprint 一响就说明预览真的开了，不必提示。 */
+  function hint(){
+    if (done || printed || document.getElementById('__pnHint')) return;
+    try{
+      var st = document.createElement('style');
+      st.textContent = '@media print{#__pnHint{display:none!important}}';
+      document.head.appendChild(st);
+      var d = document.createElement('div');
+      d.id = '__pnHint';
+      d.textContent = '浏览器没有自动打开打印预览 —— 请按 Ctrl+P 打印';
+      d.style.cssText = [
+        'position:fixed', 'left:50%', 'top:16px', 'transform:translateX(-50%)',
+        'z-index:2147483647', 'padding:12px 20px', 'border-radius:10px',
+        'background:#b42318', 'color:#fff', 'font-weight:600',
+        'font:600 14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif',
+        'box-shadow:0 8px 28px rgba(0,0,0,.35)', 'white-space:nowrap'
+      ].join(';');
+      document.body.appendChild(d);
+    }catch(e){}
+  }
+
+  function banner(){
+    if (document.getElementById('__pnDone')) return;
+    try{
+      var st = document.createElement('style');
+      st.textContent = '@media print{#__pnDone{display:none!important}}';
+      document.head.appendChild(st);
+      var d = document.createElement('div');
+      d.id = '__pnDone';
+      d.textContent = '打印已完成 · 可以关闭这个标签页'
+                    + '（要再打一次，请回编辑器点「打印」）';
+      d.style.cssText = [
+        'position:fixed', 'left:50%', 'top:16px', 'transform:translateX(-50%)',
+        'z-index:2147483647', 'padding:10px 18px', 'border-radius:999px',
+        'background:rgba(24,24,27,.92)', 'color:#fff',
+        'font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif',
+        'box-shadow:0 6px 24px rgba(0,0,0,.28)',
+        'pointer-events:none', 'white-space:nowrap'
+      ].join(';');
+      document.body.appendChild(d);
+    }catch(e){}
+  }
+
+  function finish(){
+    if (done) return; done = true;
+    var h = document.getElementById('__pnHint');
+    if (h) h.remove();          /* 先撤兜底提示，免得两条叠在一起 */
+    banner();
+    /* 应用内兜底窗口（open_print 找不到浏览器时才走）由脚本创建，
+       close() 有效，1.2 秒后收窗；浏览器标签页里 close() 被忽略，
+       提示条留在那儿。 */
+    setTimeout(function(){ try { window.close(); } catch(e){} }, 1200);
+  }
+
+  function go(){
+    if (fired) return; fired = true;
+    try { window.print(); } catch(e){}
+    /* 预览是模态：这里的定时器在它开着时挂起，不会误收。20s 只是兜底，
+       防止某些环境下 afterprint 不触发导致一直不弹提示。 */
+    setTimeout(finish, 20000);
+    setTimeout(hint, 4000);     /* 4 秒还没开预览就说清楚怎么办 */
+  }
+
+  window.addEventListener('beforeprint', function(){ printed = true; });
+  window.addEventListener('afterprint', function(){ setTimeout(finish, 300); });
+
+  function ready(){ return window.__pnReady === 1 || !!window.__pnFail; }
+  window.addEventListener('load', function(){
+    if (ready()){ setTimeout(go, 80); return; }
+    var iv = setInterval(function(){
+      if (ready()){ clearInterval(iv); setTimeout(go, 80); }
+    }, 100);
+    setTimeout(function(){ clearInterval(iv); go(); }, 6000);   /* 硬兜底 */
+    setTimeout(go, 12000);                                      /* 二层兜底 */
+  });
+})();
+"""
+
+
 def _native_page_css(size_str, mt, mr, mb, ml, pn, page_cfg, icb_w=174.0,
-                     paper_bg=""):
+                     paper_bg="", regions=None):
     """原生打印的分页契约（对齐 Cogito_Scribit/typesetting 的 PRINT_CSS）。
     规则来源：书册规范 STRUCTURE_GUIDE 6.2 + 成熟排版工程实测。
 
@@ -5304,12 +5827,26 @@ def _native_page_css(size_str, mt, mr, mb, ml, pn, page_cfg, icb_w=174.0,
     css = "@page{size:%s;margin:%smm %smm %smm %smm;%s" % (
         size_str, mt, mr, mb, ml,
         ("background:%s;" % paper_bg) if paper_bg else "")
+    # 第二遍的真值（宿主用打印引擎量出来的纸面页数）。有就在出片时把
+    # {P}/{N} 写成字面量——页脚数字必须在 HTML 里定死，不能等页内脚本补。
+    _tv = 0
+    try:
+        _tp = page_cfg.get("truePages") if isinstance(page_cfg, dict) else None
+        if isinstance(_tp, dict):
+            _tv = int(_tp.get("P") or 0)
+    except Exception:
+        _tv = 0
     pn_on = (pn.get("on") == "on")
     sz = pn.get("size", 9)
     if pn_on:
         tpl = pn.get("tpl") or "{p}"
-        con = _pn_content(tpl, with_total=("{P}" in tpl))
+        con = _pn_content(tpl, with_total=("{P}" in tpl or "{N}" in tpl),
+                          total_value=_tv)
         pos = pn.get("pos", "outer")
+        # v2.35.0：区外连续号走独立计数器 pnout——默认页每页 +1，目录页/
+        # noll 区页/区页各自 increment 0 跳过（见下方页区命名页注释）。
+        # {p} 即 counter(pnout)，见 _pn_content。
+        css += "counter-increment:pnout 1;"
         if pos == "outer":
             # 书册规范 6.4：外侧——奇数页右下、偶数页左下。
             # Chromium 支持 :left/:right 分页伪类；四向 margin box 均可用。
@@ -5336,7 +5873,8 @@ def _native_page_css(size_str, mt, mr, mb, ml, pn, page_cfg, icb_w=174.0,
             "}" % (icb_w, icb_w))
     if pn_on and pn.get("pos", "outer") == "outer":
         tpl = pn.get("tpl") or "{p}"
-        con = _pn_content(tpl, with_total=("{P}" in tpl))
+        con = _pn_content(tpl, with_total=("{P}" in tpl or "{N}" in tpl),
+                          total_value=_tv)
         sz = pn.get("size", 9)
         # 奇页（右页）页码靠右，偶页（左页）靠左；对页各自只保留一个 box
         css += ("@page:right{@bottom-right{content:%s;font-size:%spt;color:#666;}"
@@ -5381,18 +5919,6 @@ def _native_page_css(size_str, mt, mr, mb, ml, pn, page_cfg, icb_w=174.0,
         # 页区：两端强制断页（页码是页级属性），末块撤 break-after 防尾页空白
         ".page-region{break-before:page;break-after:page;}"
         ".page-region:last-child{break-after:auto;}"
-        # 页区页码（v2.30.0，named pages 实测可用）：noll 区不出页码；
-        # i/I 区用罗马数字。限制：counter-reset 在元素上不生效（实测罗马
-        # 区从全局页序继续，非从 i 起）——编号重置需要两遍法，暂记在案。
-        ".page-region[data-pn=\"noll\"]{page:pn-noll;}"
-        "@page pn-noll{@bottom-center{content:none;}"
-        "@bottom-left{content:none;}@bottom-right{content:none;}}"
-        ".page-region[data-pn=\"i\"]{page:pn-roman;}"
-        ".page-region[data-pn=\"I\"]{page:pn-roman-uc;}"
-        "@page pn-roman{@bottom-center{content:counter(page,lower-roman);"
-        "font-size:9pt;color:#666;}}"
-        "@page pn-roman-uc{@bottom-center{content:counter(page,upper-roman);"
-        "font-size:9pt;color:#666;}}"
         # 独占页块：起页靠自身 break-before，收尾靠「下一块 break-before」——
         # 不用 break-after。实测 break-after:page 与后续块的上边距叠加会让
         # 浏览器"刚断页又判定溢出"，多烧一张空白页（封面后 P2 整页空白，
@@ -5406,6 +5932,141 @@ def _native_page_css(size_str, mt, mr, mb, ml, pn, page_cfg, icb_w=174.0,
         # 表格标题（@@ caption）不与其表分离
         ".mde-caption{break-before:avoid;}"
     )
+    # 页区页码命名页。**必须门控在 pn_on**：页码关闭时一条都不出——旧版
+    # 无条件输出，页码关了罗马区照样印页脚（2026-11-04 主人实测判例）。
+    # v2.35.0 计数器体系（微探针实测，Edge 156 = WebView2 运行时）：
+    #   @page 里 counter-increment 每页累加；命名页的 increment 0 能盖过默认
+    #   页的 1（跳号）；一条声明可推多个计数器；元素级 reset 碰不到页上下文；
+    #   counter-reset 挂命名页会把该名下**每一页**冻在同一号（多页区域必炸）。
+    #   所以整套体系零 reset：区外号 pnout 全局累加，目录页/noll 区页
+    #   increment 0 跳过；每个区一个独立计数器 pnregK（未定义即 0，区页 +1
+    #   → 自动从 1/i 重编，区内跨页续算）。JS 兜底失效时这里仍是一套合法
+    #   页脚（罗马区沿全局 page 序，v2.34 行为）。
+    if pn_on:
+        css += (
+            ".page-region[data-pn=\"noll\"]{page:pn-noll;}"
+            # noll 区必须像 pn-toc 一样带 :left/:right 三件套：outer 模式下
+            # 有 @page:left/@page:right 参与 @page 级联，单条 @page pn-noll
+            # 的 increment 0 会被吃掉——封面页印不出页脚（content:none 仍胜）
+            # 却照常 +1，正文从 2 起（2026-11-04 T3 二分实测判例）。
+            "@page pn-noll{counter-increment:pnout 0;"
+            "@bottom-center{content:none;}"
+            "@bottom-left{content:none;}@bottom-right{content:none;}}"
+            "@page pn-noll:left{counter-increment:pnout 0;"
+            "@bottom-center{content:none;}"
+            "@bottom-left{content:none;}@bottom-right{content:none;}}"
+            "@page pn-noll:right{counter-increment:pnout 0;"
+            "@bottom-center{content:none;}"
+            "@bottom-left{content:none;}@bottom-right{content:none;}}"
+            ".page-region[data-pn=\"i\"]{page:pn-roman;}"
+            ".page-region[data-pn=\"I\"]{page:pn-roman-uc;}"
+            # 兜底升级（2026-11-04 主人实测判例）：旧兜底 content=counter(page)
+            # 走全局物理序（物理第 65 页印成 lxv），且不压默认页的 margin box
+            # ——罗马页同时叠印顺延的阿拉伯号（lxv 与 61/63 并排）。改为：
+            # a) 各档专属计数器 pnroman/pnromanuc（零 reset 架构：未定义即 0，
+            #    区页每页 +1 → 单罗马区从 i 起连续编号）；counter-increment
+            #    换声明后默认页的 pnout+1 被盖掉（pn-noll 同判例），pnout 不再
+            #    被罗马页推进。同档多个区时计数器跨区续算——零 reset 架构的
+            #    已知边界，真值路径（下方 pnrK 规则）不受此限。
+            # b) 其余 margin box 显式压成 none——不压则继承自默认页照印
+            #    （pn-noll 三件套同判例）；:left/:right 变体必须各带全套，
+            #    outer 模式下缺一个就被 @page:left/:right 级联吃掉。
+            "@page pn-roman{counter-increment:pnroman 1;"
+            "@bottom-center{content:counter(pnroman,lower-roman);"
+            "font-size:9pt;color:#666;}"
+            "@bottom-left{content:none;}@bottom-right{content:none;}}"
+            "@page pn-roman:left{counter-increment:pnroman 1;"
+            "@bottom-center{content:counter(pnroman,lower-roman);"
+            "font-size:9pt;color:#666;}"
+            "@bottom-left{content:none;}@bottom-right{content:none;}}"
+            "@page pn-roman:right{counter-increment:pnroman 1;"
+            "@bottom-center{content:counter(pnroman,lower-roman);"
+            "font-size:9pt;color:#666;}"
+            "@bottom-left{content:none;}@bottom-right{content:none;}}"
+            "@page pn-roman-uc{counter-increment:pnromanuc 1;"
+            "@bottom-center{content:counter(pnromanuc,upper-roman);"
+            "font-size:9pt;color:#666;}"
+            "@bottom-left{content:none;}@bottom-right{content:none;}}"
+            "@page pn-roman-uc:left{counter-increment:pnromanuc 1;"
+            "@bottom-center{content:counter(pnromanuc,upper-roman);"
+            "font-size:9pt;color:#666;}"
+            "@bottom-left{content:none;}@bottom-right{content:none;}}"
+            "@page pn-roman-uc:right{counter-increment:pnromanuc 1;"
+            "@bottom-center{content:counter(pnromanuc,upper-roman);"
+            "font-size:9pt;color:#666;}"
+            "@bottom-left{content:none;}@bottom-right{content:none;}}"
+        )
+        # v2.39.1 静态区规则：第二遍手里有真值（每区页数）时，把各区命名页
+        # 规则直接烤成静态 CSS——命名/索引与页内脚本 applyCss 严格同构
+        # （非 noll 区按文档顺序 pnr0/pnr1…，区计数器 pnregK），pnfill 后到
+        # 只是覆盖同值规则。页内脚本失联（2026-11-04 实测：pdf_save 就绪
+        # 判定竞态，fill JS 没跑完即出片）时纸面仍是「1 / 60」「i / i」，
+        # 不再掉回上面的全局兜底。真值缺某区（页数 0/缺键）就跳过该区，
+        # 让兜底顶上——fail-closed，不凭空造数字。
+        if regions:
+            _tp2 = (page_cfg.get("truePages")
+                    if isinstance(page_cfg, dict) else None)
+            _rgn = (_tp2 or {}).get("regions") if isinstance(_tp2, dict) else None
+            if isinstance(_rgn, dict) and _rgn:
+                _k = -1
+                for _r in regions:
+                    _rpn = str(_r.get("pn") or "")
+                    if _rpn == "noll":
+                        continue
+                    _k += 1
+                    try:
+                        _rn = int(_rgn.get(str(_r.get("id") or ""), 0) or 0)
+                    except Exception:
+                        _rn = 0
+                    if _rn <= 0:
+                        continue
+                    _nm = "pnr%d" % _k
+                    _ct = "pnreg%d" % _k
+                    if _rpn == "i":
+                        _pe = "counter(%s,lower-roman)" % _ct
+                        _ne = _pn_roman(_rn)
+                    elif _rpn == "I":
+                        _pe = "counter(%s,upper-roman)" % _ct
+                        _ne = _pn_roman(_rn).upper()
+                    else:
+                        _pe = "counter(%s)" % _ct
+                        _ne = str(_rn)
+                    _rc = _pn_region_content(tpl, _tv, _ne, _pe)
+                    _fs = "font-size:%spt;color:#666;" % sz
+                    if pn.get("pos", "outer") == "outer":
+                        css += ("@page " + _nm
+                                + "{counter-increment:pnout 0 " + _ct
+                                + " 1;@bottom-right{content:" + _rc + ";"
+                                + _fs + "}@bottom-left{content:none;}}"
+                                "@page " + _nm + ":right{@bottom-right{content:"
+                                + _rc + ";" + _fs
+                                + "}@bottom-left{content:none;}}"
+                                "@page " + _nm + ":left{@bottom-left{content:"
+                                + _rc + ";" + _fs
+                                + "}@bottom-right{content:none;}}}")
+                    else:
+                        _bx = PAGED_PAGE_BOX.get(pn.get("pos") or "bc",
+                                                 "@bottom-center")
+                        css += ("@page " + _nm
+                                + "{counter-increment:pnout 0 " + _ct + " 1;"
+                                + _bx + "{content:" + _rc + ";" + _fs + "}}")
+                    # data-pr-id 映射与上面 data-pn 映射同权重(0,2,0)，后写胜出
+                    css += ('.page-region[data-pr-id="' + str(_r.get("id"))
+                            + '"]{page:' + _nm + ";}")
+    # v2.35.0 目录页：不印页码，且不占号（区外连续号 pnout 在目录页
+    # increment 0 跳过，正文首页印 1）。
+    # 2026-11-04 实测（Edge 156 = WebView2 运行时同版本号）：
+    #   旧做法 counter-reset:page 0 挂命名页——单页有效，但 reset 会在该名下
+    #   **每一页**重放（多页目录整体冻在 0，页区同理冻号），已废弃。
+    #   named page 的样式从默认 @page 继承（纸张/页边距不变），实测版式不动。
+    if pn_on and (page_cfg.get("toc") or {}).get("on") == "on":
+        _nofoot = ("{counter-increment:pnout 0;"
+                   "@bottom-center{content:none;}@bottom-left{content:none;}"
+                   "@bottom-right{content:none;}}")
+        css += (".md-toc-wrap{page:pn-toc;}"
+                "@page pn-toc" + _nofoot
+                + "@page pn-toc:left" + _nofoot
+                + "@page pn-toc:right" + _nofoot)
     return css
 
 
@@ -5494,7 +6155,7 @@ def _native_fullbg(body_html, paper_w, paper_h, mt, mr, mb, ml, paper_bg=""):
             combos[key] = name
             # 命名页 margin 归零：这一页的内容区就是整张纸，元素才量得出
             # 纸宽/纸高。background 与基础 @page 同色，避免页内出现接缝。
-            css.append('@page %s{margin:0;%s}' % (
+            css.append('@page %s{margin:0;counter-increment:pnout 0;%s}' % (
                 name, ("background:%s;" % paper_bg) if paper_bg else ""))
             css.append(
                 '.full-page[data-mde-pg="%s"]{page:%s;'
@@ -5527,7 +6188,9 @@ def _native_fullbg(body_html, paper_w, paper_h, mt, mr, mb, ml, paper_bg=""):
     return "".join(css), "".join(out)
 
 
-def build_paged_html(md_path, body_html, ts_css, page_cfg, native=False):
+def build_paged_html(md_path, body_html, ts_css, page_cfg, native=False,
+                     default_font=None):
+    """native=True 出原生打印产物。"""
     paper = page_cfg.get("paper", "A4")
     pw, ph = page_cfg.get("pw", ""), page_cfg.get("ph", "")
     if paper == "custom" and pw and ph:
@@ -5637,8 +6300,22 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg, native=False):
         # 纸色走 @page 背景（见 _native_page_css 注释）：深色纸时整张纸都深，
         # 页边距不再留白。浅色纸不写，保持浏览器默认白纸。
         _paper_bg = "#1a1a1c" if str(page_cfg.get("tone") or "") == "dark" else ""
+        # 静态区规则的区清单（文档顺序，v2.39.1）：id + 编号档位。与
+        # _noll_spans 扫描同款正则；解析器保证 page-region 不嵌套但内部可
+        # 有任意 div。page_css 生成时真值（每区页数）若已在 page_cfg 里，
+        # 各区命名页规则直接烤成静态 CSS（见 _native_page_css）。
+        _pn_regs = []
+        for _m in re.finditer(
+                r'<div class="[^"]*\bpage-region\b[^"]*"[^>]*>',
+                body_html or ""):
+            _idm = re.search(r'data-pr-id="([^"]*)"', _m.group(0))
+            _pnm = re.search(r'data-pn="([^"]*)"', _m.group(0))
+            if _idm:
+                _pn_regs.append({"id": _idm.group(1),
+                                 "pn": _pnm.group(1) if _pnm else ""})
         page_css = _native_page_css(size_str, mt, mr, mb, ml, pn, page_cfg,
-                                    icb_w, paper_bg=_paper_bg)
+                                    icb_w, paper_bg=_paper_bg,
+                                    regions=_pn_regs)
 
     # TOC + 锚点
     # v2.21.0 级别排除：排版设置「不计入目录」勾选 #/##/### 后，对应级别的
@@ -5770,6 +6447,20 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg, native=False):
     # 在分页导出中消失的根因；置于 ts_css 之前，排版设置的 !important 仍可覆盖
     base_css = (PAGED_BASE_CSS.replace("__IMGMAXH__", ("%.2f" % img_maxh))
                 .replace("__PAGECH__", ("%.2f" % page_ch))) + FIGCAP_BASE_CSS
+
+    # v2.35.1 默认字体显性传递：全链路 CSS 不点名任何字体（版权立场，见
+    # PAGED_BASE_CSS 注释），正文栈停在 sans-serif 泛型族，实际命中谁由
+    # 浏览器环境决定——而无头打印实例对泛型族的解析与有头预览不同
+    # （实测 en 无头回落 NSimSun、预览是系统默认无衬线），同一段 CSS
+    # 两端排出不同页数。前端导出前在预览环境探测泛型族实际命中的字体
+    # （FontFace local() 探存在性 + canvas 字形像素定位回退，见
+    # detectDefaultFont），作为运行时事实随请求传 defaultFont；产物里
+    # 点名它 = 导出与预览同字体。此规则置 base_css 尾部（在 ts_css 之
+    # 前）：面板设置了字体档时 tsCss !important 照常覆盖。
+    _dfont = str(default_font or "").strip().replace('"', "")
+    if _dfont:
+        base_css += ('\n.markdown-body{font-family:-apple-system,'
+                     'BlinkMacSystemFont,"%s",sans-serif;}' % _dfont)
 
     # v2.27.1 纸张底色（深/浅）。正文与边框取色由前端 ts_css 里的
     # .markdown-body.md-tone-* 给出（与预览、HTML 导出同一份 ts-style，单源）；
@@ -5981,8 +6672,10 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg, native=False):
     title = title.strip() or "未命名文档"
 
     if native:
-        # 原生打印产物：只有 CSS 契约与内容，一行脚本都没有——分页完全交给
-        # 浏览器打印引擎。print-color-adjust:exact 是纸色/封面背景能印出来的
+        # 原生打印产物：CSS 契约 + 内容 + **唯一一段页内页码脚本**。分页本身
+        # 完全交给浏览器打印引擎，脚本只做两件事：量出每个标题落在第几页、
+        # 把实测数字写进 @page 的 margin box（两遍法，零三方包）。
+        # print-color-adjust:exact 是纸色/封面背景能印出来的
         # 前提（实测：同文档不加则输出纯白纸，加了背景照原样输出）。
         _npaper = paper_css
         if "print-color-adjust" not in _npaper:
@@ -6009,11 +6702,49 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg, native=False):
         # 对话框「背景图形」开关影响，见 _native_fullbg。
         _fullbg_css, body = _native_fullbg(body, _paper_w, paper_h,
                                            mt, mr, mb, ml, _paper_bg)
+        # v2.35.0 页码/目录页码：唯一注入的一段脚本（体积小、只数页不排页，
+        # 分页仍然完全交给浏览器打印引擎）。不做这件事的话，{P}/{N} 只能印
+        # 物理页数（含目录页），目录条目也永远没有页码——CSS 的 target-counter
+        # 与 leader() 在这个内核里都不支持（2026-11-04 实测）。
+        # 只挂一处，失败即退出：__pnReady 置位后照旧打印，页脚退回兜底值。
+        _pnjs = ""
+        if pn.get("on") == "on" or toc_cfg.get("on") == "on":
+            _cfg = {"cw": round(icb_w * 96.0 / 25.4, 3),
+                    "ch": round(max(50.0, float(paper_h) - float(mt)
+                                    - float(mb)) * 96.0 / 25.4, 3),
+                    "tpl": pn.get("tpl") or "{p}",
+                    "size": pn.get("size", 9),
+                    "pos": pn.get("pos", "outer"),
+                    # 页码关、只开目录时脚本照样要跑（目录要页码），但**一条
+                    # 页脚规则都不许生成**——否则页区循环会凭空造出页脚。
+                    "pnon": 1 if pn.get("on") == "on" else 0,
+                    "box": PAGED_PAGE_BOX.get(pn.get("pos") or "bc",
+                                              "@bottom-center")}
+            # v2.37.0 两遍法第二遍：宿主用打印引擎量出的真值，原样交给页内
+            # 脚本覆盖测量盒的估计（{P} 与各区 {N}）。白名单构造，这里单独挂。
+            _tp = (page_cfg or {}).get("truePages")
+            if isinstance(_tp, dict) and _tp:
+                _cfg["truePages"] = _tp
+            _pnjs = ("<script>window.__PNCFG=%s;</script><script>%s</script>"
+                     % (json.dumps(_cfg, ensure_ascii=False), _PN_FILL_JS))
+            # 脚本本体不含 "</script" 字面量，无需转义；**不要**把闭合标签转成
+            # <\/script——那样标签不再闭合，后面的脚本会被当成文本，整段不执行
+            # （2026-11-04 实测：__pnReady 永远为 undefined）。
+        # 纸张几何随产物带走（v2.37.1）：宿主量页要用 Shell 的 PrintSettings
+        # 重建同一张纸——PrintSettings 的 PageWidth/PageHeight 默认 Letter，
+        # 会盖掉 CSS @page。写死 A4 的话，换 B5/A5/自定义纸型量出来的页数就
+        # 不是纸上那个数（量的是 A4 上的分页）。这里把真实几何交出去。
+        _paperjs = ("<script>window.__PNPAPER=%s;</script>"
+                    % json.dumps({"w": _paper_w, "h": paper_h,
+                                  "mt": mt, "mr": mr, "mb": mb, "ml": ml},
+                                 ensure_ascii=False))
+        # 打印窗口自触发：与页码脚本相互独立——页码关掉、只开目录时也要能打印。
+        _auto_js = "<script>" + _PRINT_AUTO_JS + "</script>"
         html = (
             '<!DOCTYPE html>\n<html lang="zh-CN"><head><meta charset="UTF-8"><title>%s</title>'
-            "<style>%s</style><style>%s</style><style>%s%s%s%s</style>"
+            '<style id="pnpage">%s</style><style>%s</style><style>%s%s%s%s</style>'
             '</head><body class="markdown-body %s"><div id="paged-content" class="markdown-body %s">%s</div>'
-            "</body></html>"
+            "%s</body></html>"
         ) % (
             html_module.escape(title),
             page_css,
@@ -6026,6 +6757,7 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg, native=False):
             tone_cls,
             tone_cls,
             body,
+            _paperjs + _pnjs + _auto_js,
         )
         return html
 
@@ -6247,6 +6979,26 @@ def _pick_dir_subprocess():
         return r
     _pickdir_log("modern: 不可用/无返回（未回退）")
     return ""
+
+
+def _find_edge_chromium():
+    """找本机 Edge/Chrome 可执行文件（同为 Chromium 内核，CLI 打印参数
+    一致）。顺序：PATH → 常见安装位置。找不到返回 None（调用方报错，
+    不猜第三套路径——fail-closed）。"""
+    for name in ("msedge", "msedge.exe", "chrome", "chrome.exe"):
+        w = shutil.which(name)
+        if w:
+            return w
+    cands = (
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    )
+    for c in cands:
+        if os.path.isfile(c):
+            return c
+    return None
 
 
 def _pickdir_log(msg):

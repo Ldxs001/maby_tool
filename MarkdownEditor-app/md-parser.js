@@ -1055,6 +1055,18 @@ function _scanBeginBlock(lines,startIdx,teams){
   var inner=[],stack=[],closed=false,k=startIdx;
   while(k<lines.length){
     var ln=lines[k];
+    /* v2.35.1 围栏豁免：``` 代码块里的 @@ begin/end 是**展示用法的字面文本**，
+       不得参与块配对——否则代码块里写 @@ end page 会把真实页区提前闭合、
+       写 @@ begin page 会假入栈吞掉真正的闭合。配对规矩与主循环同一套
+       （开 N 个反引号，个数恰为 N 的行收尾；未闭合时其后所有行都按内容
+       处理，与主循环 D103 口径一致）。 */
+    if(_fenceLen(ln)>=3){
+      var _sfe=k+1;
+      while(_sfe<lines.length&&_fenceLen(lines[_sfe])!==_fenceLen(ln))_sfe++;
+      var _sfeEnd=_sfe<lines.length?_sfe+1:lines.length;
+      while(k<_sfeEnd){inner.push(lines[k]);k++;}
+      continue;
+    }
     var bm=/^[ ]{0,3}@@\s*begin\s+([\s\S]*)$/.exec(ln);
     if(bm){
       var fams=_beginFams(bm[1]),dup=false;
@@ -1861,6 +1873,15 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
           for(var _md=0;_md<_mgl.length;_md++){_mgOpen[_mgl[_md].f]=true;_mgDepth[_mgl[_md].f]=1;}
           while(_mgK2<lines.length){
             var _mln=lines[_mgK2];
+            /* v2.35.1 围栏豁免（与 _scanBeginBlock 同口径）：``` 里的
+               @@ begin/end 文本不参与分段配对，整段围栏按内容收进当前段 */
+            if(_fenceLen(_mln)>=3){
+              var _mgfe=_mgK2+1;
+              while(_mgfe<lines.length&&_fenceLen(lines[_mgfe])!==_fenceLen(_mln))_mgfe++;
+              var _mgfeEnd=_mgfe<lines.length?_mgfe+1:lines.length;
+              while(_mgK2<_mgfeEnd){_mgBuf.push(lines[_mgK2]);_mgK2++;}
+              continue;
+            }
             var _mgBm=_mln.match(/^[ ]{0,3}@@\s*begin\s+([\s\S]*)$/);
             if(_mgBm){
               /* begin 行：行内家族词各 +1（并写 begin 行含多个家族词；

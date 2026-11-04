@@ -601,7 +601,7 @@ def _apply_run_style(run, style_node):
         run.font.italic = True
     if "underline" in sd.get("text-decoration", ""):
         run.font.underline = True
-    fam = _font_family(sd.get("font-family", ""))
+    fam = _font_family(sd.get("font-family", ""), fallback=getattr(_CTX, "default_font", None))
     if fam:
         run.font.name = fam
         # CJK：font.name 只写 ascii/hAnsi 槽位，中文走 eastAsia——
@@ -668,13 +668,17 @@ _CSS_NON_FONTS = {
 }
 
 
-def _font_family(ff):
+def _font_family(ff, fallback=None):
     """CSS 字体栈 → 第一个真实字体名。过滤 WebKit 系统标识符与泛型族
     （-apple-system 不是字体名——写进 rFonts 时 Word 渲染回落且
     v2.4.7 曾把它带入 OMML run 触发"文件损坏"，见 _style_omml 注释）。
-    无真实名返回 None（调用方不写字体槽）。"""
+    无真实名返回 fallback（v2.35.1 默认字体显性传递：前端预览环境
+    探出 sans-serif 实际命中的字体名随请求传来；Word 不是浏览器，
+    泛型族落 Word 主题默认（等线/宋体），与预览从来不同字体——
+    探出的名字写进三槽即与预览一致。探不出（None）不写，维持现状。
+    调用方不写字体槽。"""
     if not ff:
-        return None
+        return fallback
     for part in re.split(r"[,;]", ff):
         fam = part.strip().strip('"').strip("'").strip()
         if not fam:
@@ -682,7 +686,7 @@ def _font_family(ff):
         if fam.lstrip("-").lower() in _CSS_NON_FONTS:
             continue
         return fam
-    return None
+    return fallback
 
 
 def _add_run(para, text, style_node):
@@ -1598,15 +1602,41 @@ def _sanitize_builtin_styles(doc):
     return clean
 
 
-def build_docx(md_path, body_html, ts_css=None, page_cfg=None):
+def build_docx(md_path, body_html, ts_css=None, page_cfg=None,
+               default_font=None):
     """body_html: 已内联样式的 HTML 片段（含 .markdown-body 根）。
     page_cfg: 排版面板 page 节（纸张/页边距），None 用 A4 默认。
+    default_font: 预览环境探出的默认字体名（v2.35.1 显性传递，None 维持
+    Word 主题回落）。存 _CTX（threading.local）供模块级 _apply_run_style 取。
     返回 .docx 字节。"""
+    _CTX.default_font = (str(default_font or "").strip().replace('"', "") or None)
     # v2.16.0 实图输出档位：orig（默认，全用原图）/ 300 / 150
     _mode = str((page_cfg or {}).get("img") or "orig")
     _CTX.img_dpi = 300 if _mode == "300" else (150 if _mode == "150" else 0)
     doc = Document()
     _sanitize_builtin_styles(doc)
+    # v2.35.1 默认字体显性传递的落点：Word 不是浏览器，泛型族落主题默认
+    # （等线/宋体），与预览从来不同字体。run 级 _font_family 只在 run 自带
+    # CSS 时触发（绝大多数 run 无内联 style，兜不到）——必须在文档默认
+    # 样式层写：Normal 覆盖正文/表格/列表，标题/题注各有样式一并写入。
+    # 同时删 theme* 属性：w:rFonts 上 themeAscii/themeEastAsia 存在时
+    # 优先于显式值，不删等于白写。
+    if _CTX.default_font:
+        for _sname in ("Normal", "Heading 1", "Heading 2", "Heading 3",
+                       "Heading 4", "Heading 5", "Heading 6", "Caption",
+                       "Title", "Subtitle"):
+            try:
+                _st = doc.styles[_sname]
+            except KeyError:
+                continue
+            _rpr = _st.element.get_or_add_rPr()
+            _rf = _rpr.get_or_add_rFonts()
+            for _slot in ("ascii", "hAnsi", "eastAsia", "cs"):
+                _rf.set(qn("w:" + _slot), _CTX.default_font)
+            for _slot in ("asciiTheme", "hAnsiTheme", "eastAsiaTheme", "cstheme"):
+                _key = qn("w:" + _slot)
+                if _key in _rf.attrib:
+                    del _rf.attrib[_key]
     _apply_page_section(doc, page_cfg)
     # 列表编号定义要在建 li 段落之前定稿：外凸态编号后走 tab，inside 态走空格
     hang, slot_ol, slot_ul = _list_hang_from_css(ts_css)

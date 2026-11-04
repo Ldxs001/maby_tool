@@ -11,6 +11,133 @@
 
 ---
 
+## v2.39.0（2026-11-04）
+
+**本次改动：打印改为自建面板 + 分页预览（不再借任何浏览器对话框）；导出合并为「导出 ▾」并新增 PDF；修复页码三缺陷（出片不等回填、目录页数量错、罗马区掉全局序兜底）**
+
+**新增**
+- **自建打印面板 + 分页预览**：点「打印」→ 两遍法出片（第一遍量真值、第二遍带真值重出）→ 最终产物经 `PrintToPdfAsync` 落成 `runtime/preview.pdf` 铺满预览栏——预览即打印引擎纸面，页边距、分页、页码为最终形态（屏幕 CSS 多列的页边距只能加在容器上、加不到每一列，给不出带页边距的纸）；预览栏顶栏「打印」→ 自建面板（打印机 / 份数 / 页码范围 / 单双面 / 纸张 / 背景图形）→ `PrintAsync`，`ShouldPrintHeaderAndFooter=False` 写死。实测前提：穿透 `edge://print` 与 WebView2 预览 shadow DOM，`options-setting` 组件仅有「背景图形」一项，`header-footer` 复选框不存在（Edge 156 / WebView2 1.0.3856.49）；关闭页眉页脚的唯一开关只对 `PrintAsync`/`PrintToPdfAsync` 生效，对带预览的对话框无效——「借浏览器拿到勾选项」路径不成立，改自建。
+- **导出改为单个按钮 + 格式下拉**：工具栏「.html」「.docx」两按钮合并为「导出 ▾」，主按钮直接导出 HTML，下拉为 HTML / PDF / Word；**新增 PDF 导出**——与打印同一链路（两遍出片后 `PrintToPdfAsync` 落盘），分页与打印完全一致。
+- **能力边界**：`CoreWebView2PrintMediaSize` 反射实测仅 `Default`/`Custom`，具名纸型不可换，纸张经 `PageWidth`/`PageHeight` 实现；面板选项按 `PrintSettings` 的 `PrinterName`/`Copies`/`PageRanges`/`Duplex`/`ScaleFactor`/`Collation`/`ColorMode` 实现；打印机清单取自 `PrinterSettings.InstalledPrinters`（实测本机 5 台）。
+
+**修复**（页码三缺陷，65 页指南实机复现）
+- **现象**：① 目录条目全部没有页码；② 页脚 `{P}` 印 63（规则应为 61：65 物理页 − 目录 3 − 封面 1），各区 `{N}` 全部缺失；③ 罗马区页不从 i 起（印成全局物理序 `lxv`）、无 `{N}`，并叠印顺延阿拉伯号 `61 / 63`。
+- **根因一（宿主就绪判定竞态）**：about:blank 的 `document.readyState` 也是 `'complete'`——`pdf_measure`/`pdf_save` 建窗后首次查询即误判加载完成，`__PNCFG` 探到 undefined（日志 `readyState=loading waited=0.0s` + `no pn script`），pnReady 等待整体跳过，页内回填（目录页码、区命名页规则）未跑完即 `PrintToPdfAsync`。修法：`md_app.pyw` 新增 `_wait_doc()`，就绪判据改为 `readyState=complete` **且**产物标记（`window.__PNPAPER` 或 `#paged-content`）在场，`_wait_ready` 与 `pdf_measure` 统一走它。
+- **根因二（目录页数测量连坐）**：目录 `.md-toc-wrap` 位于 noll 区内部，`show([], True)` 隐藏全部区时父区 `display:none` 把目录一并隐藏——toc 量成 1 页空白（真值 3），`P = 65 − 1 − 1 = 63` 被当真值写入 CSS。修法：目录页数改算术——宿主区整区出两次片（带目录 / 不带目录），差即目录页数；区结构原样不动，不产生命名页换名催出的空白首页；目录不在任何区里时走原单显路径。
+- **根因三（静态兜底口径）**：`@page pn-roman` 兜底用 `counter(page)`（全局物理序）且不压默认页 margin box。修法：`md_server.py` 静态区规则——第二遍持有 `truePages.regions` 时按文档顺序给非 noll 区烤出与页内 `applyCss` 同构的命名页（`pnrK`/`pnregK`，`{p}`=区计数器、`{N}`=真值字面量、罗马区转罗马、`increment:pnout 0`、`:left/:right` 三件套，`data-pr-id` 映射后写胜出）；罗马兜底升级为各档专属计数器 `pnroman`/`pnromanuc`（零 reset 架构，单罗马区从 i 起连续编号；同档多区跨区续算为已知边界），其余 margin box 显式压 none，`counter-increment` 换声明后 pnout 不再被罗马页推进。区清单由 `build_paged_html` 从 body 扫 `.page-region[data-pr-id]/[data-pn]` 传入；真值缺某区跳过该区让兜底顶上，fail-closed。页内脚本失联时纸面仍为 `1 / 60`、`i / i`。
+- **i18n 补漏 15 条**：审计（DOM 文本/五类属性 × `I18N_EN`∪`I18N_RE` 双向对账，`Temp/_i18n_audit3.py`）发现英文界面缺译——工具栏打印/导出/导入 tooltip 4 条、状态栏「语法检查」、元数据分类/归属/纸张底色 placeholder 4 条、**导出下拉三项的主文案与副提示 6 条**（HTML/PDF/Word 各两行，v2.39.0 新 UI 未登记词条），补入 `I18N_EN` 增补区；补后 DOM 缺译 15→1，剩余 1 条为 low runner 面板的 run 示例代码（代码即代码，不译）；题注「图/表」编号属文档产物，不随 UI 语言翻译（`T()` 未命中即原样返回，行为不变）。审计器修正一处误报并删除随之误加的重复词条：「保存母版／存为母版」自 v2.28.0 起已在词表（审计器字典重建漏扫该增补块），重复补入的两条已删，v2.28.0 原值保留。
+- **pypdf 版权三处补齐（v2.38.0 引入依赖时的遗漏）**：`LICENSES/pypdf-LICENSE.txt`（BSD-3-Clause 原文，自 `pypdf-6.14.2.dist-info/licenses/` 逐字拷入）；`LICENSES/README.txt` 组件清单加行；`docs/版权与开源组件声明.md` 中英两节各加表格行（用途＝打印目录页码真值）、BSD-3-Clause 要点条目加入 pypdf、发行形态差异注明 pip 版不含 pypdf。
+
+**测试**
+- **静态探针 `Temp/_probe_static_region.py` 22/22**：pnr 规则、罗马换算边界、映射顺序、无真值不烤、缺区跳过、兜底三件套。
+- **`_test_v230_native_print.py` 39/39**；**`_test_v2350_pn.py` 30 PASS / 2 FAIL** 与修前同数同项（G 长表 thead 漂移为挂账遗留，非本次引入）；py_compile 双文件通过。
+- **`PrintAsync` 落纸行为未实测**（会真实出纸），待实机点一次确认；宿主就绪判定与目录算术预期输出：65 页 = 封面无号 + 目录 3 页无号 + 正文 `1/60…60/60` + 罗马 `i / i`，目录条目带页码。
+
+---
+
+## v2.38.0（2026-11-04）
+
+**本次改动：目录条目页码改用打印引擎真值（pypdf 从第一遍 PDF 读标题落页），不再用测量盒估算**
+
+**新增**
+- **目录真值链路**：第一遍 PDF 由 `pypdf` 逐页提取文本，按标题在文档中的先后顺序逐页前扫，命中即记物理页，回传 `truePages.headPages`，页内 `measure()` 优先取用（`CFG.truePages.headPages`），无真值的标题退回估算。一次出片覆盖全部标题，不为每个标题单独渲染（50 个标题需多跑几十次出片）。
+
+**变更**
+- **运行时新增依赖 `pypdf`**（纯 Python，BSD-3-Clause，随便携运行时分发，已放入 `python/Lib/site-packages/`）。
+
+**修复**
+- **两处提取适配（实测定位）**：① 中文标题混排不同字体时 PDF 绘制顺序会把标题拆开，整串匹配恒失——改为 10/8/6/4 字长度递减取前缀；② 目录页包含全部标题文本，判据不能用「页内含『目录』二字」（正文讲目录功能也命中，实测误伤 23 页）——改为「一页同时命中 ≥8 个标题」（目录页实测 27/28，正文最密页仅 4）。
+
+**测试**
+- **指南文档真值配置**：`total=57 / toc=3 / P=53`，`headPages=65/66`；目录号与纸面页脚比对 **0 条不一致**；页脚序列前 12 页 `[无,无,无,无,1,2,3,4,5,6,7,8]`（3 页目录 + 1 页 noll 封面不编号，正文从 1 起）。整轮 10.4s（含 pypdf 解析 3s）。
+
+---
+
+## v2.37.0（2026-11-04）
+
+**本次改动：页码两遍法实机落地（宿主用打印引擎出片量真值，PDF 只当卷尺）；打印通道迭代（独立窗口 → 系统浏览器）**
+
+**新增**
+- **两遍法**：第一遍由宿主 `CoreWebView2.PrintToPdfAsync`（与打印预览同一套引擎）静默出 PDF，纯标准库数页；第二遍带真值重出打印页，页脚印真数，仍走 `window.print()` 系统打印对话框；拿不到宿主能力（浏览器直开）时退回测量盒估计值。分区量法依据：每个 `.page-region` 强制从新页起，「单独渲染一个区」的页数等于其在全文中的页数（实测 57 = 目录 3 + 封面 1 + 正文 52 + 罗马 1）；`P = 全文 − 目录 − 所有 noll 区`。页数统计用 `/Type /Page` 计数（PDF 页树嵌套，`/Count` 取首个会误判，实测 58 页文档页树含 8/8/8/8/8/8/2/58 多个 `/Count`）。
+- **纸张参数对齐**：产物携带 `window.__PNPAPER`（真实 `paper_w/paper_h/mt/mr/mb/ml`），宿主读它建同一张纸——原先硬编码 A4/25/18mm，换纸型时量错纸。实测 `PrintSettings` 不显式设纸张与边距时默认 Letter 盖掉 CSS `@page`；headless CLI `--print-to-pdf` 不认 CSS 页边距（5mm 与 20mm 产出页数相同），不可用。
+
+**修复**
+- **两遍法首版转圈 20 秒**：`CoreWebView2` 属性有 UI 线程亲和，后台线程直读每次抛 `CoreWebView2 can only be accessed from the UI thread` 且被 `except: pass` 吞掉，就绪循环空转到上限。修法：所有触碰 `CoreWebView2` 的读与调用经 `control.Invoke` 回 UI 线程，就绪判定改为「UI 线程取引用」，`rounds=0~1` 即成功，40 秒空等消失。
+- **打印窗口白页**：`/api/export-paged` 返回站内相对地址，`webview.create_window` 原样交内核 `Navigate`，非绝对 URI 渲染空白（pywebview `_resolve_url` 空前缀原样返回）。修法：前端 `new URL(full, location.href)` 补绝对地址 + 宿主 `urljoin` 兜底；`window.print()` 后不再立即 `close()`（WebView2 预览异步拉起会被一起关掉），改 `afterprint` 收窗 + 20s 兜底；打印按钮 1~5 秒生成期加 `is-busy` 转圈禁点，成功/失败/超时路径均复原。
+- **进度日志全 404**：`uiBeacon` 原用 `navigator.sendBeacon`（默认 POST），服务端 `/api/log` 只挂 `do_GET`，每发静默丢弃。改 `fetch(..., {keepalive:true})` 走 GET。
+- **无效等待与真值失效**：页码与目录全关时产物无 `__PNCFG`，固定等待 12 秒属无效等待（实测整轮 5s→17s）——改为先探测 `typeof window.__PNCFG`；前端把 `truePages` 放 payload 顶层而服务端白名单只取 `cfg` 内，第二遍等于没有真值（罗马区印 `i / ii`）——改写进 `payloadObj.cfg.truePages`，服务端兼容顶层键；量页先等 `document.readyState === 'complete'` 再探测，避免在半加载文档上判断。
+
+**变更**
+- **打印通道改走系统浏览器**：WebView2 仅暴露 `CoreWebView2PrintDialogKind.Browser`（精简预览，选项仅「背景图形」）与 `.System`（无预览，WebView2Feedback #5744），应用内无「页眉和页脚」可达开关。`printDirect()` 改调宿主 `open_print()`：打印页（`?print=1`）交系统浏览器（注册表 App Paths 定位 `msedge.exe`，缺失退默认浏览器，再退应用内窗口），`__pnReady` 置位后自触发 `window.print()`；是否带系统页眉页脚由该浏览器 profile 的 `printing.print_preview_sticky_settings.appState.isHeaderFooterEnabled` 决定。实测：CDP 监视显示 Edge 启动后 1.5s 出现 `edge://print/` 目标、2s 生成 `print.pdf`，无需按键；`ShouldPrintHeaderAndFooter` 关/开两态产物均 65 页（页眉画在页边距内不改分页）；4 秒未收到 `beforeprint` 显示「请按 Ctrl+P 打印」，`afterprint` 后提示打印完成（浏览器标签页无法 `window.close()`）。
+
+**测试**
+- **`test_parser_sync` PASS**；**`_test_v2350_pn.py` 30 PASS / 2 FAIL**（G 长表漂移，与改动前同数同项）；真值链路 `build_paged_html(cfg.truePages=…)` 直测；js_api 线程真实链路复核 `total=54 / toc=1 / pr1=1 / pr2=52 / pr3=1 / P=52`，`sec=4.87~6.52s`，`__pnReady` 0.8~1.5s 置位。
+
+---
+
+## v2.36.0（2026-11-04）
+
+**本次改动：页区编号体系重构（零 `counter-reset`）；代码块内页区指令围栏豁免；默认字体显性传递贯通 HTML／打印／docx 三路导出**
+
+**变更**
+- **页区重编号体系重构（零 `counter-reset`）**：区域重编号弃用 `counter-reset`（命名页挂 `counter-reset` 会在该页名下每一页重放，`_micro_reg2` 探针实测两页区域 R1=R2=reset 值，多页区域按档位重编在该机制上不成立），改为页上下文计数器：默认页 `counter-increment:pnout 1`；`pn-toc`/`pn-noll`/`mdefbg` 命名页 `counter-increment:pnout 0` 跳号；每个编号区独立计数器 `pnregK`（区页声明 `pnout 0 pnregK 1`），区内页脚 `counter(pnregK)` 从 1/i/I 重编，区外连续号自动跳过区页。元素级 `counter-reset` 触不到页上下文（`_micro_pgctr` 系列 5 项实测），页上下文计数器是唯一可行层。实测三区段样本页脚逐页 `[i|7|2][ii|7|2][1|7|7][2|7|7][1|7|2][2|7|2][3|7|7]`；真指南全管线页脚 `P5=[1|53]…P57=[53|53]`，末页罗马区 `P58=[i|53]`；目录条目罗马形态与页脚同源。
+- **默认字体显性传递**：同一段零字体名 CSS，有头预览渲染雅黑、无头 CLI 渲染 NSimSun（54 vs 55 页、P2 起逐页错位）、Word 打开 docx 落主题默认（document.xml 零 `rFonts` + theme `ea=""`）——泛型族 `sans-serif` 由各端默认设置解析，零指定不等于结果确定。修法：前端 `detectDefaultFont()`——FontFace `local()` 探系统安装状态（`fonts.check()` 对假字体恒 true 不可用；CJK 全角等宽，宽度法失效），canvas 字形像素对比定位预览实际回退；探出名随 `/api/export-paged`/`/api/export-html`/`/api/export-docx` 传 `defaultFont`；`build_paged_html`/`build_standalone_html` 产物 CSS 栈插值，`build_docx` 写 Normal/Heading 1-6/Caption/Title/Subtitle 样式层 `ascii/hAnsi/eastAsia/cs` 四槽并删除 `*Theme` 属性（theme 属性在场时显式值不生效）。双保险判据：`local()` loaded（系统真实安装）+ 像素一致（预览正在使用）；探不出返回空串维持泛型栈。产物字体名来自运行时探测的**本机实际安装且预览实际使用**的字体，代码零字体名。
+
+**修复**
+- **代码块内 `@@ begin/end page` 误开误闭区域**：围栏里的示例文本被当真指令，真实页区被提前闭合或误开启、后续内容泄漏。根因：`_scanBeginBlock`（md-parser.js）与并写扫描器在裸行数组上直接匹配指令文本，无围栏感知，块家族五个（fill/color/font/full/page）全部走同一函数全部受影响。修法：两处扫描器按 `_fenceLen` 规则（行首反引号 ≥3，开 N 收 N、开合长度严格相等）跳过围栏内容行，区指令只在围栏外生效。实测区域真实闭合、块内指令按字面保留进 `<code>`、顶层围栏不产生区域。
+- **`{N}` 缺值与罗马区 `{N}` 走阿拉伯**：占位判据只看模板里有无 `{P}`，只写 `{N}` 的模板（如 `{p} / {N}`）整段丢 N 印出「3 / 」——改为 `{P}`/`{N}` 任一存在即输出占位；`{N}` 是实测静态数字、生成规则未转档位，罗马区印「i / 1」——改按区档位显式转罗马。口径钉死：`{N}` 恒指**本页区（page 包围盒）内**页数，区外兜底取全文可编号页数。
+- **封面页静默计入页号（`mdefbg` 命名页）**：整页背景封面挂 `@page mdefbgK{margin:0}`，margin 归零后 margin box 无处渲染，但 `counter-increment` 是页上下文属性照常生效，封面页静默吃号，正文页脚从 `[2|…]` 起。修法：`@page mdefbgK` 追加 `counter-increment:pnout 0`，整页背景页不占号，修复后正文首页 `[1|53]`。
+- **解析器围栏豁免回灌**：`markdown-editor.html` 内嵌解析段的 `_scanBeginBlock` 与并写分支未与 `md-parser.js` 同步补围栏豁免，入口文档里 `@@ begin page{1}` 长期「未闭合」、正文页区不建立、标记原样上纸。回灌后 `_test_parser_sync.py` 由 FAIL 转 PASS（core 2073 行逐字节全等），指南诊断 3 条归零、页区恢复 3 个。
+
+**说明**
+- **测量盒 vs 真实打印漂移根因（挂账另案）**：测量盒 56 列 vs 真实打印 58 页、`{P}`=53 应为 54、66 条目录 43 条错位。CSS 消融实验定位：`thead{display:table-header-group}` 表头跨页重复——真实打印每续页重复表头多占一行，多列测量盒不重复，下游测量偏早、偏移随文档累积；摘掉表头重复后测量 53 列 = 真实 53 页、66 条目录 65 条对齐（仅剩末尾 1 条亚像素残余）；摘掉 `tr{break-inside:avoid}`/`orphans/widows` 无改善；多列上下文镜像 `break-after:avoid` 反而更差（56→57→56），`_PN_FILL_JS` 的 `MEAS_CSS` 已留注释禁止镜像。
+- **无头 CLI 出片方案实施后整体回退**：为取打印真值曾实施 `/api/export-pdf` 无头 CLI 路由（前端弃 iframe+`print()` 改 `pdfDirect`）。裁定口径：点击「打印」必须直接调系统打印对话框，不是生成 PDF 文件——v2.35.0 的两遍法一直走系统打印路径，该改动属改坏既有机制。回退内容（`MD_SERVER_VERSION` 141→142）：前端恢复 `#pagedFrame` 隐藏 iframe（元素/CSS/`printDirect()` 含 `__pnReady` 等待与 6s/12s 双兜底）；服务端删除 `/api/export-pdf` 路由、零依赖 PDF 探针（`_pdf_*`）、CLI 两遍逻辑（`_two_pass_pdf`/`_print_pdf_cli`）、`build_paged_html` 的 `mark/probe/pn_static/mark_out` 参数与静态回填分支。内置页眉页脚口径补正：其为浏览器对话框的用户选项之说不适用于 WebView2 内嵌预览（该项不存在），打印通道后续迭代见 v2.37.0 与 v2.39.0。
+
+**测试**
+- **`_test_v230_native_print.py` 39/39**（契约第 75 行同步 `counter(pnout)` 口径）；**`_test_v2350_pn.py` 30 PASS / 2 FAIL**（G 长表漂移挂账，与改动前同数同项）；**`_e2e_http_pn.py` 全链路绿**（目录页码回填、`{P}/{N}` 就地改写、区页独立计数）；**`Temp/_e2e_defaultfont.py` 10/10**（产物含唯一点名规则、无 `defaultFont` 维持泛型栈、docx 样式层四槽齐、run 级显式字体仍优先、无头 CLI 重打 PDF 内嵌字体 NSimSun→MicrosoftYaHei、真实页面探测返回 `Microsoft YaHei`）；**`build_docx` 回归 5/5**（便携 python 直调）；**`test_parser_sync` PASS**；**`Temp/_cmp_pn.py` 8/8**（旧含表格样本新旧页号体系逐页一致）。
+
+---
+
+## v2.35.0（2026-11-04）
+
+**本次变更：打印页码体系补齐——`{P}`／`{N}` 真正计数、目录页不印号不占号、目录条目带回点线引导页码**
+
+**修复**
+
+- **`{N}` 原样印出、`{P}` 把目录页算进去**：现象——页脚模板 `p{p}/P{P}/N{N}` 印成 `p3/P{N}/N{N}` 一类字符串，`{P}` 始终等于物理页数。根因——`_pn_content` 只识别 `{p}`／`{P}`，`{N}` 从未实现；`{P}` 走 CSS `counter(pages)`，那是物理页数，内核不会替调用方剔除不该编号的页。修法——`{N}` 改为输出未定义计数器 `counter(pn-region-pages)` 占位（未知计数器按 0 渲染，仍是合法 CSS），由页内脚本按实测值精确替换；`{P}` 同样在 `#pnpage` 里就地改写。
+- **目录页被计数且带页脚**：现象——目录页底部印 `0`／`1`，正文首页从 `2` 起。根因——`tocOnly()` 只存在于 Paged.js 回退链路的 JS 里，v2.30.0 起默认走的原生 `@page` 链路没有对应规则。修法——目录块挂命名页 `@page pn-toc`，三个方位 `content:none` 且 `counter-reset:page 0`（`counter-reset` 只对**本就独占页**的元素生效，挂到跨页元素会把整区页号冻在同一值）。
+- **目录条目没有页码**：现象——条目右侧一片空白，无点线也无数字。根因——目录页码的标准写法 `target-counter(attr(href), page)` 与 `leader('.')` 在本机内核（Edge 156，与 WebView2 运行时同版本号）均不支持，微探针逐一实测确认。修法——改为页内测量后注入 `.toc-dots` ＋ `.md-toc-pg`，页码与页脚同源。
+- **页码关闭、只开目录时凭空出现页脚**：页区循环无条件生成 `@page` 页脚规则，关掉页码也照发。修法——配置增加 `pnon` 开关，页码关闭时一条页脚规则都不生成，目录回填照常。
+- **页码模板的语言跟随是死代码**：打印载荷在 `page.num.tpl` 上切中英文，而页码配置实际存在 `page.pn.tpl`（`num` 属于列表编号 `tsCfg`，`page` 里没有这个键），英文界面永远拿不到 `Page {p} of {P}`。修法——改读 `page.pn.tpl`。
+
+**新增**
+
+- **页内两遍法 `_PN_FILL_JS`**：零三方包、零外部进程、不联网。把内容灌进「版心宽 × 版心高」的隐藏多列容器（`column-width:CW; height:CH; column-fill:auto`），让浏览器自己做真实断行断页，元素落在第几列即第几页；再按实测数字生成 `@page` 规则、回填目录页码。分页本身仍完全交给打印引擎，脚本只数页不排页。
+- **前件归零**：目录与「开头连续」的 `noll` 页区挂 `pn-lead` 页名并 `counter-reset:page 0`，正文从 1 起。中途的 `noll` 区不动——它不印号但占号，属编号流的一部分。
+- **打印前等待**：`printDirect` 等到 `window.__pnReady` 再呼出打印对话框，6 秒硬兜底、12 秒二层兜底；量不出来照旧打印，页脚退回合法兜底值，绝不卡死。
+
+**变更**
+
+- **`{P}` 口径**：由「物理页数」改为「参与编号的页数」——目录页与开头不编号的封面／前言不计，中途 `noll` 区仍计。目标是末页印出的「共 N 页」等于实际能翻到的最后一个页码。此项改变了既有输出，故按次版本号发布。
+- 面板提示、使用指南、`_pn_content` 文档串同步新口径。
+
+**测试**
+
+- 新增 `_test_v2350_pn.py`（真引擎 Edge 156，6 个样本 24 项全 PASS）：目录页无页脚／正文首页印 1／页号连续／`{P}` = 可编号页数／目录页码与页脚一致（按 PDF 里隐形 1px 标记的真实落页比对）／`noll` 区不印号／页码关时全文无页脚且目录仍有页码。
+- 新增 `_test_v2350_mirror.py`（6 项全 PASS）：静态比对打印 CSS 每条 `break-*:page` 与测量盒每条 `break-*:column` 的镜像关系。负向对照已验证——抽掉任意一条镜像即 FAIL。此测试挡的是开发期实际事故：漏镜像 `.page-region` 的 `break-after` 后，真值 7 页量出 5 页、每个标题错 1~2 页，而所有字符串断言仍全绿。
+- `_test_v230_native_print.py` 36 → 39 项全 PASS：旧断言「产物不含任何 `<script>`」随实现更新为「无外链脚本 ＋ `<script>` 与 `</script>` 计数相等 ＋ 带 `__PNCFG`/`__pnReady` ＋ 不含 Paged.js」，并新增「闭合标签未被转义成 `<\\/script`」一条——该事故曾导致标签不闭合、后续脚本全部变成纯文本。
+- `_test_paged_e2e.py` 64 项 5 FAIL，与基线同数同项（E7／E24／E36／E43／E44），无新增。
+- `_probe_units.py` 6 项、`_probe_units_i18n.py` 全 PASS（面板文案改动未破坏单位标注与英文界面）。
+- `_e2e_http_pn.py`：走真实 `POST /api/export-paged` → `/static/*.print.html` → PDF 的完整链路，7 物理页、目录 5 条均带页码、点线节点 5 个。
+
+**说明**
+
+- 真实稿件复核：封面 ＋ 跨两页目录 ＋ 40 章正文，物理 43 页，正文从 p1 起、`{P}`=40、`{N}`=40，目录 40 条页码与页脚逐条一致。
+- 目录页多页时同样不印号、不占号（`@page pn-toc` 对每一页都生效）。
+- 外侧页码奇右偶左经 PNG 目视复核：正文首页页脚在右下，次页在左下。
+
+---
+
 ## v2.34.0（2026-11-04）
 
 **本次变更：排版单位口径统一——字号一律 pt，段间距一律「倍」，用户可见面不再出现磅 / em / px 混说**

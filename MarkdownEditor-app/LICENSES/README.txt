@@ -14,6 +14,7 @@
 - Vega-Embed-LICENSE.txt       Vega-Embed 7.3.0（vega 围栏嵌入渲染，vega/）        BSD-3-Clause
 - Python-PSF-License.txt       Python 3.11.9 便携运行时（python/）                 PSF License 2
 - Pillow-LICENSE.txt           Pillow 13.0.0（python/Lib/site-packages/PIL/）      HPND (MIT-CMU)，含 wheel 内捆入 C 库许可全文
+- pypdf-LICENSE.txt            pypdf 6.14.2（python/Lib/site-packages/pypdf/）     BSD-3-Clause
 
 docxdeps/ 下另有 docx 导出依赖组的许可原文（docxdeps/LICENSES/，含 python-docx、lxml、
 latex2mathml、typing_extensions 与 Pillow 10.0.0），与本目录并行保留。

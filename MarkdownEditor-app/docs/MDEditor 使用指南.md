@@ -1,10 +1,11 @@
 @@ meta
 
-@@ begin full{m:![](MDEditor 使用指南.assets/20261103_010158_8502.png) f cc} font{25} color w
+@@ begin page{noll} full{m:![](MDEditor 使用指南.assets/20261103_010158_8502.png) f cc} font{25} color w
 # MDEditor 使用指南
 @@ blank{3}
-@@ end full font color
+@@ end page full font color
 
+@@ begin page{1}
 **本工具由 AI 辅助生成**：零依赖单文件 Markdown 编辑器，左侧写作、右侧实时渲染，全程本地运行。
 
 > 本指南对应 **v2.28.0**。语法有增补时，先看文末「语法速查」；每条写法后面的章节名指向详细说明。
@@ -19,8 +20,8 @@ The interface is bilingual. The small **EN / 中** button in the status bar swit
 | Import | The small caret ▾ right of **Open** → *Import…* converts external Markdown (web pages, AI answers, other editors) into this dialect: list markers, `~~~` fences, inline HTML, footnotes and reference links are rewritten, and nesting becomes `<<<` with one more chevron per level. The source file is never modified. |
 | Save / Save as | **Save** writes back to the original file; **As…** picks a folder and a format (`.md` with a sibling `.assets` folder, or a single-file `.smd`); the caret ▾ beside it holds **Save as template**, which writes a master into the fixed template library (`.smdm`) without asking for a folder. |
 | Split / follow | **Split** cycles editor-only, split, preview-only. **Follow** keeps the preview scrolled to the cursor. |
-| Print / PDF | **Print** builds a paged HTML (paper, page numbers, contents, figures and tables numbered) and opens it; press `Ctrl+P` there to print or save as PDF. |
-| Export | `.html` for a styled single file; `.docx` for an editable Word file with styles and real formulas. |
+| Print / PDF | **Print** renders the true paper pages with the print engine itself (margins, page numbers, contents all final) into the preview pane; the bar above it opens the built-in print panel (printer, copies, range, duplex, paper, background) — no headers/footers exist at all. **Export ▾ → PDF** saves the same pages as a PDF file. |
+| Export | **Export ▾** — main button writes `.html` (styled single file) in one click; the dropdown holds HTML / PDF / Word. PDF shares the print pipeline, so its pagination is identical to printing; `.docx` is an editable Word file with styles and real formulas. |
 | Typesetting | **TS** opens fonts and sizes, table style, paragraph indent, paragraph gap, hanging list markers, page setup and autosave. |
 | Image output | **TS → Image output**: *Original* (default, untouched), *300 dpi* or *150 dpi*. Export copies are downscaled to each image's real printed width (`width_mm ÷ 25.4 × dpi`), never upscaled, and only when it actually saves bytes. Print/PDF, `.html` and `.docx` all follow; the files on disk are never modified and the preview always uses thumbnails. |
 | Language | Status bar **EN / 中**, remembered on this machine. |
@@ -735,6 +736,7 @@ run 库里的 `plotimg` 用工具自带的 Pillow 直接把编辑区的数据画
 ## 九、排版（工具栏「排版」按钮）
 
 - 每种元素（正文 / H1 / H2 / H3~H6 / 引用 / 列表 / 表格 / 代码）可分别设置**字体、字号、对齐**；**字号一律以 `pt` 为单位（1 pt = 1 磅）**，范围 6–72，留空＝自动；**图片**元素只有**对齐**档（图片无字体字号语义），单图可用 `{N c/l/r}` 后缀覆盖
+- **未点名字体时各端用同一个**：排版面板没写具体字体名的元素，导出（HTML／打印／docx）不会各猜各的——应用启动时探测预览实际回退到的系统字体，把探测结果显式写进三条导出通道（docx 写进 Normal 与各级标题样式），Word 打开不再落回 Word 自己的主题默认（v2.36.0 起；代码零字体名，探测不到时维持原泛型栈）
 - **单位分工（v2.34.0 统一口径）**：字号一律 **pt**（每个字号框右侧固定标 `pt`，留空＝自动，即沿用该元素的默认档）；纸张与页边距 **mm**；段落缩进 **字符**（随字号自动换算）；统一段间距 **倍**（1 倍 = 一个正文字号高）；图片输出 **像素／dpi**。界面里不会再出现 `px`——那是屏幕像素，只在内部布局计算里用，预览参考线标注的四边距也是 mm
 - 对齐支持：默认 / 左 / **居中** / 右 / 两端
 - 段落缩进按元素独立：**正文**提供首行缩进或悬挂缩进（字符数可调，随字号自动换算）；**列表**与**引用**各只有一个「**整体缩进**」档——整项 / 整块一起右移 N 字符，不再分首行与悬挂
@@ -781,10 +783,11 @@ run 库里的 `plotimg` 用工具自带的 Pillow 直接把编辑区的数据画
   - 编码选型：带透明通道、或抽样色数 < 4096 的图（截图、线稿、图表）走 PNG 无损；其余走 JPEG q92
   - **预览不受此项影响**：预览栏始终按栏宽要缩略图（`宽 × DPR`）＋懒加载，切档位不会让预览变糊或变慢
 - **页码**（v2.17.0 扩了占位符）：是否显示、位置（外侧奇右偶左 / 底部居中 / 底部右侧 / 底部左侧 / 顶部居中 / 顶部右侧）、模板与字号
-  - 模板里三个占位符：`{p}` 当前页序号、`{P}` 全文可编号页数、`{N}` 当前页区的总页数（未划页区时 `{N}` 与 `{P}` 同值）
+  - 模板里三个占位符：`{p}` 当前页序号、`{P}` 参与编号的页数（目录页与开头不编号的封面不计）、`{N}` 当前页区的总页数（未划页区时 `{N}` 与 `{P}` 同值）
   - 例：`{p}` 只印数字；`第 {p} 页 / 共 {P} 页` 印全文；`{p} / {N}` 在页区内印本区页数（罗马区的「共 v 页」）
   - 分区编号（前言不印、序用罗马、正文从 1）见「十一、（三）页区页码」
 - **目录**（打印导出时自动生成，条目带页码）：生成开关、位置（置于文首 / 第一个 # 之下）、独占一页
+  - 条目右侧是**点线引导 + 右对齐页码列**，页码与页脚同源；目录页**自己不印页脚、也不占页号**（v2.35.0）
   - **不计入目录**（v2.21.0）：勾选 `#` / `##` / `###` 任一级，该级标题**照常渲染、只是不进目录**——封面大标题用 `#` 又不想它出现在目录里时勾掉 `#` 即可，无需为它套 `noll` 页区
   - 与 `noll` 区叠加互不干扰：`noll` 区标题本就不进目录（见「十一、（三）」）；三个级别全勾时目录无条目可收、整体不生成
 
@@ -1026,7 +1029,7 @@ note: 第一卷草稿
 | 占位符 | 区域外 | 页区内 |
 |---|---|---|
 | `{p}` | 当前页的连续序号 | 当前页在本区内的序号，形态随区 |
-| `{P}` | 全文可编号页数 | **同一个数，全文总页数** |
+| `{P}` | 参与编号的页数（目录页与开头不编号的封面／前言不计） | **同一个数**，全文口径 |
 | `{N}` | 同 `{P}` | 本区总页数，形态随区 |
 
 - 要「第 3 页 / 共 12 页」的区内版：`{p} / {N}`。要「共 20 页」的全文版：`{p} / {P}`
@@ -1038,12 +1041,13 @@ note: 第一卷草稿
 - 参数非法（`{x}`、`{}`、不写参数）→ 标记行按原文露出，内容照常渲染
 - 未闭合（缺 `@@ end page`）→ 标记行原样显示，不吞后面的内容
 - **嵌套不支持**：`page` 区里再开 `page` 区，内层两行标记退回普通文本
+- **代码块内按字面**：``` 围栏里写的 `@@ begin page`／`@@ end page` 是示例文本，不参与开区／闭区配对（v2.36.0 起）
 - 区域是文末最后一块时不再补断页，不会多出一张空白尾页
 
 **两个容易误会的现象**：
 
 - 正文页脚 `1` 对应的可能是物理第 3 张纸（前言用了 `i`、`ii`）。这是分册书的常态，PDF 阅读器显示的页码是物理页序，两者本来就不同
-- `noll` 区的页**算进** `{P}`（它们物理存在，只是不印号），但不占任何 `{p}` 序号
+- **目录页与开头连续的 `noll` 区（封面／前言）：既不印号，也不吃号，也不算进 `{P}`**（v2.35.0 起）。这样末页印出的「共 N 页」恰好等于你实际能翻到的最后一个页码。文档**中间**的 `noll` 区不同：它不印号但占一个号，属于编号流的一部分，照旧算进 `{P}`
 
 ### （四）并写 `@@ begin page{…} full{t} font{…} color{X}`
 
@@ -1270,10 +1274,20 @@ fail-closed 两种：参数解析不出（D215）、`@@ end font` 没写（D216�
 - **「另存为 ▾」→「存为母版」**：把当前文档存进母版库（`.smdm`）。母版库位置固定，所以这条路不问目录、只取名；撞名才弹框（见本章「（三）母版」）
 - 打开 `.smd` 后点「保存」写回包内（不是导出），「另存为」可换格式另存一份（`.smd` → `.md` 会把图片解到同名 `.assets/`，反之收进包内）
 - 打开文档时若含 base64 内嵌图或本机绝对路径图，保存/另存**会自动把图片收进同名 `.assets/` 并把引用改写为相对路径**
-- 导出三件套：**.md**（纯文本）、**.html**（带排版与公式）、**分页**（纸张 / 页边距 / 页码 / 自动目录，Ctrl+P 直接出 PDF）
+- **.md** 另存即纯文本出一份；**导出 ▾**（一个按钮 + 格式下拉）：主按钮直接导出 **HTML**（最常用，一步到位）；下拉里是 **HTML / PDF / Word** 三项。**PDF 与打印同一链路**（两遍出片后由打印引擎落盘），分页与打印完全一致，不做「另存 HTML 再让浏览器打」的中间态
+- **打印**：点「打印」→ 两遍法出片（第一遍量真值、第二遍带真值重出）→ 最终纸面用打印引擎落成预览，直接铺在预览栏——看到的边距、分页、页码就是最终形态；预览栏顶部横栏的「打印」→ **自建打印面板**（打印机 / 份数 / 页码范围 / 单双面 / 纸张 / 背景图形）。页眉页脚从根上不存在——不依赖任何浏览器的勾选项
 - 导出件里图片用多大，由「排版 → **图片输出**」三档决定（原图 / 实图 300dpi / 实图 150dpi；见第九章）；**磁盘上的原图任何时候都不动**
 
-### （一）历史版本（仅 `.smd`）
+### （一·补）点「打印」之后那零点几秒在做什么（v2.35.0）
+
+勾了页码或目录时，导出的打印页里会带一小段页内脚本。点「打印」后它会先在隐藏区域把全文按版心宽、版心高**过一遍**，量出每个标题落在第几页，再把实测数字写进页脚与目录条目——这就是排版上的「两遍法」，和 LaTeX 编两遍才能出交叉引用是同一回事。
+
+- **有一瞬间的等待是正常的**（通常 0.2~1 秒，几十页的长文档约 1 秒出头）。等待期间打印对话框不会弹出来，也不要重复点
+- **绝不卡死**：6 秒内量不出结果就直接打印，页脚退回兜底值（`{p}` 正常、`{P}` 可能偏大），目录条目留空，不会让你永远等下去
+- 零三方包、零外部进程、不联网：脚本只是在本页里数格子，分页仍然完全交给浏览器打印引擎
+- 为什么要这么做：浏览器对 CSS `target-counter()`（目录取页码）与 `leader()`（点线引导）的支持至今不完整，实测 Edge 156 两者都不生效——目录条目页码只能这样量出来
+
+### （二）历史版本（仅 `.smd`）
 
 `.md` 是覆盖写：磁盘上永远只有当前这一份，所以**没有历史版本**，文件面板右列会直接写明不支持。
 
@@ -1398,7 +1412,9 @@ AI 解释（批注弹窗内一键按钮）可请 AI 解读当前标注片段。�
 | `@@ begin page{noll} full{t} color{r}` … `@@ end <关剩的>` | 并写：嵌套的简写，展开成 page＞full＞font＞color 嵌套容器（书写顺序锁死）；end 也是并写——`@@ end X` 只关 X、`@@ end X Y` 同关多个、关剩的继续收内容；`fill` 不参与（用嵌套）。嵌套：同族禁套、主链 page＞full＞fill 严格递增、font 与 color 任意层但 font 须在 color 之前 | 「并写」 | Combine containers |
 | `$...$` / `$$...$$` | 行内 / 块级 LaTeX 公式 | 「数学公式」 | Inline / block LaTeX |
 | `<<< ... <<<` | 缩进包围块：块内容以上一段的缩进位置为起点整体右移；紧邻连续块逐级递进，空行/其他块打断 | 「缩进包围块」 | Indent block |
+@@ end page
 
+@@ begin page{i}
 ### （三）约定
 
 - `\X`（X 为标点）：反斜杠转义，显示字面字符（防止标点被当作语法解析）；代码段内反斜杠保持字面
@@ -1414,3 +1430,4 @@ AI 解释（批注弹窗内一键按钮）可请 AI 解读当前标注片段。�
 ---
 
 试着修改左侧内容，右侧会实时更新。
+@@ end page
