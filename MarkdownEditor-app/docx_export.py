@@ -1602,6 +1602,105 @@ def _sanitize_builtin_styles(doc):
     return clean
 
 
+def _apply_char_spacing(doc, ts_css, page_cfg):
+    """v2.40.0 每行字数 → Word 的字符间距（w:spacing，单位 1/20 pt）。
+
+    尺子只有一把：ls_em 从 ts-style 里读（`:root{--mde-ls:0.5658em}`），
+    这里只做 em→twips 的换算，绝不重算版心。重算就是「Word 与预览两套
+    几何」，这类账以前吃过不止一次。
+
+    豁免与面板六个勾选一一对应：标题按 Heading N 的级别跳过，表格按祖先
+    w:tbl 跳过。z 顺序：w:spacing 必须落在 w:sz 之前（ECMA-376 的 rPr
+    子元素序列），乱序 Word 会直接忽略这条属性。
+    """
+    if not ts_css:
+        return 0
+    m = re.search(r"--mde-ls:\s*([\d.]+)em", ts_css)
+    if not m:
+        return 0
+    try:
+        ls_em = float(m.group(1))
+    except ValueError:
+        return 0
+    if ls_em <= 0:
+        return 0
+    # 正文档没写字号时，正文 run 没有 w:sz，只有段落样式的默认值：用 ts-style
+    # 里 p 的 font-size 兜底，再不行才 10.5pt（Word 中文正文默认五号）。
+    base_pt = 10.5
+    mp = re.search(r"#preview p, \.markdown-body p\{[^}]*font-size:([\d.]+)pt", ts_css)
+    if mp:
+        try:
+            base_pt = float(mp.group(1))
+        except ValueError:
+            pass
+
+    ex = (page_cfg or {}).get("cjEx") or {}
+    hall = bool(ex.get("hall"))
+    by_lvl = {1: bool(ex.get("h1")), 2: bool(ex.get("h2")), 3: bool(ex.get("h3"))}
+    skip_tbl = bool(ex.get("tbl"))
+    body = doc.element.body
+    n = 0
+    for p in body.iter(qn("w:p")):
+        anc = p.getparent()
+        in_tbl = False
+        while anc is not None and anc is not body:
+            if anc.tag == qn("w:tbl"):
+                in_tbl = True
+                break
+            anc = anc.getparent()
+        if in_tbl and skip_tbl:
+            continue
+        lvl = 0
+        ppr = p.find(qn("w:pPr"))
+        if ppr is not None:
+            ps = ppr.find(qn("w:pStyle"))
+            if ps is not None:
+                pm = re.match(r"Heading\s*(\d)$", ps.get(qn("w:val")) or "")
+                if pm:
+                    lvl = int(pm.group(1))
+        if lvl and (hall or by_lvl.get(lvl) or lvl >= 4):
+            continue
+        # 标题 run 通常没有 w:sz（字号来自段落样式），不补这一档就会把标题
+        # 按正文字号算字距：16pt 的 H1 会拿到 11.25pt 的值，整整小一圈。
+        lvl_pt = None
+        if lvl:
+            try:
+                _st = doc.styles["Heading %d" % lvl]
+                if _st.font.size:
+                    lvl_pt = _st.font.size.pt
+            except Exception:
+                lvl_pt = None
+        for r in p.findall(qn("w:r")):
+            rpr = r.find(qn("w:rPr"))
+            pt = None
+            if rpr is not None:
+                szel = rpr.find(qn("w:sz"))
+                if szel is not None:
+                    try:
+                        pt = int(szel.get(qn("w:val"))) / 2.0
+                    except (TypeError, ValueError):
+                        pt = None
+            if not pt:
+                pt = lvl_pt or base_pt
+            val = int(round(ls_em * pt * 20))
+            if val <= 0:
+                continue
+            if rpr is None:
+                rpr = OxmlElement("w:rPr")
+                r.insert(0, rpr)
+            sp = rpr.find(qn("w:spacing"))
+            if sp is None:
+                sp = OxmlElement("w:spacing")
+                szel = rpr.find(qn("w:sz"))
+                if szel is not None:
+                    szel.addprevious(sp)
+                else:
+                    rpr.append(sp)
+            sp.set(qn("w:val"), str(val))
+            n += 1
+    return n
+
+
 def build_docx(md_path, body_html, ts_css=None, page_cfg=None,
                default_font=None):
     """body_html: 已内联样式的 HTML 片段（含 .markdown-body 根）。
@@ -1803,6 +1902,7 @@ def build_docx(md_path, body_html, ts_css=None, page_cfg=None,
             _end_section(val)
         elif val is not None:
             _sect_valign(doc.sections[-1], val)   # 文末就是 full：写 body sectPr
+    _apply_char_spacing(doc, ts_css, page_cfg)
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()

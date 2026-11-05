@@ -96,7 +96,7 @@ try:
         pg2.goto("http://127.0.0.1:%d/?file=" % PORT)
         pg2.wait_for_timeout(1200)
         r2 = pg2.evaluate("""()=>{
-          var cur=document.querySelector('.lr-mode-seg .lr-btn.cur');
+          var cur=document.querySelector('.lr-mode-seg .sv-btn.cur');
           var raw=localStorage.getItem('md-editor-run-mode');
           var btn=document.getElementById('btnRunAll');
           return {modeRaw:raw, uiCur:cur?cur.id:'-',

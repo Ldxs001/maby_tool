@@ -48,6 +48,9 @@ FORMAT_VERSION = 1
 DOC_NAME = "doc.md"
 ASSETS_DIR = "assets"
 META_NAME = "meta.json"
+# v2.40.0 母版排版：只存排版（字体/缩进/表格/页面），不存元数据、不存文件名。
+# 普通 .smd 文档不带此条目；只有 .smdm（母版）在存盘时写入。
+TS_NAME = "typeset.json"
 META_DIR = ".mde"          # 元数据档案目录（assets/.mde/zero.json、up.md）
 HIST_DIR = "history"       # 历史版本目录：history/NNNNNN.md（v1.3.0）
 
@@ -421,7 +424,8 @@ def _put_file(z, fp, arcname):
         shutil.copyfileobj(src, dst)
 
 
-def _pack_from_dir(smd_path, doc_src, assets_src=None, hist_dir=None):
+def _pack_from_dir(smd_path, doc_src, assets_src=None, hist_dir=None,
+                   typeset=None):
     """全量打包（新建/另存为/整理/回滚用）。临时文件 + os.replace 原子替换。
 
     资产过滤（v1.3.0 改为并集）：doc_src 正文 **以及 hist_dir 里每一份历史正文**
@@ -437,6 +441,15 @@ def _pack_from_dir(smd_path, doc_src, assets_src=None, hist_dir=None):
         times = {s: dt for s, dt in _hist_times(smd_path).items()}
     except Exception:
         times = {}
+    # v2.40.0：没显式给排版时，从旧包里读回原值。否则「整理包」这类重建会
+    # 静默抹掉母版的 typeset.json——正文和资产都还在，排版没了，且不报错。
+    if typeset is None and os.path.isfile(smd_path):
+        try:
+            with zipfile.ZipFile(smd_path) as _z0:
+                if TS_NAME in _z0.namelist():
+                    typeset = json.loads(_z0.read(TS_NAME).decode("utf-8"))
+        except Exception:
+            typeset = None
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
         # newline=""：按原始字节读，不做 CRLF→LF 翻译（否则“整理”会顺手改正文）
         with io.open(doc_src, "r", encoding="utf-8", newline="") as f:
@@ -463,6 +476,10 @@ def _pack_from_dir(smd_path, doc_src, assets_src=None, hist_dir=None):
                 continue
             _put_file(z, fp, ASSETS_DIR + "/" + rel)
         z.writestr(META_NAME, json.dumps({"format": FORMAT_VERSION}, ensure_ascii=False))
+        # v2.40.0 母版排版：只在调用方明确给出时写。不写空对象——旧包语义是
+        # "没有 typeset.json"，套用时不覆盖任何值；写个 {} 会让两者难以区分。
+        if isinstance(typeset, dict) and typeset:
+            z.writestr(TS_NAME, json.dumps(typeset, ensure_ascii=False))
     _replace_retry(tmp, smd_path)
 
 
@@ -693,7 +710,7 @@ def needs_compact(smd_path, base_dir):
             # 注意不能数 live：那是 dict，同名 entry 已被合并成一条，恒为 1。
             return doc_copies > COMPACT_MAX_DOC_COPIES
         valid = {}
-        for nm in (DOC_NAME, META_NAME):
+        for nm in (DOC_NAME, META_NAME, TS_NAME):
             fp = os.path.join(base_dir, nm)
             if os.path.isfile(fp):
                 valid[nm] = _file_sig(fp)      # 含 meta.json：不再按 0 字节算
@@ -992,10 +1009,41 @@ def base_dir_for(smd_path):
         return _base_dir_for(smd_path)
 
 
-def pack_from_dir(smd_path, doc_src, assets_src=None, hist_dir=None):
-    """全量打包（新建/另存为/整理用），原子替换。"""
+def pack_from_dir(smd_path, doc_src, assets_src=None, hist_dir=None,
+                  typeset=None):
+    """全量打包（新建/另存为/整理用），原子替换。
+
+    typeset：母版排版（dict）。只有 .smdm 存盘才传，普通文档传 None 即不写。
+    """
     with locked(smd_path):
-        _pack_from_dir(smd_path, doc_src, assets_src, hist_dir)
+        _pack_from_dir(smd_path, doc_src, assets_src, hist_dir, typeset)
+
+
+def set_typeset(smd_path, typeset):
+    """更新包内 typeset.json（母版排版），返回是否写入。
+
+    为什么用「追加 entry」而不是重打包：重打包会重建全部历史与资产，为一个
+    几百字节的 json 付那个代价不划算，且中途失败会毁掉整包。zip 允许同名
+    entry，_extract_all 按顺序解压、后写覆盖先写，读到的就是最新那份；
+    下次整理（_pack_from_dir）会把多份同名片收敛成一份（那里会读回并重写）。
+    """
+    if not isinstance(typeset, dict) or not typeset:
+        return False
+    if not os.path.isfile(smd_path):
+        return False
+    import tempfile
+    fd, fp = tempfile.mkstemp(suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(typeset, f, ensure_ascii=False)
+        with locked(smd_path):
+            _append_entries(smd_path, [(TS_NAME, fp)])
+        return True
+    finally:
+        try:
+            os.remove(fp)
+        except OSError:
+            pass
 
 
 def save_from_dir(smd_path, base_dir):

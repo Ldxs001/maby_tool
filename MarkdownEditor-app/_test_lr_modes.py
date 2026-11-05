@@ -207,7 +207,7 @@ try:
         pg.evaluate("()=>{document.getElementById('btnRun').click();}")
         pg.wait_for_timeout(600)
         mode = pg.evaluate(
-            "()=>({cur:document.querySelector('.lr-mode-seg .lr-btn.cur')"
+            "()=>({cur:document.querySelector('.lr-mode-seg .sv-btn.cur')"
             ".id, secDisabled:document.getElementById('lrModeWaitSec')"
             ".disabled,"
             " sec:document.getElementById('lrModeWaitSec').value})")
@@ -218,7 +218,7 @@ try:
         pg.evaluate("()=>{document.getElementById('lrModeWait').click();}")
         pg.wait_for_timeout(300)
         mode2 = pg.evaluate(
-            "()=>({cur:document.querySelector('.lr-mode-seg .lr-btn.cur').id,"
+            "()=>({cur:document.querySelector('.lr-mode-seg .sv-btn.cur').id,"
             "secDisabled:document.getElementById('lrModeWaitSec').disabled,"
             "sec:document.getElementById('lrModeWaitSec').value})")
         check("lr 界面：切等待模式 N 秒输入可用（持久 2）",

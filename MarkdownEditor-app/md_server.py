@@ -63,10 +63,45 @@ except Exception as _e:
     except Exception:
         pass
 
-PORT = 18766
+PORT = int(os.environ.get("MD_PORT") or 18766)  # MD_PORT：多实例/测试隔离用，默认不变
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 145  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 147  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+
+# ---------- v2.40.1 自动化写围栏 ----------
+# 前端在自动化浏览器（Playwright/CDP，navigator.webdriver=true）里会给全部
+# API 请求附加 X-MD-Automation: 1 头；本端对"目标路径由客户端给定"的写盘
+# 端点启用硬围栏：目标只许落在草场白名单（项目 Temp/、系统临时目录，外加
+# Temp/_md_test_lock.json 中 allow_dirs 追加项），其余一律拒绝。
+# 人工使用永不带此头，行为零变化。事故背景：2026-11-05 使用指南被测试覆盖。
+_TEST_LOCK_FILE = os.path.join(HERE, "Temp", "_md_test_lock.json")
+
+def _fence_allow_roots():
+    roots = [os.path.normcase(os.path.join(HERE, "Temp")),
+             os.path.normcase(tempfile.gettempdir())]
+    try:
+        with io.open(_TEST_LOCK_FILE, "r", encoding="utf-8") as _f:
+            for _d in (json.loads(_f.read()).get("allow_dirs") or []):
+                roots.append(os.path.normcase(os.path.abspath(_d)))
+    except Exception:
+        pass
+    return roots
+
+def _auto_write_guard(is_auto, *targets):
+    """is_auto 为 False 直接放行；否则 targets 必须全部落在草场白名单内。"""
+    if not is_auto:
+        return
+    _roots = _fence_allow_roots()
+    for _t in targets:
+        if not _t:
+            continue
+        _p = os.path.normcase(os.path.abspath(str(_t)))
+        if not any(_p == _r or _p.startswith(_r.rstrip(os.sep) + os.sep)
+                   for _r in _roots):
+            raise PermissionError(
+                "自动化会话禁止写入测试草场以外的路径（" + _p + "）；"
+                "如确需写该路径，请把它加入 Temp/_md_test_lock.json 的 allow_dirs。")
+
 
 # MSIX 商城版判定（微软商店政策 11.16 的"报告 AI 生成内容"入口用）：
 # 商城包与侧载包恒落在 WindowsApps 之下，Release 安装包/便携形态不会。
@@ -2377,6 +2412,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 obj = json.loads(_raw.decode("utf-8")) if _raw else {}
                 p = (obj.get("path") or "").strip()
                 action = (obj.get("action") or "read").strip()
+                _auto_write_guard(self.headers.get("X-MD-Automation") == "1", p)
                 fields = obj.get("fields") or {}
                 who = (obj.get("who") or "").strip()
                 if not p:
@@ -2432,6 +2468,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 obj = json.loads(raw.decode("utf-8"))
                 p = obj.get("path", "")
                 content = obj.get("content", "")
+                _auto_write_guard(self.headers.get("X-MD-Automation") == "1", p)
                 if not p:
                     self._send(400, json.dumps({"ok": False, "error": "missing path"}, ensure_ascii=False))
                     return
@@ -2479,6 +2516,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     int(self.headers.get("Content-Length", 0))).decode("utf-8"))
                 p = (obj.get("path") or "").strip()
                 seq = obj.get("seq")
+                _auto_write_guard(self.headers.get("X-MD-Automation") == "1", p)
                 if not p or seq is None:
                     self._send(400, json.dumps({"ok": False, "error": "missing path/seq"},
                                                ensure_ascii=False))
@@ -2534,10 +2572,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     if os.path.isdir(ad):
                         imgs = sorted(x for x in os.listdir(ad)
                                       if os.path.isfile(os.path.join(ad, x)))
+                    # v2.40.0 母版排版：旧母版没有这个条目，就回 None——前端
+                    # 见到 None 不覆盖任何值（逐字段 merge），不会把设置打回默认。
+                    ts = None
+                    tsp = os.path.join(base, _smd.TS_NAME)
+                    if os.path.isfile(tsp):
+                        try:
+                            ts = json.loads(io.open(tsp, encoding="utf-8").read())
+                        except Exception:
+                            ts = None
                     self._send(200, json.dumps(
                         {"ok": True, "name": n, "path": p,
-                         "content": content, "base": base, "images": imgs},
+                         "content": content, "base": base, "images": imgs,
+                         "typeset": ts},
                         ensure_ascii=False))
+                    return
+
+                if act == "typeset":
+                    # 已是母版的文档改了排版后「保存母版」：增量写一条
+                    # typeset.json（追加 entry，后写为准），不重打包。
+                    p = str(obj.get("path") or "")
+                    if (not p or not os.path.isfile(p)
+                            or not p.lower().endswith(".smdm")):
+                        self._send(400, json.dumps(
+                            {"ok": False, "error": "不是母版文件"}, ensure_ascii=False))
+                        return
+                    ok = _smd.set_typeset(p, obj.get("typeset") or {})
+                    self._send(200 if ok else 500, json.dumps(
+                        {"ok": bool(ok)}, ensure_ascii=False))
                     return
 
                 if act == "delete":
@@ -2678,6 +2740,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not to_smd and not name.lower().endswith(".md"):
                     name += ".md"
                 path = os.path.join(d, name)
+                _auto_write_guard(self.headers.get("X-MD-Automation") == "1", path)
                 if to_smd:
                     # 另存为 .smd：正文进 doc.md；资产三级来源——
                     # ① base/assets（.smd 会话，引用已是包内 assets/ 契约，整目录跟随）
@@ -2713,10 +2776,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         content, _nr = _rewrite_assets_ref(
                             content, os.path.basename(cand), "assets")
                     # 原子写 + newline=""：磁盘=包内=响应字节一致
+                    # v2.40.0 母版排版：只认 .smdm，且只收 dict。普通 .smd
+                    # 另存为不带这个字段，包里就不会多出 typeset.json。
+                    _ts = obj.get("typeset")
+                    if not (name.lower().endswith(".smdm")
+                            and isinstance(_ts, dict)):
+                        _ts = None
                     with _smd.locked(path):
                         _smd.write_doc(stage, content)
                         _smd.pack_from_dir(path, os.path.join(stage, _smd.DOC_NAME),
-                                           dst_assets)
+                                           dst_assets, typeset=_ts)
                     _LAST_DOC_DIR[0] = stage
                     self._send(200, json.dumps({"ok": True, "path": path, "smd": True,
                                                 "base": stage, "content": content,
@@ -2755,6 +2824,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", 0))
                 obj = json.loads(self.rfile.read(length).decode("utf-8"))
                 p = os.path.abspath(obj.get("path") or "")
+                _auto_write_guard(self.headers.get("X-MD-Automation") == "1", p)
                 bak = os.path.abspath(obj.get("backup") or "")
                 if not p or not bak:
                     self._send(400, json.dumps({"ok": False, "error": "bad payload"}, ensure_ascii=False))
@@ -2788,6 +2858,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", 0))
                 obj = json.loads(self.rfile.read(length).decode("utf-8"))
                 doc_path = obj.get("docPath") or ""
+                _auto_write_guard(self.headers.get("X-MD-Automation") == "1", doc_path)
                 data_url = obj.get("dataUrl") or ""
                 if not doc_path:
                     self._send(400, json.dumps({"ok": False,
@@ -2837,6 +2908,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", 0))
                 obj = json.loads(self.rfile.read(length).decode("utf-8"))
                 doc_path = obj.get("docPath") or ""
+                _auto_write_guard(self.headers.get("X-MD-Automation") == "1", doc_path)
                 data_url = obj.get("dataUrl") or ""
                 if not doc_path:
                     self._send(400, json.dumps({"ok": False,
@@ -2909,6 +2981,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", 0))
                 obj = json.loads(self.rfile.read(length).decode("utf-8"))
                 doc_path = obj.get("docPath") or ""
+                _auto_write_guard(self.headers.get("X-MD-Automation") == "1", doc_path)
                 rel = str(obj.get("rel") or "").strip()
                 ref_base = _doc_ref_base(doc_path)
                 assets = _doc_assets_dir(doc_path)
@@ -3027,6 +3100,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # 优先写到用户"另存为"所选路径；未提供时回退可写 runtime
                 # （兼容老调用；商城包安装目录只读，不能落 HERE）
                 out = obj.get("path") or os.path.join(RUNTIME_DIR, "document.html")
+                _auto_write_guard(self.headers.get("X-MD-Automation") == "1", obj.get("path"))
                 d = os.path.dirname(out)
                 if d:
                     os.makedirs(d, exist_ok=True)
@@ -3052,6 +3126,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # 优先写到用户"另存为"所选路径；未提供时回退可写 runtime
                 # （兼容老调用；商城包安装目录只读，不能落 HERE）
                 out = obj.get("path") or os.path.join(RUNTIME_DIR, "document.docx")
+                _auto_write_guard(self.headers.get("X-MD-Automation") == "1", obj.get("path"))
                 d = os.path.dirname(out)
                 if d:
                     os.makedirs(d, exist_ok=True)
@@ -3081,13 +3156,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # 缺省/其他值仍走 Paged.js——保证旧调用方与既有测试行为不变。
                 mode = str(obj.get("mode") or "paged").lower()
                 native = (mode == "native")
+                # v2.40.0 镜像出片：一次性动作参数，不进 cfg（镜像不是排版设置，
+                # 不持久化、不跨文档继承）。只对 native 分支有意义。
+                mirror = bool(obj.get("mirror"))
                 html = build_paged_html(md_path, body_html, ts_css, page_cfg,
                                         native=native,
-                                        default_font=obj.get("defaultFont"))
+                                        default_font=obj.get("defaultFont"),
+                                        mirror=mirror)
                 # /static/ 路由两级查找（HERE → RUNTIME_DIR），产物落可写
                 # runtime 即可用 /static/<name> 取回——商城包安装目录只读
-                name = ("document.print.html" if native
-                        else "document.paged.html")
+                # 镜像版必须独立文件名：两次请求共用同一个文件时，镜像预览
+                # 开到一半再点普通导出会拿到被覆盖的那份（时序竞争）。
+                if native:
+                    name = ("document.print.mirror.html" if mirror
+                            else "document.print.html")
+                else:
+                    name = "document.paged.html"
                 with open(os.path.join(RUNTIME_DIR, name), "w", encoding="utf-8") as f:
                     f.write(html)
                 self._send(200, json.dumps({"ok": True, "url": "/static/" + name},
@@ -3118,6 +3202,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 obj = json.loads(self.rfile.read(length).decode("utf-8"))
                 p = obj.get("path", "")
                 anns = obj.get("annotations", [])
+                _auto_write_guard(self.headers.get("X-MD-Automation") == "1", p)
                 if not p or not isinstance(anns, list):
                     self._send(400, json.dumps({"ok": False, "error": "bad payload"}, ensure_ascii=False))
                     return
@@ -3329,6 +3414,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", 0))
                 obj = json.loads(self.rfile.read(length).decode("utf-8"))
                 path = (obj.get("path") or "").strip()
+                _auto_write_guard(self.headers.get("X-MD-Automation") == "1", path)
                 kind = (obj.get("kind") or "").strip().lower()
                 if not path:
                     self._send(400, json.dumps({"ok": False, "error": "缺少路径"},
@@ -5815,7 +5901,7 @@ _PRINT_AUTO_JS = r"""
 
 
 def _native_page_css(size_str, mt, mr, mb, ml, pn, page_cfg, icb_w=174.0,
-                     paper_bg="", regions=None):
+                     paper_bg="", regions=None, mirror=False):
     """原生打印的分页契约（对齐 Cogito_Scribit/typesetting 的 PRINT_CSS）。
     规则来源：书册规范 STRUCTURE_GUIDE 6.2 + 成熟排版工程实测。
 
@@ -5823,7 +5909,56 @@ def _native_page_css(size_str, mt, mr, mb, ml, pn, page_cfg, icb_w=174.0,
     border-box 内，而 @page 的 margin 区（页边距）不属于任何元素，所以
     body{background} 打印出来只有版心是深色（实测四角 0/4）。写在 @page
     上的背景铺满整张纸（四角 4/4），且配合 print-color-adjust:exact 后
-    用户不勾「背景图形」也照常输出（不加则 bgOFF 全白，实测判例）。"""
+    用户不勾「背景图形」也照常输出（不加则 bgOFF 全白，实测判例）。
+
+    mirror（v2.40.0）：奇偶页左右边距对调，即"凹凸"装订版。**默认页（第一页，
+    右页）永远按用户设定走**——实时预览参考线画的那张纸就是它，两处必须同一
+    口径。左页把左右对调。三条硬约束：
+
+    1. 左右边距相等时对调无视觉效果，照样出片，不拦（主人口径：他只配了
+       左右一致，怪不了谁）。
+    2. 版心宽 = 纸宽 − ml − mr，对调不改变这个和 → 分页点、页数、{P}/{N}、
+       目录页码全部不变（Edge 无头实测：两侧版心宽均 135.9mm，逐毫米相同）。
+       所以镜像不引入任何新的分页正确性风险，内容只是整体平移。
+    3. 命名页必须补 :left/:right 变体。@page:left/:right 的 specificity
+       (0,1,0) 高于单条 @page NAME (0,0,1)，不补就被级联吃掉——本项目
+       已有同类判例（下方 pn-noll 注释）。mdefbgN（整页背景图）反而要
+       **强制**写回 margin:0，否则整页图缩进 12mm 露白边。
+
+    mirror=False 时本函数输出与 v2.39.1 逐字节相同（所有补丁串均为空），
+    非镜像路径零风险。"""
+    # v2.40.0 镜像：三个边距补丁串。非镜像时全空串 —— 后续所有插入点拼出来
+    # 的 CSS 与 v2.39.1 逐字节相同（验收项，勿改成"总是写 margin"）。
+    #   _mmR 右页（奇数页，含第一页）：左右对调
+    #   _mmL 左页（偶数页）：按用户设定
+    #   _mmN 不翻页（名单命中）：两侧都按用户设定
+    # 相位口径（已定，勿再改）：**奇数页对调**。这样点镜像后第一页就会变，
+    # 用户立刻能确认生效；"首页不镜像"也因此有实际效果（把第一页拉回设定）。
+    # 若反过来（奇数页按设定），第一页恒不变，"首页不镜像"就成了死开关。
+    _mmR = _mmL = _mmN = ""
+    if mirror:
+        # margin 是简写，必须四值写全——只写左右会把上下边距清成 0。
+        _mmSet = "margin:%smm %smm %smm %smm;" % (mt, mr, mb, ml)
+        _mmAlt = "margin:%smm %smm %smm %smm;" % (mt, ml, mb, mr)
+        _mmR, _mmL, _mmN = _mmAlt, _mmSet, _mmSet
+    # 不镜像名单（只存文档结构意图，勾了才生效；缺省全不勾＝全翻）。
+    _nmc = {}
+    if isinstance(page_cfg, dict):
+        _nmv = page_cfg.get("nm")
+        if isinstance(_nmv, dict):
+            _nmc = _nmv
+    # 与 build_paged_html 同一条读取路径：page_cfg 就是 tsCfg.page。
+    # 名单命中时**两侧都要按设定**——只改 :left 不够：目录页/不编号区若从
+    # 第 1 页开始就落在右页，右页仍是"对调"，勾选等于没勾（2026-11-04
+    # 实测判例：目录勾上后 T 仍量到 29.9mm）。
+    _noll_on = bool(mirror and _nmc.get("noll"))
+    _toc_on = bool(mirror and _nmc.get("toc"))
+    _noll_r = _mmN if _noll_on else _mmR
+    _noll_l = _mmN if _noll_on else _mmL
+    _toc_r = _mmN if _toc_on else _mmR
+    _toc_l = _mmN if _toc_on else _mmL
+    # 已生成的命名页名（供末尾 :first 补丁逐一压回；pnrK 在下方循环里追加）
+    _named_pages = ["pn-noll", "pn-roman", "pn-roman-uc", "pn-toc"]
     css = "@page{size:%s;margin:%smm %smm %smm %smm;%s" % (
         size_str, mt, mr, mb, ml,
         ("background:%s;" % paper_bg) if paper_bg else "")
@@ -5871,16 +6006,25 @@ def _native_page_css(size_str, mt, mr, mb, ml, pn, page_cfg, icb_w=174.0,
             "body{margin:0 !important;padding:0 !important;"
             "width:%smm !important;max-width:%smm !important;}"
             "}" % (icb_w, icb_w))
+    _lr_done = False
     if pn_on and pn.get("pos", "outer") == "outer":
         tpl = pn.get("tpl") or "{p}"
         con = _pn_content(tpl, with_total=("{P}" in tpl or "{N}" in tpl),
                           total_value=_tv)
         sz = pn.get("size", 9)
         # 奇页（右页）页码靠右，偶页（左页）靠左；对页各自只保留一个 box
-        css += ("@page:right{@bottom-right{content:%s;font-size:%spt;color:#666;}"
+        # v2.40.0：镜像的 margin 就地并进这两条规则，不再另起同名块——同名
+        # @page 两条规则虽可层叠合并，但依赖合并行为不划算，一次写全最稳。
+        css += ("@page:right{%s@bottom-right{content:%s;font-size:%spt;color:#666;}"
                 "@bottom-left{content:none;}}"
-                "@page:left{@bottom-left{content:%s;font-size:%spt;color:#666;}"
-                "@bottom-right{content:none;}}" % (con, sz, con, sz))
+                "@page:left{%s@bottom-left{content:%s;font-size:%spt;color:#666;}"
+                "@bottom-right{content:none;}}"
+                % (_mmR, con, sz, _mmL, con, sz))
+        _lr_done = True
+    # 页码关（或非外侧）时不会有上面那两条，镜像得自己补——否则奇偶页
+    # 根本没有 margin 差异，勾了镜像等于没勾。
+    if mirror and not _lr_done:
+        css += "@page:right{%s}@page:left{%s}" % (_mmR, _mmL)
 
     # 分页规则：与 typesetting PRINT_CSS 逐条对齐，另加三处本工程必需项
     css += (
@@ -5949,13 +6093,13 @@ def _native_page_css(size_str, mt, mr, mb, ml, pn, page_cfg, icb_w=174.0,
             # 有 @page:left/@page:right 参与 @page 级联，单条 @page pn-noll
             # 的 increment 0 会被吃掉——封面页印不出页脚（content:none 仍胜）
             # 却照常 +1，正文从 2 起（2026-11-04 T3 二分实测判例）。
-            "@page pn-noll{counter-increment:pnout 0;"
+            "@page pn-noll{" + _noll_r + "counter-increment:pnout 0;"
             "@bottom-center{content:none;}"
             "@bottom-left{content:none;}@bottom-right{content:none;}}"
-            "@page pn-noll:left{counter-increment:pnout 0;"
+            "@page pn-noll:left{" + _noll_l + "counter-increment:pnout 0;"
             "@bottom-center{content:none;}"
             "@bottom-left{content:none;}@bottom-right{content:none;}}"
-            "@page pn-noll:right{counter-increment:pnout 0;"
+            "@page pn-noll:right{" + _noll_r + "counter-increment:pnout 0;"
             "@bottom-center{content:none;}"
             "@bottom-left{content:none;}@bottom-right{content:none;}}"
             ".page-region[data-pn=\"i\"]{page:pn-roman;}"
@@ -5971,27 +6115,27 @@ def _native_page_css(size_str, mt, mr, mb, ml, pn, page_cfg, icb_w=174.0,
             # b) 其余 margin box 显式压成 none——不压则继承自默认页照印
             #    （pn-noll 三件套同判例）；:left/:right 变体必须各带全套，
             #    outer 模式下缺一个就被 @page:left/:right 级联吃掉。
-            "@page pn-roman{counter-increment:pnroman 1;"
+            "@page pn-roman{" + _mmR + "counter-increment:pnroman 1;"
             "@bottom-center{content:counter(pnroman,lower-roman);"
             "font-size:9pt;color:#666;}"
             "@bottom-left{content:none;}@bottom-right{content:none;}}"
-            "@page pn-roman:left{counter-increment:pnroman 1;"
+            "@page pn-roman:left{" + _mmL + "counter-increment:pnroman 1;"
             "@bottom-center{content:counter(pnroman,lower-roman);"
             "font-size:9pt;color:#666;}"
             "@bottom-left{content:none;}@bottom-right{content:none;}}"
-            "@page pn-roman:right{counter-increment:pnroman 1;"
+            "@page pn-roman:right{" + _mmR + "counter-increment:pnroman 1;"
             "@bottom-center{content:counter(pnroman,lower-roman);"
             "font-size:9pt;color:#666;}"
             "@bottom-left{content:none;}@bottom-right{content:none;}}"
-            "@page pn-roman-uc{counter-increment:pnromanuc 1;"
+            "@page pn-roman-uc{" + _mmR + "counter-increment:pnromanuc 1;"
             "@bottom-center{content:counter(pnromanuc,upper-roman);"
             "font-size:9pt;color:#666;}"
             "@bottom-left{content:none;}@bottom-right{content:none;}}"
-            "@page pn-roman-uc:left{counter-increment:pnromanuc 1;"
+            "@page pn-roman-uc:left{" + _mmL + "counter-increment:pnromanuc 1;"
             "@bottom-center{content:counter(pnromanuc,upper-roman);"
             "font-size:9pt;color:#666;}"
             "@bottom-left{content:none;}@bottom-right{content:none;}}"
-            "@page pn-roman-uc:right{counter-increment:pnromanuc 1;"
+            "@page pn-roman-uc:right{" + _mmR + "counter-increment:pnromanuc 1;"
             "@bottom-center{content:counter(pnromanuc,upper-roman);"
             "font-size:9pt;color:#666;}"
             "@bottom-left{content:none;}@bottom-right{content:none;}}"
@@ -6022,6 +6166,7 @@ def _native_page_css(size_str, mt, mr, mb, ml, pn, page_cfg, icb_w=174.0,
                         continue
                     _nm = "pnr%d" % _k
                     _ct = "pnreg%d" % _k
+                    _named_pages.append(_nm)
                     if _rpn == "i":
                         _pe = "counter(%s,lower-roman)" % _ct
                         _ne = _pn_roman(_rn)
@@ -6035,21 +6180,28 @@ def _native_page_css(size_str, mt, mr, mb, ml, pn, page_cfg, icb_w=174.0,
                     _fs = "font-size:%spt;color:#666;" % sz
                     if pn.get("pos", "outer") == "outer":
                         css += ("@page " + _nm
-                                + "{counter-increment:pnout 0 " + _ct
+                                + "{" + _mmR + "counter-increment:pnout 0 " + _ct
                                 + " 1;@bottom-right{content:" + _rc + ";"
                                 + _fs + "}@bottom-left{content:none;}}"
-                                "@page " + _nm + ":right{@bottom-right{content:"
+                                "@page " + _nm + ":right{" + _mmR
+                                + "@bottom-right{content:"
                                 + _rc + ";" + _fs
                                 + "}@bottom-left{content:none;}}"
-                                "@page " + _nm + ":left{@bottom-left{content:"
+                                "@page " + _nm + ":left{" + _mmL
+                                + "@bottom-left{content:"
                                 + _rc + ";" + _fs
                                 + "}@bottom-right{content:none;}}}")
                     else:
                         _bx = PAGED_PAGE_BOX.get(pn.get("pos") or "bc",
                                                  "@bottom-center")
                         css += ("@page " + _nm
-                                + "{counter-increment:pnout 0 " + _ct + " 1;"
+                                + "{" + _mmR + "counter-increment:pnout 0 " + _ct + " 1;"
                                 + _bx + "{content:" + _rc + ";" + _fs + "}}")
+                        # 页码居中/内侧时不产生 @page:left/:right 的 footer 规则，
+                        # 但镜像仍有那两条全局 margin 规则，命名页必须压回去。
+                        if mirror:
+                            css += ("@page " + _nm + ":right{" + _mmR + "}"
+                                    "@page " + _nm + ":left{" + _mmL + "}")
                     # data-pr-id 映射与上面 data-pn 映射同权重(0,2,0)，后写胜出
                     css += ('.page-region[data-pr-id="' + str(_r.get("id"))
                             + '"]{page:' + _nm + ";}")
@@ -6060,13 +6212,22 @@ def _native_page_css(size_str, mt, mr, mb, ml, pn, page_cfg, icb_w=174.0,
     #   **每一页**重放（多页目录整体冻在 0，页区同理冻号），已废弃。
     #   named page 的样式从默认 @page 继承（纸张/页边距不变），实测版式不动。
     if pn_on and (page_cfg.get("toc") or {}).get("on") == "on":
-        _nofoot = ("{counter-increment:pnout 0;"
-                   "@bottom-center{content:none;}@bottom-left{content:none;}"
-                   "@bottom-right{content:none;}}")
+        def _nofoot(mm):
+            return ("{" + mm + "counter-increment:pnout 0;"
+                    "@bottom-center{content:none;}@bottom-left{content:none;}"
+                    "@bottom-right{content:none;}}")
         css += (".md-toc-wrap{page:pn-toc;}"
-                "@page pn-toc" + _nofoot
-                + "@page pn-toc:left" + _nofoot
-                + "@page pn-toc:right" + _nofoot)
+                "@page pn-toc" + _nofoot(_toc_r)
+                + "@page pn-toc:left" + _nofoot(_toc_l)
+                + "@page pn-toc:right" + _nofoot(_toc_r))
+    # v2.40.0 首页不镜像：@page:first 与 @page:left/:right 同为 (0,1,0)，同
+    # specificity 靠书写顺序决胜，因此必须放在本函数最末。命名页的 :first
+    # 变体 specificity (0,1,1) 更高——首页恰好是目录页/编号区首页时才压得住
+    # 那几页已有的 :left/:right 规则。
+    if mirror and _nmc.get("first"):
+        css += "@page:first{%s}" % _mmL
+        for _fn in _named_pages:
+            css += "@page %s:first{%s}" % (_fn, _mmL)
     return css
 
 
@@ -6107,7 +6268,8 @@ _FULL_BG_POS = {"lt": "left top", "ct": "center top", "rt": "right top",
                 "lb": "left bottom", "cb": "center bottom", "rb": "right bottom"}
 
 
-def _native_fullbg(body_html, paper_w, paper_h, mt, mr, mb, ml, paper_bg=""):
+def _native_fullbg(body_html, paper_w, paper_h, mt, mr, mb, ml, paper_bg="",
+                   mirror=False):
     """把 full 块的背景图搬成「命名页 + 真实 <img>」，铺满整张纸。
 
     v2.31.0 重做。前两版都错在同一个地方——指望 @page 的 background-image：
@@ -6157,6 +6319,14 @@ def _native_fullbg(body_html, paper_w, paper_h, mt, mr, mb, ml, paper_bg=""):
             # 纸宽/纸高。background 与基础 @page 同色，避免页内出现接缝。
             css.append('@page %s{margin:0;counter-increment:pnout 0;%s}' % (
                 name, ("background:%s;" % paper_bg) if paper_bg else ""))
+            if mirror:
+                # v2.40.0 整页背景图**强制不镜像**（主人口径：有图就铺满，
+                # 没有可选项）。@page:left/:right 的 specificity (0,1,0) 高于
+                # @page NAME (0,0,1)，不补这三条，这一页的 margin:0 会被镜像
+                # 规则改回页边距 → 图缩进 12mm，四边露白。:first 同补，防首页
+                # 恰是整页图页时被 @page:first 拉回去。
+                css.append('@page %s:left{margin:0}@page %s:right{margin:0}'
+                           '@page %s:first{margin:0}' % (name, name, name))
             css.append(
                 '.full-page[data-mde-pg="%s"]{page:%s;'
                 'width:%smm !important;height:%smm !important;'
@@ -6189,8 +6359,9 @@ def _native_fullbg(body_html, paper_w, paper_h, mt, mr, mb, ml, paper_bg=""):
 
 
 def build_paged_html(md_path, body_html, ts_css, page_cfg, native=False,
-                     default_font=None):
-    """native=True 出原生打印产物。"""
+                     default_font=None, mirror=False):
+    """native=True 出原生打印产物。mirror=True 出镜像（奇偶左右对调）版，
+    只影响 native 分支——Paged.js 回退分支不参与镜像，见 _native_page_css。"""
     paper = page_cfg.get("paper", "A4")
     pw, ph = page_cfg.get("pw", ""), page_cfg.get("ph", "")
     if paper == "custom" and pw and ph:
@@ -6315,7 +6486,7 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg, native=False,
                                  "pn": _pnm.group(1) if _pnm else ""})
         page_css = _native_page_css(size_str, mt, mr, mb, ml, pn, page_cfg,
                                     icb_w, paper_bg=_paper_bg,
-                                    regions=_pn_regs)
+                                    regions=_pn_regs, mirror=mirror)
 
     # TOC + 锚点
     # v2.21.0 级别排除：排版设置「不计入目录」勾选 #/##/### 后，对应级别的
@@ -6701,7 +6872,8 @@ def build_paged_html(md_path, body_html, ts_css, page_cfg, native=False,
         # full 块：背景图搬成「命名页 + 真实 <img>」，铺满整张纸且不受打印
         # 对话框「背景图形」开关影响，见 _native_fullbg。
         _fullbg_css, body = _native_fullbg(body, _paper_w, paper_h,
-                                           mt, mr, mb, ml, _paper_bg)
+                                           mt, mr, mb, ml, _paper_bg,
+                                           mirror=mirror)
         # v2.35.0 页码/目录页码：唯一注入的一段脚本（体积小、只数页不排页，
         # 分页仍然完全交给浏览器打印引擎）。不做这件事的话，{P}/{N} 只能印
         # 物理页数（含目录页），目录条目也永远没有页码——CSS 的 target-counter

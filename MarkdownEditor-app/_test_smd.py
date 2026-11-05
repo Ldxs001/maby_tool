@@ -514,10 +514,50 @@ check("T25 递归拷贝含子目录", os.path.isfile(os.path.join(tdst, "sub", "
 check("T25 递归拷贝含 .mde 档案", os.path.isfile(os.path.join(tdst, ".mde", "zero.json")))
 check("T25 拷贝计数正确", _n_tree == 3, str(_n_tree))
 
+# --- T26 母版排版 typeset.json（v2.40.0）---
+# 为什么单独测：这个条目不在正文引用里、也不在 assets/ 里，任何一处白名单
+# 漏了都会**静默**丢掉（尤其是整理包重建那次），丢的结果只是"排版没套上"，
+# 不会报任何错——只能靠断言挡。
+ts_path = os.path.join(TD, "tpl.smdm")
+ts_stage = os.path.join(TD, "tpl_stage")
+os.makedirs(os.path.join(ts_stage, "assets"), exist_ok=True)
+with io.open(os.path.join(ts_stage, "doc.md"), "w", encoding="utf-8") as f:
+    f.write("# 母版正文\n")
+TS_OBJ = {"v": 1, "fonts": {"p": {"s": "12"}}, "page": {"mt": 25, "ml": 22}}
+_smd.pack_from_dir(ts_path, os.path.join(ts_stage, "doc.md"),
+                   os.path.join(ts_stage, "assets"), typeset=TS_OBJ)
+with zipfile.ZipFile(ts_path) as z:
+    check("T26 母版包内含 typeset.json", _smd.TS_NAME in z.namelist(),
+          str(z.namelist()))
+    got = json.loads(z.read(_smd.TS_NAME).decode("utf-8"))
+check("T26 排版往返一致", got == TS_OBJ, str(got))
+
+# 重打包（整理 / 回滚 / 覆盖另存为走同一条路）必须把排版带回来
+_smd.pack_from_dir(ts_path, os.path.join(ts_stage, "doc.md"),
+                   os.path.join(ts_stage, "assets"))
+with zipfile.ZipFile(ts_path) as z:
+    got2 = json.loads(z.read(_smd.TS_NAME).decode("utf-8"))
+check("T26 重打包保留排版（不传也读回）", got2 == TS_OBJ, str(got2))
+
+# 普通 .smd 不带该条目：不能因为共用一条打包路径就凭空多出一个文件
+plain_path = os.path.join(TD, "plain.smd")
+_smd.pack_from_dir(plain_path, os.path.join(ts_stage, "doc.md"),
+                   os.path.join(ts_stage, "assets"))
+with zipfile.ZipFile(plain_path) as z:
+    check("T26 普通包不含 typeset.json", _smd.TS_NAME not in z.namelist())
+
+# 已是母版改排版：追加 entry，解包读到最新那份
+_smd.set_typeset(ts_path, {"v": 1, "page": {"mt": 30}})
+_td = _smd.base_dir_for(ts_path)
+got3 = json.loads(io.open(os.path.join(_td, _smd.TS_NAME), encoding="utf-8").read())
+check("T26 set_typeset 后解包读到新值",
+      (got3.get("page") or {}).get("mt") == 30, str(got3))
+
 # --- 清理 ---
 shutil.rmtree(TD, ignore_errors=True)
 for s in (stage, big_stage, ps, orphan_stage, fstage, sstage, spstage,
-          nstage, cc_stage, cstage2, estage, mstage, tsrc, tdst):
+          nstage, cc_stage, cstage2, estage, mstage, tsrc, tdst,
+          ts_stage):
     shutil.rmtree(s, ignore_errors=True)
 
 fails = [r for r in results if not r[1]]
