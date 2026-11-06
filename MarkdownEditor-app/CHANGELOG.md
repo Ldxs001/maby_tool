@@ -12,6 +12,19 @@
 ---
 
 
+## v2.40.2（2026-11-06）
+
+**本次改动：方言提示条补齐 `@@ table` 与 `@@ meta`（两条 v2.23/v2.27 落地却从未进过提示表的指令），并修诊断文案对 font 家族的滞后——只动提示与文案，解析与配对逻辑零改动**
+
+**新增**
+- **提示条补 `@@ table` 与 `@@ meta` 两条专属条目**：现象——输入 `@@ table{…}` 或 `@@ meta` 时提示条显示的是 begin/caption/blank/MDE 一组不相干提示。根因——DG_HINTS 表自 v2.22.0 建表后未随新方言同步：`@@ meta`（v2.23.0）、`@@ table`（v2.27.0）两条漏收，且 generic `@@` 兜底列表同样不含它们，两条指令落进兜底也无从提示。修法——DG_HINTS 各插一条专属条目（table 含 `50l:r(…)`／`s(1x30,5x10)` 两种列宽写法与位置契约 table→caption→表格；meta 含「独占一行、不带参数、不进正文」三条硬规矩），generic 兜底补 table/meta 两行。验证——抽出 DG_HINTS 按 `dgHintUpdate` 同一「首条命中即停」逻辑自测 19 例全 PASS（table/meta 带参不带参、generic 兜底、五家族 begin、end 并写、行内 color、MDE、`<<<` 各归其位）。
+
+**修复**
+- **诊断文案补 font 家族**：现象——并写块诊断 D241 写「家族顺序须 page→full→color」、D243 写「开着的 page/full/color 层」，font 家族（v2.33.0 并入）在文案里缺席。根因——v2.33.0 加 font 时改了实现（`_MGORD={page,full,font,color}`）没同步两处用户可见文案。修法——D241 补为 page→full→font→color，D243 补为 page/full/font/color；`@@ end` 提示条同步补「@@ end font」例，generic begin 描述补 font。逻辑层核对无恙：并写实现本就支持 font，仅文案滞后。
+
+**说明**
+- **lint 触发架构复核（不改）**：原计划「渲染顺便收集 diag、撤 lint 二次解析」，读实现后前提不成立——渲染是 splitBlocks 章级分块 + 块哈希增量（未变块不解析），lint 的全篇 `parseMarkdown(diag)` 才是诊断的必要成本（配对需全文视角，@@ 块感知切块保证 begin/end 不被劈开）。若改为块级 diag 缓存拼接，切块边界随内容漂移，行号正确性风险大于收益。维持现状：MutationObserver 700ms 防抖 + 全篇解析，渲染路径只解析 changed 块，与 lint 无重复全篇成本。
+
 ## v2.40.1（2026-11-05）
 
 **本次改动：弹窗统一收尾——保存文档、存为母版、打印面板三个漏网窗口并入统一骨架（宽 480、圆角 10、右上 ×、点空白关闭），`.pp-btn` 独立按钮族退役；打印面板补齐 i18n（此前不在扫描根，英文界面整块漏翻）；自动化写围栏——测试/探针永久不可能再覆盖用户真实文件**

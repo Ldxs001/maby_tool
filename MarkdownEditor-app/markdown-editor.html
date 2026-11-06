@@ -3576,9 +3576,9 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
             continue;
           }
           if(!_mgOk2){_dgE(_mgK2,'D242','并写块：@@ end 关闭了未打开的家族');_dgHit=true;}
-          else{_dgE(i,'D243','并写块未闭合：文末仍有开着的 page/full/color 层');_dgHit=true;}
+          else{_dgE(i,'D243','并写块未闭合：文末仍有开着的 page/full/font/color 层');_dgHit=true;}
         }else{
-          _dgE(i,'D241','并写 begin 不成立：家族顺序须 page→full→color、同族不重复、参数合法');_dgHit=true;
+          _dgE(i,'D241','并写 begin 不成立：家族顺序须 page→full→font→color、同族不重复、参数合法');_dgHit=true;
         }
       }
       /* 不成立（单家族 / 参数非法 / 顺序错 / end 未开家族 / 未闭合）→ 落到下面普通段落按原文露出 */
@@ -11620,12 +11620,16 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     [/^[ ]{0,3}@@\s*begin\s+font/i,[['@@ begin font{"Microsoft YaHei Light" 12pt}','整块临时换字体／字号：字体名可加引号或直接写，字号 6–72pt，末行写 @@ end font 收尾']]],
     [/^[ ]{0,3}@@\s*begin\s+color/i,[['@@ begin color{#c0392b}','整块着色：颜色名或 #rgb／#rrggbb，末行写 @@ end color 收尾']]],
     [/^[ ]{0,3}@@\s*begin\b/i,[['@@ begin fill{a|b}','分栏'],['@@ begin full{t|m|b}','独占一页'],['@@ begin page{noll|1|i|I}','页区页码'],['@@ begin font{"字体名" 12pt}','整块换字体字号'],['@@ begin color{X}','整块着色'],['@@ begin page full font color …','并写时按 page→full→font→color 的顺序排列']]],
-    [/^[ ]{0,3}@@\s*end\b/i,[['@@ end fill','关 fill'],['@@ end color','只关 color，外层 page/full 继续收内容'],['@@ end page color','集合语义：一行同时关多个']]],
+    [/^[ ]{0,3}@@\s*end\b/i,[['@@ end fill','关 fill'],['@@ end font','关 font，外层 page/full 继续收内容'],['@@ end color','只关 color，外层 page/full/font 继续收内容'],['@@ end page color','集合语义：一行同时关多个']]],
     [/^[ ]{0,3}@@\s*caption/i,[['@@ caption{…} 表注文字','题注：作用于紧随其后的那一个表格']]],
+    /* v2.40.2 补 v2.23/v2.27 漏掉的方言提示：table 与 meta 此前落到 generic
+       兜底，而兜底列表也不含它们——写这两条指令时看到的是一组不相干提示。 */
+    [/^[ ]{0,3}@@\s*table/i,[['@@ table{50l:r(50|30|20)}','表格宽与列宽：50l/r/c=表宽50%左/右/居中；r(…)各列百分比，s(1x30,5x10)按列号指定；只作用于紧随其后的那一个表格（table → caption → 表格）']]],
+    [/^[ ]{0,3}@@\s*meta/i,[['@@ meta','元数据锚点：须独占一行、不带任何参数；值在元数据面板填写，不进正文（只在预览显示，不打印、不进 Word/HTML 导出）']]],
     [/^[ ]{0,3}@@\s*blank/i,[['@@ blank{2}','硬控段间空白：n=正文行数，取 0.1~50，单独占一行']]],
     [/@@\s*color/,[['@@ color r{这段是红的}','行内着色：色值 = 11 个字母简写（r红 g绿 b蓝 y黄 o橙 p紫 c青 m品红 k黑 w白 a灰）或 3/6/8 位十六进制（不带 #）'],['花括号按层配对','内容可与加粗、~~删除线~~、x^{2} 上标混排，如 @@ color r{价 x^{2}}']]],
     [/^[ ]{0,3}@@\s*MDE/i,[['@@ MDE_{k == v}','执行点数据（low runner）'],['@@ MDE__{…}','隐性公共池（不渲染）'],['@@ MDE import 名 [is 别名] [{global p}]','导入 run，正文原位替换执行结果'],['@@ MDE from 名 import 函数 [is 别名]','从 run 选择性导入']]],
-    [/^[ ]{0,3}@@/,[['@@ begin …','块：fill 分栏／full 独占页／page 页区／color 着色'],['@@ caption{…}','表格题注'],['@@ blank{n}','段间空白'],['@@ MDE_{k == v}','执行点数据（low runner）'],['@@ MDE__{…}','隐性公共池（不渲染）']]],
+    [/^[ ]{0,3}@@/,[['@@ begin …','块：fill 分栏／full 独占页／page 页区／font 字体字号／color 着色'],['@@ caption{…}','表格题注'],['@@ table{50l:r(…)}','表格宽与列宽方案'],['@@ blank{n}','段间空白'],['@@ meta','元数据锚点'],['@@ MDE_{k == v}','执行点数据（low runner）'],['@@ MDE__{…}','隐性公共池（不渲染）']]],
     [/^[ ]{0,3}<<</,[['<<<','缩进包围块：开行 <<< → 中间放内容 → 闭行 <<<，开闭各自独占一行']]]
   ];
   function dgHintUpdate(){
