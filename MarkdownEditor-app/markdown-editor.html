@@ -4093,6 +4093,8 @@ I18N_EN["最近修改"]="Last edited";
 I18N_EN["留空则记为 default"]="Blank = recorded as default";
 I18N_EN["元数据写入失败："]="Could not write the metadata: ";
 I18N_EN["设置里的这份值。「应用」只是把它存进设置，文档一个字都不动；保存文档时才写档案：没有档案就建档（创建快照只写一次、只读），已有档案就追加这次保存的记录（字段变了记新旧值，没变记一条「保存」）。开关开着就建档，作者留空记为 default，其余留空就是不记。标签与代称的显示只看履历：履历里最后一次被记录的值就是显示值，从没人记过就留空；本次保存没记就沿用之前的。"]="These values live in your typesetting settings. Apply only stores them there and leaves the document untouched; the archive is written when you save: a missing archive is created at that point (snapshot written once, then read-only), and an existing one gets a record for this save appended (old and new values when a field changed, a plain \"saved\" line otherwise). With the switch on an archive is always created, a blank author is recorded as default, and any other blank field is simply not recorded. Tags and Alias display purely from the history: the last recorded value is what is shown; if no one ever recorded one the line stays empty, and a save without one keeps the previous value.";
+I18N_EN["正在保存设置…"]="Saving settings…";
+I18N_EN["设置未能写入磁盘，请检查磁盘空间或写入权限"]="Settings could not be written to disk — check free space and write permissions";
 I18N_EN["设置已保存；元数据在保存文档时才写"]="Settings saved; the metadata archive is written when you save the document";
 I18N_EN["front matter 已写入正文"]="Front matter written into the document";
 I18N_EN["排版设置尚未应用（改动只在面板里，未持久化）"]="Typesetting changes are not applied yet (they exist only in this panel and are not saved)";
@@ -4178,21 +4180,44 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     }catch(e){}
     return null;
   }
-  var _uiDirty={},_uiTimer=null;
+  var _uiDirty={},_uiTimer=null,_uiCbs=[],_uiFailAt=0;
+  /* 写盘失败只在 20s 内提示一次：输入时每次节流 flush 都可能失败，不能刷屏 */
+  function _uiWriteFail(){
+    var now=Date.now();
+    if(now-_uiFailAt<20000)return;
+    _uiFailAt=now;
+    try{showToast(TF('设置未能写入磁盘，请检查磁盘空间或写入权限'),true);}catch(e){}
+  }
   function _uiFlush(){
     _uiTimer=null;
     var d=_uiDirty;_uiDirty={};
+    var cbs=_uiCbs;_uiCbs=[];
     var has=false;for(var k in d){has=true;break;}
-    if(!has)return;
+    if(!has){for(var i0=0;i0<cbs.length;i0++){try{cbs[i0](true);}catch(e){}}return;}
+    function done(ok){
+      if(!ok)_uiWriteFail();
+      for(var i=0;i<cbs.length;i++){try{cbs[i](ok);}catch(e){}}
+    }
     try{
       fetch('/api/ui-settings',{method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(d)});
-    }catch(e){}
+        body:JSON.stringify(d)}).then(function(r){
+          return r.json();
+        }).then(function(j){
+          done(!!(j&&j.ok));
+        })['catch'](function(){done(false);});
+    }catch(e){done(false);}
   }
   function _uiQueue(k,v){
     _uiDirty[k]=v;
     if(!_uiTimer)_uiTimer=setTimeout(_uiFlush,300);
+  }
+  /* 立刻 flush，并在写盘真有结果后回调。排版面板「应用」用它给出真实反馈——
+     以前那里是在 fetch 都没发出时就把「设置已保存」写死在状态栏。 */
+  function _uiAfterFlush(fn){
+    _uiCbs.push(fn);
+    if(_uiTimer){clearTimeout(_uiTimer);_uiTimer=null;}
+    _uiFlush();
   }
   (function(){
     var r=_uiRemoteGetAll();
@@ -9938,10 +9963,20 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     /* 「应用」只到设置为止：通道 b 的档案要等保存才写，通道 a 的 front matter
        当场改进正文。两句话各说各的落点，不合并——合并过两次都把它说糊了。 */
     var ss=document.getElementById('statSave');
-    ss.textContent=docFrontMatter()
-      ? TF('front matter 已写入正文')
-      : TF('设置已保存；元数据在保存文档时才写');
-    ss.className='saved';
+    var _fmNow=!!docFrontMatter();
+    ss.textContent=TF('正在保存设置…');
+    ss.className='dirty';
+    _uiAfterFlush(function(ok){
+      if(!ok){
+        ss.textContent=TF('设置未能写入磁盘，请检查磁盘空间或写入权限');
+        ss.className='dirty';
+        return;
+      }
+      ss.textContent=_fmNow
+        ? TF('front matter 已写入正文')
+        : TF('设置已保存；元数据在保存文档时才写');
+      ss.className='saved';
+    });
   });
   var dirty=false,diskTimer=null;
   editor.addEventListener('input',function(){

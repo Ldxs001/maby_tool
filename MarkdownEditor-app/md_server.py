@@ -19,6 +19,7 @@ import tempfile
 import socketserver
 import socket
 import shutil
+import errno
 import threading
 import os
 import sys
@@ -66,7 +67,7 @@ except Exception as _e:
 PORT = int(os.environ.get("MD_PORT") or 18766)  # MD_PORT：多实例/测试隔离用，默认不变
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 147  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 148  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
 
 # ---------- v2.40.1 自动化写围栏 ----------
 # 前端在自动化浏览器（Playwright/CDP，navigator.webdriver=true）里会给全部
@@ -459,14 +460,29 @@ def _ui_settings_read():
 
 
 def _ui_settings_write(d):
+    """写 UI 状态（排版/主题/视图）。返回 True/False。
+
+    v2.40.3 之前这里是 `except Exception: pass`：MSIX 虚拟化下写盘失败被吞掉，
+    端点照样回 ok:true，前端还把「设置已保存」写死在状态栏——用户改完排版
+    重开就丢，且无从发现。现在失败落日志、由端点回 500、前端据此提示。
+    """
     try:
         os.makedirs(os.path.dirname(UI_SETTINGS_PATH), exist_ok=True)
         tmp = UI_SETTINGS_PATH + ".tmp"
         with io.open(tmp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False)
-        os.replace(tmp, UI_SETTINGS_PATH)
-    except Exception:
-        pass
+        _replace_retry(tmp, UI_SETTINGS_PATH)
+        return True
+    except Exception as e:
+        try:
+            os.makedirs(RUNTIME_DIR, exist_ok=True)
+            with io.open(os.path.join(RUNTIME_DIR, "ui-settings-write.log"),
+                         "a", encoding="utf-8") as f:
+                f.write("%s %s: %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"),
+                                         type(e).__name__, e))
+        except Exception:
+            pass
+        return False
 
 # .smd 自包含文档格式（v1.2.0）；导入失败落错误日志，相关路由返回明确错误而非静默
 try:
@@ -611,7 +627,7 @@ def _save_json(path, data):
     tmp = path + ".tmp"
     with io.open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, path)
+    _replace_retry(tmp, path)
 
 
 _TMP_SEQ = itertools.count()
@@ -630,15 +646,75 @@ def _text_lock(path):
     return lk
 
 
+_CROSS_VOLUME_DIRS = set()
+
+
+def _is_cross_volume(e):
+    """同目录 rename 被判跨卷：Windows WinError 17 / POSIX EXDEV。
+
+    MSIX 商店版开启文件系统虚拟化后（包被装在非系统卷时生效）：
+    AppData 里**已存在的文件**留在真实 AppData（系统卷），而**新建文件**
+    （我们写的 .tmp）落进包所在卷的私有存储（D:\\WpSystem\\...）。
+    同一个可见目录，底层是两个卷；os.replace 是 MoveFileEx，不带跨卷复制，
+    于是抛 ERROR_NOT_SAME_DEVICE(17)。目录看起来相同，卷不同。
+    """
+    return (getattr(e, "winerror", None) == 17
+            or getattr(e, "errno", None) == errno.EXDEV)
+
+
+def _note_cross_volume(dst):
+    """跨卷降级第一次发生在某个目录时记一行日志，便于事后定位。"""
+    d = os.path.dirname(os.path.abspath(str(dst))) or "."
+    if d in _CROSS_VOLUME_DIRS:
+        return
+    _CROSS_VOLUME_DIRS.add(d)
+    try:
+        os.makedirs(RUNTIME_DIR, exist_ok=True)
+        with io.open(os.path.join(RUNTIME_DIR, "fs-fallback.log"),
+                     "a", encoding="utf-8") as f:
+            f.write("%s not-same-device fallback in %s\n"
+                    % (time.strftime("%Y-%m-%d %H:%M:%S"), d))
+    except Exception:
+        pass
+
+
+def _copy_over(src, dst):
+    """跨卷降级：逐字节把 src 覆盖进 dst，落盘后才删 src。
+
+    只在 _is_cross_volume 命中时走这条路。同卷永远走原子 os.replace，
+    所以 exe 安装版 / zip 便携版 / 正常商店安装的行为一个字节都不变。
+    代价：这条降级路径失去原子性（复制中途断电会留半截目标文件），
+    但这是「能保存」与「保存必失败」之间唯一可选的取舍。
+    """
+    with open(src, "rb") as fs, open(dst, "wb") as fd:
+        shutil.copyfileobj(fs, fd, 128 * 1024)
+        fd.flush()
+        try:
+            os.fsync(fd.fileno())
+        except OSError:
+            pass
+    try:
+        os.remove(src)
+    except OSError:
+        pass
+
+
 def _replace_retry(src, dst, tries=6):
     """os.replace 重试：Windows 上目标文件被杀毒/索引/并发替换瞬时占用时报
-    WinError 5（拒绝访问）。退避重试，全部失败再抛原始异常，不吞错。"""
+    WinError 5（拒绝访问）。退避重试，全部失败再抛原始异常，不吞错。
+
+    跨卷（WinError 17 / EXDEV）是确定性错误，重试没有意义：直接降级为
+    逐字节复制 + 删临时文件（v2.40.3，MSIX 虚拟化场景）。"""
     last = None
     for i in range(tries):
         try:
             os.replace(src, dst)
             return
         except OSError as e:
+            if _is_cross_volume(e):
+                _note_cross_volume(dst)
+                _copy_over(src, dst)
+                return
             last = e
             time.sleep(0.02 * (i + 1))
     raise last
@@ -2392,7 +2468,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             d.pop(k, None)
                         else:
                             d[k] = v
-                    _ui_settings_write(d)
+                    wrote = _ui_settings_write(d)
+                if not wrote:
+                    self._send(500, json.dumps(
+                        {"ok": False, "error": "UI 状态未能写入磁盘"},
+                        ensure_ascii=False))
+                    return
                 self._send(200, '{"ok":true}', "application/json; charset=utf-8")
             except Exception as e:
                 self._send(500, json.dumps({"ok": False, "error": str(e)},
@@ -2618,7 +2699,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     while os.path.exists(dst):
                         dst = os.path.join(trash, "%s.%s-%d%s" % (n, ts, k, TPL_EXT))
                         k += 1
-                    os.replace(p, dst)
+                    _replace_retry(p, dst)
                     self._send(200, json.dumps(
                         {"ok": True, "name": n, "trashed": dst}, ensure_ascii=False))
                     return
@@ -2644,7 +2725,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             {"ok": False, "error": "已存在同名母版：%s" % nn},
                             ensure_ascii=False))
                         return
-                    os.replace(old, new)
+                    _replace_retry(old, new)
                     self._send(200, json.dumps(
                         {"ok": True, "name": nn, "path": new, "old": old},
                         ensure_ascii=False))
@@ -2843,7 +2924,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     except Exception:
                         pass
                 if valid:
-                    os.replace(bak, p)   # 目标在不在都允许落位；base_dir_for 指纹检测会自动重解包
+                    _replace_retry(bak, p)   # 目标在不在都允许落位；base_dir_for 指纹检测会自动重解包
                     self._send(200, json.dumps({"ok": True}, ensure_ascii=False))
                 else:
                     self._send(400, json.dumps({"ok": False, "error": "备份与文档不匹配或已损坏"}, ensure_ascii=False))
@@ -3439,7 +3520,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     f.write(data)
                     f.flush()
                     os.fsync(f.fileno())
-                os.replace(tmp, path)
+                _replace_retry(tmp, path)
                 self._send(200, json.dumps({"ok": True, "path": path,
                                             "bytes": len(data)},
                                            ensure_ascii=False))
@@ -4023,7 +4104,7 @@ def _shrink_image(src_path, need_px):
             except Exception:
                 pass
             return None, None
-        os.replace(tmp, out_path)
+        _replace_retry(tmp, out_path)
     except Exception:
         if tmp:
             try:

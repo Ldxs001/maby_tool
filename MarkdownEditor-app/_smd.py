@@ -36,6 +36,7 @@ import json
 import time
 import zipfile
 import shutil
+import errno
 import warnings
 import zlib
 import itertools
@@ -201,16 +202,44 @@ def locked(smd_path):
 
 def _replace_retry(src, dst, tries=6):
     """os.replace 重试：Windows 上目标被杀毒/索引/并发替换瞬时占用时报
-    WinError 5。退避重试，全部失败再抛原始异常（不吞错）。"""
+    WinError 5。退避重试，全部失败再抛原始异常（不吞错）。
+
+    跨卷（WinError 17 / EXDEV）是确定性错误，重试无意义：降级为逐字节
+    复制 + 删临时文件。MSIX 商店版虚拟化下，已存在的包在真实 AppData
+    （系统卷）、新建的 tmp 落包所在卷的私有存储，rename 必然跨卷。
+    """
     last = None
     for i in range(tries):
         try:
             os.replace(src, dst)
             return
         except OSError as e:
+            if (getattr(e, "winerror", None) == 17
+                    or getattr(e, "errno", None) == errno.EXDEV):
+                _copy_over(src, dst)
+                return
             last = e
             time.sleep(0.02 * (i + 1))
     raise last
+
+
+def _copy_over(src, dst):
+    """跨卷降级：逐字节覆盖 dst，落盘后才删 src。
+
+    只在上面命中 WinError 17 / EXDEV 时使用；同卷永远走原子 os.replace，
+    所以 exe / zip 版本的行为不变。代价是这条路径失去原子性。
+    """
+    with open(src, "rb") as fs, open(dst, "wb") as fd:
+        shutil.copyfileobj(fs, fd, 128 * 1024)
+        fd.flush()
+        try:
+            os.fsync(fd.fileno())
+        except OSError:
+            pass
+    try:
+        os.remove(src)
+    except OSError:
+        pass
 
 
 def write_doc(base_dir, text):
