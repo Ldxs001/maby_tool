@@ -50,7 +50,10 @@ DIST_FILES = ["md_launch.pyw", "_md_run.py", "md_server.py", "markdown-editor.ht
               "docx_export.py", "md_meta.py", "md_sm3.py", "md_convert.py",
               "md_app.pyw", "LICENSE", "COPYRIGHT", "README.md",
               "install.cmd", "MarkdownEditor.cs", "_mklnk.ps1",
-              "uninstall.cmd", "UninstallMDEditor.cs", "desktop-shortcut.cmd", "md_stop.cmd"]
+              "uninstall.cmd", "UninstallMDEditor.cs", "desktop-shortcut.cmd", "md_stop.cmd",
+              # v2.41.0 关于与快捷键面板：三枚标识图 + 产品版本号唯一来源。
+              # 漏列时安装包内没有这些文件，静态请求 404、/api/version 的 app 为空。
+              "CHANGELOG.md", "about_md.png", "about_author.png", "about_repo.png"]
 
 # 构建期预编译的二进制（由 make_prebuilt_exes 生成，随包分发）。
 # MarkdownEditor.exe 是右键菜单 / 打开方式的入口，UninstallMDEditor.exe 是
@@ -211,6 +214,11 @@ def make_staging(ver):
         os.path.join(STAGING, "docxdeps", "PIL"),
         os.path.join(STAGING, "docxdeps", "latex2mathml"),
         os.path.join(STAGING, "docxdeps", "LICENSES", "README.md"),
+        # v2.41.0 关于与快捷键面板：缺任一资源，安装版标识图与版本号即失效。
+        os.path.join(STAGING, "CHANGELOG.md"),
+        os.path.join(STAGING, "about_md.png"),
+        os.path.join(STAGING, "about_author.png"),
+        os.path.join(STAGING, "about_repo.png"),
     ]
     # low runner 种子断言（缺一即 FAIL：示例 run 随包分发，缺了就断链）
     _runs_must = [os.path.join(rdst, f) for f in DIST_RUNS]
@@ -295,9 +303,12 @@ def run_smoke(exe):
         os.remove(SMOKE_REPORT)
     # payload 内 run 库清单（独立于 C# smoke 报告：直接查包，最贴近用户拿到的东西）
     with zipfile.ZipFile(os.path.join(OUT, "payload.zip")) as z:
+        _zip_names = set(z.namelist())
         _zip_runs = sorted(n.rsplit("/", 1)[-1] for n in z.namelist()
                            if n.startswith("runtime/runs/") and n.endswith(".py"))
     _runs_ok = _zip_runs == DIST_RUNS
+    _about_res = ["CHANGELOG.md", "about_md.png", "about_author.png", "about_repo.png"]
+    _about_ok = all(n in _zip_names for n in _about_res)
     subprocess.run([exe, "--smoke"], timeout=600, capture_output=True)
     for _ in range(40):
         if os.path.exists(SMOKE_REPORT):
@@ -345,6 +356,8 @@ def run_smoke(exe):
         ("vega-embed vendor in payload (>=50KB)",
          int(rep.get("vega_embed_vendor_size", "0")) > 50 * 1024,
          rep.get("vega_embed_vendor_size", "?")),
+        ("about resources in payload (4)", _about_ok,
+         ",".join(n for n in _about_res if n not in _zip_names)),
         ("version parsed", rep.get("version", "?") != "?", rep.get("version", "?")),
         ("webview2 detected (this machine)", rep.get("webview2") == "1", ""),
         ("run library complete in payload (%d files)" % len(DIST_RUNS), _runs_ok,

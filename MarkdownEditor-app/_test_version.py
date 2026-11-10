@@ -85,5 +85,16 @@ try:
 except OSError as e:
     ck("V11 MSIX 复用 detect_version", False, repr(e))
 
-print("\nPASS %d / FAIL %d" % (11 - len(fails), len(fails)))
+# 落点 4：关于与快捷键面板的资源必须进安装包构建清单（缺一即安装版破图 / 版本为空）
+inst = io.open(os.path.join(HERE, "installer", "_build_installer.py"),
+               encoding="utf-8").read()
+about_res = ["CHANGELOG.md", "about_md.png", "about_author.png", "about_repo.png"]
+ck("V12 关于面板资源在 DIST_FILES",
+   all(('"%s"' % n) in inst for n in about_res),
+   "missing=%s" % [n for n in about_res if ('"%s"' % n) not in inst])
+ck("V13 安装包断言覆盖资源",
+   'os.path.join(STAGING, "about_md.png")' in inst
+   and "about resources in payload" in inst)
+
+print("\nPASS %d / FAIL %d" % (13 - len(fails), len(fails)))
 sys.exit(1 if fails else 0)
