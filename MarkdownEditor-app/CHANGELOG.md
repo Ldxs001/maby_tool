@@ -13,6 +13,30 @@
 ---
 
 
+## v2.42.1（2026-11-10）
+
+**本次改动：元数据档案锁位在「档案已存在」路径补回——`ensure`／`update`／`sync` 三处遇到已有档案时校正 ReadOnly+Hidden，只改属性、不读不写内容；测试夹具改为先解位再删，消除只读残骸造成的假失败；安装包构建保留档案属性位**
+
+**修复**
+- **锁位在「已存在」路径永远补不回来**：只读+隐藏原本只在 `ensure` 建档那一刻设，而档案会随文档与安装包迁移，路上会丢——安装器的 `ZipArchiveEntry.ExtractToFile` 只写字节、不还原文件属性，随包分发的内置文档档案落地后是普通可写文件；`.smd` 包内条目由 `_smd` 强制成 0644（解包后要能直接改）；从别处拷来的目录与早期版本建的档案本来就没锁。而 `ensure`／`update`／`sync` 遇到已有档案是直接返回，锁位于是永久缺失，「防手滑」这层在装好的程序里等于不存在。新增 `relock()`：只在 `lock=True` 时对已有档案补 ReadOnly+Hidden，**只改属性、不打开内容、不重写 zero**，「绝不覆盖创建者快照」不受影响。四处入口各自接入：`ensure` 的已存在分支、`update`、`sync`（前端保存的主入口，档案已存在时根本不进 `ensure`），以及 `/api/meta` 的 `action=read` 分支——打开文档走的是 read，内置文档这类「只看不存」的永远走不到 sync，不在 read 补就永远锁不上。
+- **`FILE_ATTRIBUTE_NORMAL` 让补锁静默失败**：`0x80` 只在单独使用时有效，与任何其它位组合都是非法值，`SetFileAttributesW` 会整体失败且返回码被忽略。`_set_attrs` 现在先摘掉该位再按位加减；否则对「只剩 NORMAL」的档案补锁，属性一个都写不上去。
+- **测试夹具的只读残骸造成假失败**：档案建完即只读，`shutil.rmtree(..., ignore_errors=True)` 删不掉且不报错，下一轮 `ensure` 看到「档案已存在」直接返回——`_test_meta_api` 的 `A4 up.md 存在` 与 `C2 补作者 default` 两条长期 FAIL 即由此而来，并非功能缺陷。`_test_meta_api`／`_test_smd`／`_test_zero_perm` 的开头重置与收尾改用 `_smd._force_rmtree`（解位再删、失败重试），两条转 PASS，38 项全绿。
+- **安装包构建不得剥掉档案属性**：`installer/_build_installer.py` 复制内置文档时，`.mde/zero.json` 目标已存在且只读会让 `copytree` 报 `Permission denied`，且报错随份数推进（删掉报错那份就轮到下一份）。改为每轮先删 `.mde` 整目录（解位后 rmtree，目标不存在时 `copy2` 才写得进），复制仍走 `copy2`，再补 `_carry_mde_attrs` 按源整体搬一次 Windows 属性位——`copystat` 只带得动 `st_mode` 里的只读位，`FILE_ATTRIBUTE_HIDDEN` 不在其中。包内属性与源逐项相等。**不得用 `copy_function=shutil.copyfile` 绕过**：那等于把 zero 的只读锁剥掉。
+
+**变更**
+- `md_meta` 模块头第 2 条纪律补上「锁位会在迁移中丢失、`relock()` 负责补回」，与实现一致。
+
+**测试**
+- `_test_zero_perm` 新增 F 组 16 条（19→35 项）：建档即锁、`.mde` 目录隐藏、模拟解压后 `ensure`／`update`／`sync` 三条路径各自补回只读与隐藏、补锁后属性与建档态逐位相同（`0x23`）、补锁不改内容（SHA-256 一致）、已锁档案重复调用不写属性（mtime 不变）、`lock=False` 方向不搞反（`update` 不得补锁）、以内置指南真实档案作「解压后」样本验证补锁与内容不变。
+- `_test_meta_api` 新增 A16–A18：模拟解压后调 `action=read`，只读位必须补回且字段不变；同时把该文件的汇总数从写死的 35 改为动态计数（新增断言仍报旧数等于谎报覆盖面）。
+- 回归：`_test_meta_api` 38/38、`_test_zero_perm` 35/35、`_test_smd` 74/74、`_test_smd_history` 32/32、`_test_smd_ann` ALL PASS、`_test_metadata` 70/70、`_test_routes` ALL PASS、`_test_parser_sync` 逐字节全等。
+- HTTP 层实测：磁盘 `.md` 首次 `sync` 建档得 `RO,HID,ARCH`；模拟解压摘掉 `RO|HID` 后再 `sync`，属性补回 `RO,HID,ARCH` 且字段不变。
+
+**说明**
+- 版本走 patch 位：v2.42.0 已双端发布，本段为锁位补回与构建链修正，属缺陷修复。`MD_SERVER_VERSION` 独立演进（150→151）。
+
+---
+
 ## v2.42.0（2026-11-10）
 
 **本次改动：块级字体方言 `@@ begin font` 增加对齐参数（`l`/`c`/`r`/`j`），块内覆盖全局排版设定，预览、HTML 导出、打印/PDF 与 Word 四处一致；使用指南的「块级字体」一节、语法速查表与概览行同步**
@@ -23,7 +47,7 @@
 - **Word 段落对齐**：Word 的段落对齐不继承，新增 `_font_align()` 从 font 容器样式取 `WD_ALIGN`，标题与段落两分支各落一次值；段落自带对齐仍优先于容器。
 
 **修复**
-- **构建链：内置文档元数据档案覆盖失败**：`installer/_build_installer.py` 复制 docs 时，`.mde/zero.json`（建档即只读）覆盖报 `Permission denied`，且报错随份数推进——删掉报错那份就轮到下一份；`_clear_readonly_tree` 单测有效但在整树复制里赶不上属性回写。改为复制前先删 `.mde` 整目录、复制改用 `copyfile`（只搬内容不继承只读属性），包内文件保持可写，同一份 staging 可重复构建。
+- **构建链：内置文档元数据档案覆盖失败**：`installer/_build_installer.py` 复制 docs 时，`.mde/zero.json`（建档即只读）覆盖报 `Permission denied`，且报错随份数推进——删掉报错那份就轮到下一份；`_clear_readonly_tree` 单测有效但在整树复制里赶不上属性回写。改为**每轮先删 `.mde` 整目录**（解位后 rmtree，目标不存在时 `copy2` 才写得进）、复制仍走 `copy2`，再补 `_carry_mde_attrs` 按源整体搬一次 Windows 属性位——`copystat` 只带得动 `st_mode` 里的只读位，`FILE_ATTRIBUTE_HIDDEN` 不在其中，只靠 copy2 会让包里的 `zero.json` 丢隐藏位、`.mde` 目录变明面。包内属性与源逐项相等（`.mde` = `HID`、`zero.json` = `RO,HID`、`up.md` = `ARCH`），同一份 staging 可重复构建；**不得用 `copy_function=shutil.copyfile` 绕过**——那等于把 zero 的只读锁剥掉，拿设计换构建。
 
 **变更**
 - **使用指南「块级字体」一节改写**：标题改为 `@@ begin font{"字体名" 对齐 字号}`，补齐对齐字母表、纯对齐块、token 剥取顺序（数字当字号、单字母 `lcrj` 当对齐、其余拼成字体名）、表格与代码块不跟随的原因、引号名规避 `c` 冲突；并写一节的 `font` 表格行与嵌套规则同步，语法速查表与概览行同步。

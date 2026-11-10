@@ -17,7 +17,10 @@
 2. **"只读"保护的是手滑与外部工具，不是安全边界**。程序只在建档那一刻写
    zero.json，之后任何保存路径都不碰它，因此只读位不影响日常存盘。唯一需要
    解位的场景是 up 在而 zero 丢失时的重建——那种情况由人手动处理，本模块
-   不偷偷解位改写。
+   不偷偷解位改写。反过来，锁位在路上会丢（安装包解压不还原属性、`.smd`
+   包内条目是 0644、别人拷来的目录、早期版本的老档案），所以 `ensure` /
+   `update` / `sync` 遇到「已存在」时会调 `relock()` 把锁补回来——**只改
+   属性，内容一个字节不动**，不违反「绝不覆盖创建者快照」。
 
 3. **当前值 = zero.fields 叠加 up 里的全部变更**。zero 存的是"创建时是什么"，
    up 存的是"后来改了什么"，两者合起来才是"现在是什么"。前端要渲染就直接
@@ -76,6 +79,7 @@ _UP_SM3_RE = re.compile(r"\bsm3:([0-9a-f]{%d})\b" % md_sm3.HEX_LEN)
 # Windows 文件属性位（其它平台静默跳过：Linux/macOS 的点开头文件名本身就是隐藏）
 _FA_READONLY = 0x1
 _FA_HIDDEN = 0x2
+_FA_NORMAL = 0x80
 
 
 def assets_dir_for(doc_path):
@@ -108,7 +112,10 @@ def _set_attrs(path, hidden=None, readonly=None):
         cur = k32.GetFileAttributesW(str(path))
         if cur == 0xFFFFFFFF:
             return
-        a = cur
+        # FILE_ATTRIBUTE_NORMAL(0x80) 只在「单独使用」时有效，与任何其它位
+        # 组合都是非法值，SetFileAttributesW 会整体失败——那会让补锁静默不生效
+        # （_test_zero_perm 的 B 组为同一原因留了注释）。先摘掉再按位加减。
+        a = cur & ~_FA_NORMAL
         if hidden is not None:
             a = (a | _FA_HIDDEN) if hidden else (a & ~_FA_HIDDEN)
         if readonly is not None:
@@ -301,6 +308,54 @@ def relax(assets_dir):
     _set_attrs(md, hidden=False)
 
 
+def _attrs(path):
+    """读 Windows 文件属性位；非 Windows 或读失败返回 None。"""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        a = ctypes.windll.kernel32.GetFileAttributesW(str(path))
+        return None if a == 0xFFFFFFFF else a
+    except Exception:
+        return None
+
+
+def relock(assets_dir):
+    """把**已存在**的档案补上只读 + 隐藏（只改属性，不读不写内容）。
+
+    为什么需要：只读位原本只在 `ensure` 建档那一刻设，而档案会跟着文档与
+    安装包到处走，路上会丢：
+      - .NET 的 `ZipArchiveEntry.ExtractToFile` 只写字节、**不还原属性**，
+        所以安装包里的内置文档档案到用户机上是普通可写文件；
+      - `.smd` 包内条目被 `_smd` 强制成 0644（解包后要能直接改，见 E1/E2 契约）；
+      - 从别人那里拷来的目录、以及早期版本建的老档案，本来就没锁。
+    `ensure` / `update` / `sync` 遇到「已存在」原本直接返回，于是这些档案
+    永远补不上锁——「防手滑」这条在用户机上等于没做。这里补一次。
+
+    三条红线：
+      1. **只改属性**。不打开内容、不重写 zero，「绝不覆盖创建者快照」这条
+         纪律不受影响；内容正确性由 `read()` 负责，与锁位无关。
+      2. **只在 lock=True 时调用**。`.smd` 的解包副本建在临时目录，锁上会让
+         rmtree 删不干净、下次解包撞只读同名文件 → HTTP 500（2026-10-31 事故）。
+         `lock=False` 的分支走 `relax()`，方向相反，两者别混。
+      3. **出错静默**。只读盘、网络盘、无权限都只是让这层保护落空，
+         不能让一次保存因为设属性失败而报错（`_set_attrs` 内部已吞异常）。
+
+    已经锁好的档案直接返回，不重复写属性：每次保存都写一遍会让同步盘与
+    杀软多扫一遍，也没有任何意义。返回是否真的改过属性。
+    """
+    md = meta_dir(assets_dir)
+    zp = os.path.join(md, ZERO_NAME)
+    if not os.path.isfile(zp):
+        return False
+    a = _attrs(zp)
+    if a is not None and (a & _FA_READONLY) and (a & _FA_HIDDEN):
+        return False                      # 已经锁好，一个字节都不碰
+    _set_attrs(md, hidden=True)
+    _set_attrs(zp, hidden=True, readonly=True)
+    return True
+
+
 def ensure(assets_dir, fields=None, lock=True, created=None):
     """建档：zero.json + up.md。已存在则原样返回（**绝不覆盖创建者快照**）。
 
@@ -318,6 +373,8 @@ def ensure(assets_dir, fields=None, lock=True, created=None):
     if cur is not None:
         if not lock:
             relax(assets_dir)            # 老副本可能已被锁过，这里顺带解开
+        else:
+            relock(assets_dir)           # 已存在但可能没锁（安装包/拷贝/老档案）
         return cur, False
     md = meta_dir(assets_dir)
     os.makedirs(md, exist_ok=True)
@@ -368,6 +425,8 @@ def update(assets_dir, fields, lock=True, who=""):
     if cur is None:
         cur, _ = ensure(assets_dir, fields, lock)
         return cur, 0
+    if lock:
+        relock(assets_dir)               # 已存在：补锁（`.smd` 副本 lock=False 不补）
     old = cur.get("fields") or {}
     new = _clean(fields)
     at = _now()
@@ -435,6 +494,8 @@ def sync(assets_dir, fields=None, who="", created=None, lock=True, baseline=None
                 "at": _now(), "who": (who or "").strip() or DEFAULT_AUTHOR,
                 "key": None, "note": "建档", "from": "", "to": "", "hash": h}])
             cur = read(assets_dir)
+    elif lock:
+        relock(assets_dir)               # 已存在：补锁（主路径，见 relock 说明）
     changed = 0
     if fields:
         cur, changed = update(assets_dir, fields, lock=lock, who=who)

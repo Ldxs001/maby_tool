@@ -1,7 +1,7 @@
-// MDEditor 2.8 宣传片 · 确定性录制器
-//   node record.js            全量录制（114s @25fps）
+// MDEditor 宣传片 · 确定性录制器（商店预告片版，去版本号）
+//   node record.js            全量录制（157.8s @25fps）
 //   LIMIT=14 node record.js   只录前 14 秒（快速验画面）
-// 产出：raw28/capture.mp4（1600x900 @25fps，无声，纯画面轨）
+// 产出：raw28/capture.mp4（1920x1080 @25fps，无声，纯画面轨）
 //        frames/0N-*.png（成片抽帧验收）
 //        stills/*.png（时间线关键点原图，自检用）
 // 为何不用 playwright recordVideo：本机 CDP screencast 通道几乎不推帧，
@@ -17,23 +17,34 @@ const EXE = 'C:\\Users\\sm001\\AppData\\Local\\ms-playwright\\chromium-1217\\chr
 const FF = 'C:\\Users\\sm001\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-9.0.1-full_build\\bin\\ffmpeg.exe';
 
 const FPS = 25;
-const FULL = 115.03;                              // 与 demo.html 的 __DUR__ 一致
+const FULL = 148.15;                               // 与 demo.html 的 __DUR__ 一致
 const LIMIT = parseFloat(process.env.LIMIT || '0');
 const DUR = LIMIT > 0 ? LIMIT : FULL;
 const TOTAL = Math.round(FPS * DUR);
 const STEP = 1000 / FPS;
-const W = 1600, H = 900;
+const W = 1920, H = 1080;
 
 const OUTDIR = path.join(__dirname, 'raw28');
 const FDIR = path.join(OUTDIR, 'frames');
 const CAP = path.join(OUTDIR, 'capture.mp4');
 const STILLS = path.join(__dirname, 'stills');
 
-// 时间线关键点 → 自检帧（与 demo.html 的 TL 对应）
+// 时间线关键点 → 自检帧（与 demo.html 的 TL 对应；scene_start 回填后同步）
 const CHECKS = [
-  [400, '01-标题卡.png'], [14500, '02-问题.png'], [32000, '03-数据点.png'],
-  [45000, '04-表格.png'], [60000, '05-图片.png'], [75000, '06-落点命名.png'],
-  [86000, '07-解释器与包.png'], [96000, '08-手动运行.png'], [109000, '09-收尾.png'],
+  [3000, '01-标题卡.png'],
+  [10200, '02-问题.png'],
+  [19620, '03-数据点.png'],
+  [35700, '04-表格.png'],
+  [47160, '05-作图.png'],
+  [58980, '06-落点命名.png'],
+  [67330, '07-解释器.png'],
+  [74530, '08-手动运行.png'],
+  [80570, '09-排版痛点.png'],
+  [90960, '10-分页排版.png'],
+  [105800, '11-图片拼版.png'],
+  [119130, '12-公式批注.png'],
+  [130240, '13-自包含.png'],
+  [141990, '14-收尾.png'],
 ];
 
 (async () => {

@@ -31,7 +31,10 @@ sys.path.insert(0, APPDIR)
 import _smd
 
 TD = os.path.join(APPDIR, "Temp", "_e2e_meta")
-shutil.rmtree(TD, ignore_errors=True)
+# 元数据档案建完即只读，裸 rmtree(ignore_errors=True) 会静默留下 zero.json：
+# 下一轮 ensure 看到「档案已存在」直接返回，于是 A4 的 up.md 与 C2 的建档行
+# 永远缺——那不是功能坏了，是夹具没清干净。必须先解位再删。
+_smd._force_rmtree(TD)
 os.makedirs(TD, exist_ok=True)
 fails = []
 
@@ -44,7 +47,13 @@ def post(path, obj):
         return json.loads(r.read().decode("utf-8"))
 
 
+TOTAL = 0
+
+
 def ck(name, cond, detail=""):
+    # 计数必须动态：写死总数时新增断言仍报旧数，等于谎报覆盖面。
+    global TOTAL
+    TOTAL += 1
     print(("%s  %s%s" % ("PASS" if cond else "FAIL", name,
                          ("  [" + str(detail) + "]") if detail else "")))
     if not cond:
@@ -93,6 +102,15 @@ if os.name == "nt":
     ck("A14 zero.json 带隐藏位", bool(a & 0x2), hex(a))
     d = k32.GetFileAttributesW(os.path.join(adir, ".mde"))
     ck("A15 .mde 目录隐藏", bool(d & 0x2), hex(d))
+
+    # A16-A18：打开文档走 action=read，不是 sync。锁位会随安装包解压丢失，
+    # 而内置文档这类「只看不存」的永远走不到 sync —— read 也必须把锁补回来。
+    k32.SetFileAttributesW(zp, k32.GetFileAttributesW(zp) & ~0x3)   # 模拟解压后
+    ck("A16 构造未锁档案", not (k32.GetFileAttributesW(zp) & 0x1))
+    jr = post("/api/meta", {"path": md, "action": "read"})
+    a2 = k32.GetFileAttributesW(zp)
+    ck("A17 read 路径补回只读", bool(a2 & 0x1), hex(a2))
+    ck("A18 read 补锁后字段不变", (jr.get("meta") or {}).get("fields", {}).get("title") == "改过了")
 
 # ---------- B. .smd 包内 ----------
 stage = os.path.join(TD, "_stage")
@@ -234,5 +252,5 @@ ck("C13 盘上正文与末条指纹不符：stale=True（未记录改动可见�
    (j19.get("meta") or {}).get("stale") is True,
    (j19.get("meta") or {}).get("stale"))
 
-print("\n===== %d 项，FAIL %d =====" % (35, len(fails)))
+print("\n===== %d 项，FAIL %d =====" % (TOTAL, len(fails)))
 sys.exit(1 if fails else 0)

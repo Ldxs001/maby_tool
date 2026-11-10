@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>MDEditor 2.8 Demo</title>
+<title>MDEditor Demo</title>
 <style>
   @font-face{font-family:'Noto Sans SC';src:url('fonts/noto-sc-400.woff2') format('woff2');font-weight:400;}
   @font-face{font-family:'Noto Sans SC';src:url('fonts/noto-sc-700.woff2') format('woff2');font-weight:700;}
@@ -14,9 +14,10 @@
     --bd:#2a3142; --ink:#e8ebf2; --dim:#94a0b8;
     --blue:#6f9bff; --gold:#f0c060; --green:#4ec98a; --red:#e8697a;
   }
-  html,body{width:1600px;height:900px;overflow:hidden;background:var(--bg0);
+  html,body{width:1920px;height:1080px;overflow:hidden;background:var(--bg0);
     font-family:'Noto Sans SC',sans-serif;color:var(--ink);}
-  #stage{position:relative;width:1600px;height:900px;
+  /* 版面按 1600x900 设计，整体 1.2 倍渲染到 1920x1080（矢量文字按设备像素光栅化，不糊） */
+  #stage{position:relative;width:1600px;height:900px;transform:scale(1.2);transform-origin:0 0;
     background:radial-gradient(1200px 620px at 50% -10%,#1d2434 0%,#12161f 55%,#0d1016 100%);}
   .scene{position:absolute;inset:0;display:none;}
   .scene.on{display:flex;align-items:center;justify-content:center;flex-direction:column;}
@@ -34,6 +35,7 @@
     border-bottom:1px solid var(--bd);flex:0 0 auto;}
   .brand{font-weight:700;font-size:23px;color:var(--blue);letter-spacing:2px;margin-right:16px;}
   .tb{padding:7px 16px;border:1px solid #333c4e;border-radius:8px;font-size:17px;color:#c6cddb;background:#232936;}
+  .tb.on{border-color:var(--gold);color:var(--gold);}
 
   /* s0 标题卡 */
   #s0 h1{font-size:112px;letter-spacing:4px;
@@ -135,14 +137,125 @@
   .clicked{animation:pop .45s ease-out;}
   @keyframes pop{0%{transform:scale(1)}45%{transform:scale(1.14)}100%{transform:scale(1)}}
 
-  /* s8 收尾 */
-  #s8 .big{font-size:52px;color:#fff;margin-bottom:38px;letter-spacing:1px;}
-  #s8 .cols{display:flex;gap:26px;}
-  #s8 .c{width:376px;background:var(--card2);border:1px solid var(--bd);border-radius:16px;padding:28px 30px;}
-  #s8 .c .n{font-size:15px;color:var(--gold);letter-spacing:2px;margin-bottom:12px;}
-  #s8 .c .t{font-size:26px;color:#e8ebf2;margin-bottom:10px;}
-  #s8 .c .d{font-size:18px;color:var(--dim);line-height:1.7;}
-  #s8 .end{margin-top:46px;font-size:26px;color:#8f9ab0;letter-spacing:3px;}
+  /* s9 排版痛点 */
+  #s9{justify-content:center;}
+  #s9 .head{font-size:42px;color:#dfe5f2;margin-bottom:46px;letter-spacing:1px;}
+  #s9 .head .hl{color:var(--red);}
+  .broke3{display:flex;gap:30px;}
+  .bcard{width:440px;background:var(--card2);border:1px solid var(--bd);border-radius:16px;padding:30px 32px;}
+  .bcard .bt{font-size:24px;color:var(--red);margin-bottom:20px;letter-spacing:1px;}
+  .bcard .demo{height:210px;background:#141821;border-radius:10px;border:1px solid #2f3748;
+    padding:18px 20px;overflow:hidden;}
+  .bcard .bnote{margin-top:18px;font-size:19px;line-height:1.7;color:#9aa5ba;}
+  /* 纯文本堆叠 */
+  .txtstack .st{height:12px;border-radius:6px;background:#2c3444;margin:13px 0;}
+  .txtstack .st.w1{width:82%;}.txtstack .st.w2{width:64%;}.txtstack .st.w3{width:90%;}
+  .txtstack .st.w4{width:52%;}.txtstack .st.w5{width:76%;}
+  /* 图片乱跑 */
+  .imgmess{position:relative;height:100%;}
+  .imgmess .im{position:absolute;width:110px;height:74px;border-radius:8px;
+    background:linear-gradient(135deg,#3d4a66,#242e42);border:1px solid #46536f;}
+  .imgmess .im1{left:6px;top:10px;transform:rotate(-7deg);}
+  .imgmess .im2{left:150px;top:44px;transform:rotate(5deg);}
+  .imgmess .im3{left:52px;top:108px;transform:rotate(12deg);}
+  /* 公式乱码 */
+  .garble{font-family:'JB Mono',monospace;font-size:22px;line-height:2.1;color:#8d99ad;}
+  .garble .g1{color:var(--red);}
+  #s9 .tail{margin-top:42px;font-size:33px;color:#e8ebf2;}
+  #s9 .tail .hl{color:var(--gold);}
+
+  /* s10 分页排版 */
+  #s10 .win{width:1480px;height:760px;}
+  .pagebar{display:flex;gap:26px;justify-content:center;background:#efece6;padding:26px 0;flex:1;overflow:hidden;}
+  .paper{width:340px;height:480px;background:#fff;border-radius:4px;box-shadow:0 10px 34px rgba(0,0,0,.28);
+    padding:34px 36px;position:relative;color:#333;flex:0 0 auto;}
+  .paper .pno{position:absolute;bottom:14px;left:0;right:0;text-align:center;font-size:13px;color:#9a938a;}
+  .paper .phd{font-size:12px;color:#b5aea4;border-bottom:1px solid #e4ded4;padding-bottom:8px;margin-bottom:16px;}
+  .paper h4{font-size:21px;color:#1f2430;margin:0 0 14px;}
+  .paper .pl{height:10px;border-radius:5px;background:#e7e3da;margin:10px 0;}
+  .paper .pl.w1{width:88%;}.paper .pl.w2{width:70%;}.paper .pl.w3{width:92%;}
+  .paper .pl.w4{width:60%;}.paper .pl.w5{width:80%;}
+  .paper .tocl{display:flex;justify-content:space-between;font-size:15px;color:#3a3a3a;
+    border-bottom:1px dotted #cfc8bd;padding:7px 2px;}
+  .paper .tocl b{font-weight:400;}
+  .paper{opacity:0;transform:translateY(16px);transition:all .5s cubic-bezier(.2,.7,.3,1);}
+  .paper.in{opacity:1;transform:none;}
+  .stylebar{height:64px;background:#1a1f2a;border-top:1px solid var(--bd);display:flex;
+    align-items:center;justify-content:center;gap:14px;flex:0 0 auto;}
+  .stylebar .chip{font-size:18px;padding:9px 20px;}
+  .stylebar .chip.lit{border-color:var(--gold);color:var(--gold);}
+
+  /* s11 图片拼版 */
+  #s11 .win{width:1480px;height:760px;}
+  .synline{display:flex;align-items:center;gap:14px;background:#141821;border-bottom:1px solid #2f3748;
+    padding:16px 26px;font-family:'JB Mono',monospace;font-size:20px;flex:0 0 auto;color:#d8dee9;}
+  .tok{padding:4px 12px;border-radius:8px;border:1px solid transparent;transition:all .35s;}
+  .tok.t1{color:#e8a0ac;} .tok.t2{color:#9ac8ff;} .tok.t3{color:#b7e3a8;} .tok.t4{color:#e8cf8e;}
+  .tok.lit{border-color:currentColor;background:rgba(255,255,255,.06);}
+  .synline .what{margin-left:auto;display:flex;gap:10px;font-size:16px;color:#8a93a6;font-family:'Noto Sans SC',sans-serif;}
+  .synline .what span{opacity:0;transition:opacity .35s;}
+  .synline .what span.show{opacity:1;}
+  .pv2wrap{flex:1;display:flex;min-height:0;}
+  .pv2{flex:1;background:#efece6;padding:22px 0;display:flex;gap:26px;justify-content:center;overflow:hidden;}
+  .pv2 .paper{opacity:1;transform:none;box-shadow:0 10px 34px rgba(0,0,0,.28);}
+  .snap2{position:absolute;left:36px;right:36px;bottom:44px;display:flex;gap:14px;align-items:flex-end;}
+  .snap2 .fig{flex:1;}
+  .snap2 img{width:100%;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.18);
+    opacity:0;transform:translateY(12px);transition:all .5s;}
+  .snap2 img.in{opacity:1;transform:none;}
+  .snap2 .figcap{margin-top:8px;text-align:center;font-size:14px;color:#6b665e;}
+  .snaptag{position:absolute;top:10px;right:12px;font-size:12px;color:#4ec98a;background:#eaf7f0;
+    border:1px solid #bfe4d2;border-radius:6px;padding:2px 8px;}
+
+  /* s12 公式批注 AI */
+  #s12 .win{width:1480px;height:760px;}
+  .formula{font-family:'Times New Roman',serif;font-style:italic;font-size:30px;color:#22304a;
+    background:#f4f6fb;border:1px solid #dfe4ef;border-radius:10px;padding:20px 26px;margin:14px 0;}
+  .formula sup{font-size:18px;}
+  .formula .frac{display:inline-block;vertical-align:middle;text-align:center;font-size:19px;margin:0 6px;}
+  .formula .frac .top{border-bottom:1.5px solid #22304a;padding:0 6px 2px;}
+  .annbox{background:var(--card2);border:1px solid var(--bd);border-radius:14px;padding:20px 24px;margin-bottom:18px;}
+  .annbox .at{font-size:15px;color:var(--gold);letter-spacing:2px;margin-bottom:12px;}
+  .mark{background:rgba(240,192,96,.28);border-bottom:2px solid var(--gold);padding:1px 3px;border-radius:3px;}
+  .annline{font-size:19px;line-height:1.9;color:#d6dcea;}
+  .annreply{margin-top:12px;font-size:18px;line-height:1.8;color:#9aa5ba;border-left:3px solid var(--blue);padding-left:12px;}
+  .aichip{display:inline-flex;align-items:center;gap:8px;font-size:15px;color:#4ec98a;margin-top:10px;}
+  .rwrow{display:flex;gap:10px;align-items:center;margin-top:10px;}
+  .rwrow .rw{flex:1;background:#141821;border:1px solid #2f3748;border-radius:10px;
+    padding:12px 14px;font-size:17px;line-height:1.7;color:#c9d2e4;}
+  .rwrow .rw.bad{color:#8d99ad;text-decoration:line-through;text-decoration-color:rgba(232,105,122,.6);}
+  .rwrow .arr{color:var(--gold);font-size:22px;}
+
+  /* s13 自包含 */
+  #s13{justify-content:center;}
+  #s13 .wrap{display:flex;align-items:center;gap:70px;}
+  .smdcard{width:640px;background:var(--card2);border:1px solid var(--bd);border-radius:18px;padding:32px 36px;}
+  .smdcard .fn2{display:flex;align-items:center;gap:14px;font-family:'JB Mono',monospace;font-size:27px;color:#e8ebf2;margin-bottom:24px;}
+  .smdcard .fico{width:44px;height:52px;background:linear-gradient(135deg,#3d5bd6,#7a5bd6);border-radius:6px;position:relative;}
+  .smdcard .fico::after{content:'';position:absolute;right:6px;top:0;width:12px;height:12px;
+    background:#8fb2ff;clip-path:polygon(0 0,100% 100%,0 100%);}
+  .smdcard .fparts{display:flex;flex-direction:column;gap:12px;}
+  .fpart{display:flex;align-items:center;gap:12px;background:#141821;border:1px solid #2f3748;
+    border-radius:10px;padding:13px 18px;font-size:20px;color:#d6dcea;
+    opacity:0;transform:translateY(10px);transition:all .4s;}
+  .fpart.in{opacity:1;transform:none;}
+  .fpart .dot{width:10px;height:10px;border-radius:50%;background:var(--gold);flex:0 0 auto;}
+  .fpart .mono{font-family:'JB Mono',monospace;font-size:17px;color:#8a93a6;margin-left:auto;}
+  .takeaway{width:480px;}
+  .takeaway .t1{font-size:30px;color:#e8ebf2;line-height:1.75;margin-bottom:24px;}
+  .takeaway .t1 .hl{color:var(--gold);}
+  .takeaway .t2{display:flex;align-items:center;gap:14px;color:var(--green);font-size:22px;}
+  .takeaway .lap{width:64px;height:42px;border:2px solid var(--green);border-radius:6px;position:relative;}
+  .takeaway .lap::after{content:'';position:absolute;left:-8px;right:-8px;bottom:-9px;height:4px;background:var(--green);border-radius:2px;}
+
+  /* s14 收尾 */
+  #s14 .big{font-size:52px;color:#fff;margin-bottom:38px;letter-spacing:1px;}
+  #s14 .cols{display:flex;gap:22px;}
+  #s14 .c{width:358px;background:var(--card2);border:1px solid var(--bd);border-radius:16px;padding:26px 28px;}
+  #s14 .c .n{font-size:15px;color:var(--gold);letter-spacing:2px;margin-bottom:12px;}
+  #s14 .c .t{font-size:26px;color:#e8ebf2;margin-bottom:10px;}
+  #s14 .c .d{font-size:18px;color:var(--dim);line-height:1.7;}
+  #s14 .end{margin-top:44px;font-size:26px;color:#8f9ab0;letter-spacing:3px;}
 </style>
 </head>
 <body>
@@ -150,12 +263,12 @@
 
   <!-- s0 标题 -->
   <div class="scene" id="s0">
-    <h1>MDEditor 2.8</h1>
-    <div class="sub">在文档里跑自己的代码</div>
+    <h1>MDEditor</h1>
+    <div class="sub">写文档 · 跑代码 · 排成书</div>
     <div class="quote">数据点 → 执行点 → 返回值，全部留在文档里</div>
     <div class="tags">
-      <div class="tag">数据点</div><div class="tag">执行点</div>
-      <div class="tag">表格 / 图片</div><div class="tag">本地运行</div>
+      <div class="tag">数据运行</div><div class="tag">图表作图</div>
+      <div class="tag">打印级排版</div><div class="tag">AI 辅助</div><div class="tag">自包含文档</div>
     </div>
   </div>
 
@@ -188,7 +301,7 @@
   <div class="scene" id="s2">
     <div class="win">
       <div class="bar"><div class="brand">MDEditor</div><div class="tb">保存</div><div class="tb">打开</div>
-        <div class="tb">排版</div><div class="tb">.docx</div><div class="tb">run</div></div>
+        <div class="tb">排版</div><div class="tb">.docx</div><div class="tb run">run</div></div>
       <div class="split">
         <div class="panev"><div class="ph">编辑器 · Markdown 源文</div>
           <div class="code" id="c2"></div></div>
@@ -212,7 +325,7 @@
     </div>
   </div>
 
-  <!-- s4 返回图片 -->
+  <!-- s4 作图 -->
   <div class="scene" id="s4">
     <div class="win">
       <div class="bar"><div class="brand">MDEditor</div><div class="tb">run</div><div class="tb">导出</div></div>
@@ -270,18 +383,158 @@
     </div>
   </div>
 
-  <!-- s8 收尾 -->
-  <div class="scene" id="s8">
-    <div class="big">数据进来，结果回去，代码只在你自己的机器上跑</div>
-    <div class="cols">
-      <div class="c"><div class="n">输入</div><div class="t">数据点</div>
-        <div class="d">六种写法，四种形状<br>kv / vals / raw / marks</div></div>
-      <div class="c"><div class="n">输出</div><div class="t">返回值</div>
-        <div class="d">文本 / 表格 / 图片<br>表格自己拼分隔行，图片自己落盘</div></div>
-      <div class="c"><div class="n">运行</div><div class="t">本地解释器</div>
-        <div class="d">便携 Python 3.11<br>三方包放 runtime/pylibs</div></div>
+  <!-- s9 排版痛点 -->
+  <div class="scene" id="s9">
+    <div class="head">写完只是第一步，<span class="hl">排版</span>才是老大难</div>
+    <div class="broke3">
+      <div class="bcard fadeup" id="b1">
+        <div class="bt">导出堆成纯文本</div>
+        <div class="demo txtstack">
+          <div class="st w1"></div><div class="st w3"></div><div class="st w2"></div>
+          <div class="st w5"></div><div class="st w4"></div>
+        </div>
+        <div class="bnote">标题正文一个样，结构全靠想象。</div>
+      </div>
+      <div class="bcard fadeup" id="b2">
+        <div class="bt">图片乱跑</div>
+        <div class="demo"><div class="imgmess">
+          <div class="im im1"></div><div class="im im2"></div><div class="im im3"></div>
+        </div></div>
+        <div class="bnote">位置随缘、大小失控，打印出来更没法看。</div>
+      </div>
+      <div class="bcard fadeup" id="b3">
+        <div class="bt">公式变乱码</div>
+        <div class="demo"><div class="garble">
+          $\sum_{i=1}^{n} x_i$<br>
+          <span class="g1">â^‘Î©√∑x≤n±</span><br>
+          E = mc&lt;sup&gt;2&lt;/sup&gt;
+        </div></div>
+        <div class="bnote">换个软件打开，公式只剩一堆转义符。</div>
+      </div>
     </div>
-    <div class="end">MDEditor 2.8 · 在文档里跑自己的代码</div>
+    <div class="tail fadeup" id="b4">文档值得<span class="hl">印刷品</span>一样的排版。</div>
+  </div>
+
+  <!-- s10 分页排版 -->
+  <div class="scene" id="s10">
+    <div class="win">
+      <div class="bar"><div class="brand">MDEditor</div><div class="tb">排版</div><div class="tb on">分页</div>
+        <div class="tb">.docx</div><div class="tb">导出</div></div>
+      <div class="pagebar" id="pb10"></div>
+      <div class="stylebar">
+        <span class="chip" id="st1">字体 / 字号</span>
+        <span class="chip" id="st2">首行缩进 2 字符</span>
+        <span class="chip" id="st3">三线表</span>
+        <span class="chip" id="st4">页边距</span>
+        <span class="chip" id="st5">页码模板</span>
+        <span class="chip" id="st6">自动目录</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- s11 图片拼版 -->
+  <div class="scene" id="s11">
+    <div class="win">
+      <div class="bar"><div class="brand">MDEditor</div><div class="tb on">排版</div><div class="tb">导出</div></div>
+      <div class="synline">
+        <span>![](销量图.png)</span><span>{:</span>
+        <span class="tok t1" id="tk1">c</span><span class="tok t2" id="tk2">t</span>
+        <span class="tok t3" id="tk3">w</span><span class="tok t4" id="tk4">s0.5</span><span>}</span>
+        <span class="what"><span id="wt1">对齐</span><span id="wt2">题注在上</span><span id="wt3">按宽裁剪</span><span id="wt4">间距</span></span>
+      </div>
+      <div class="pv2wrap"><div class="pv2">
+        <div class="paper" style="width:380px;height:540px;">
+          <div class="phd">季度报告 · 打印预览</div>
+          <h4>三、销量分析</h4>
+          <div class="pl w1"></div><div class="pl w2"></div><div class="pl w4"></div>
+          <div class="snap2">
+            <div class="fig"><img src="img/bar.png" id="fg1"><div class="figcap">图 1 · 月度销量</div></div>
+            <div class="fig"><img src="img/line.png" id="fg2"><div class="figcap">图 2 · 走势对比</div></div>
+            <div class="snaptag">吸底拼版</div>
+          </div>
+          <div class="pno">— 7 —</div>
+        </div>
+        <div class="paper" style="width:380px;height:540px;">
+          <div class="phd">季度报告 · 打印预览</div>
+          <div class="pl w3"></div><div class="pl w1"></div><div class="pl w5"></div>
+          <div class="pl w2"></div><div class="pl w4"></div><div class="pl w3"></div>
+          <div class="pno">— 8 —</div>
+        </div>
+      </div></div>
+    </div>
+  </div>
+
+  <!-- s12 公式 / 批注 / AI -->
+  <div class="scene" id="s12">
+    <div class="win">
+      <div class="bar"><div class="brand">MDEditor</div><div class="tb">AI</div><div class="tb">批注</div>
+        <div class="tb">保存</div></div>
+      <div class="split">
+        <div class="panev"><div class="ph">实时预览 · 数学公式本地渲染</div>
+          <div class="pv" id="v12">
+            <h1>能量守恒</h1>
+            <div class="formula">E = mc<sup>2</sup></div>
+            <div class="formula">∫<sub>0</sub><sup>∞</sup> f(x) dx =
+              <span class="frac"><span class="top">1</span>π</span>
+              <span style="font-style:normal;">lim</span><sub style="font-size:15px;">n→∞</sub>
+            </div>
+            <p>公式、表格、图片一起排进正文，导出所见即所得。</p>
+          </div>
+        </div>
+        <div class="panev" style="background:#141821;padding:24px 28px;">
+          <div class="ph" style="border:none;background:none;padding:0 0 14px;">选区批注 · AI 润色改写</div>
+          <div class="annbox">
+            <div class="at">批 注</div>
+            <div class="annline">本次抽检合格率为 <span class="mark">98.6%</span>，较上期提升。</div>
+            <div class="annreply">批注：数据出处补一下，引用检测中心 9 月报告。</div>
+          </div>
+          <div class="annbox">
+            <div class="at">AI 润色 · 本地模型</div>
+            <div class="rwrow">
+              <div class="rw bad">这个结果说明东西挺好的，非常棒。</div>
+              <div class="arr">→</div>
+              <div class="rw">结果表明：工艺改进后成品率显著提升。</div>
+            </div>
+            <div class="aichip">✓ LM Studio / Ollama · 文稿不出机器</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- s13 自包含文档 -->
+  <div class="scene" id="s13">
+    <div class="wrap">
+      <div class="smdcard">
+        <div class="fn2"><div class="fico"></div>季度报告.smd</div>
+        <div class="fparts">
+          <div class="fpart" id="fp1"><div class="dot"></div>正文 Markdown<span class="mono">doc.md</span></div>
+          <div class="fpart" id="fp2"><div class="dot"></div>图片 · 资产目录<span class="mono">assets/</span></div>
+          <div class="fpart" id="fp3"><div class="dot"></div>数据点 · 执行点<span class="mono">@@ MDE</span></div>
+          <div class="fpart" id="fp4"><div class="dot"></div>run 库<span class="mono">runs/*.py</span></div>
+        </div>
+      </div>
+      <div class="takeaway">
+        <div class="t1">全部打进<span class="hl">一个文件</span>，拷给别人——</div>
+        <div class="t2"><div class="lap"></div>打开就能看 · 能跑</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- s14 收尾 -->
+  <div class="scene" id="s14">
+    <div class="big">数据进来，结果回去，版式留下来</div>
+    <div class="cols">
+      <div class="c"><div class="n">运 行</div><div class="t">数据点 · 执行点</div>
+        <div class="d">六种写法，四种形状<br>代码只在本机跑</div></div>
+      <div class="c"><div class="n">作 图</div><div class="t">run 返回图片</div>
+        <div class="d">柱状 / 折线 / 环形<br>图表就地渲染</div></div>
+      <div class="c"><div class="n">排 版</div><div class="t">打印级分页</div>
+        <div class="d">纸张 / 页码 / 自动目录<br>Ctrl+P 直出 PDF</div></div>
+      <div class="c"><div class="n">协 作</div><div class="t">自包含 .smd</div>
+        <div class="d">一个文件带走全部<br>批注 · AI 润色</div></div>
+    </div>
+    <div class="end">MDEditor · 写文档，跑代码，排成书</div>
   </div>
 
   <div id="cap"><span id="cap-t"></span></div>
@@ -385,7 +638,7 @@ function playS3(){
   }, 9600);
 }
 
-/* ── s4：返回图片 ── */
+/* ── s4：作图 ── */
 function playS4(){
   const code = [
     '<span class="k">def</span> <span class="fn">bar</span>(data):',
@@ -395,7 +648,7 @@ function playS4(){
     '&nbsp;&nbsp;&nbsp;&nbsp;<span class="k">return</span> <span class="s">\'![](销量图-柱状图.png)\'</span>',
     '',
     '<span class="cm"># cwd = 文档资产目录，不用拼任何路径</span>',
-    '<span class="cm"># 图片类别的名字对上即可，框架不替你画图</span>'
+    '<span class="cm"># 图怎么画由 run 决定，返回文件名就地上墙</span>'
   ];
   lines($('#c4'), code, 240, 300);
 
@@ -411,7 +664,7 @@ function playS4(){
     }, 2400 + i*1500);
   });
   setTimeout(()=>{
-    v.innerHTML += '<p class="cap2">三张图都落在本文档的资产目录里，跟着文档走。</p>';
+    v.innerHTML += '<p class="cap2">柱状、折线、环形——图落在文档资产目录里，跟着文档走。</p>';
   }, 7400);
 }
 
@@ -458,24 +711,86 @@ function playS7(){
   setTimeout(()=>{ $('#v7').innerHTML += '<p>跑完可以回到「立即」或「等待 N 秒」，选一次就记住。</p>'; }, 8200);
 }
 
-/* ── 时间线 ── */
+/* ── s10：分页排版 ── */
+function playS10(){
+  const pb = $('#pb10');
+  pb.innerHTML =
+    '<div class="paper" id="pg1"><div class="phd">季度报告 · 打印预览</div>' +
+      '<h4>目 录</h4>' +
+      '<div class="tocl"><b>一、经营概览</b><span>1</span></div>' +
+      '<div class="tocl"><b>二、数据说明</b><span>4</span></div>' +
+      '<div class="tocl"><b>三、销量分析</b><span>7</span></div>' +
+      '<div class="tocl"><b>四、结论与建议</b><span>11</span></div>' +
+      '<div class="pno">— 0 —</div></div>' +
+    '<div class="paper" id="pg2"><div class="phd">季度报告 · 打印预览</div>' +
+      '<h4>一、经营概览</h4>' +
+      '<div class="pl w1"></div><div class="pl w3"></div><div class="pl w2"></div>' +
+      '<div class="pl w5"></div><div class="pl w4"></div><div class="pl w1"></div>' +
+      '<div class="pno">— 1 —</div></div>' +
+    '<div class="paper" id="pg3"><div class="phd">季度报告 · 打印预览</div>' +
+      '<h4>三、销量分析</h4>' +
+      '<div class="pl w2"></div><div class="pl w4"></div><div class="pl w3"></div>' +
+      '<div class="pl w5"></div>' +
+      '<div class="pno">— 7 —</div></div>';
+  setTimeout(()=>$('#pg1').classList.add('in'), 600);
+  setTimeout(()=>$('#pg2').classList.add('in'), 1600);
+  setTimeout(()=>$('#pg3').classList.add('in'), 2600);
+  const chips = ['st1','st2','st3','st4','st5','st6'];
+  chips.forEach((id,i)=>setTimeout(()=>$('#'+id).classList.add('lit'), 4200 + i*700));
+}
+
+/* ── s11：图片拼版 ── */
+function playS11(){
+  const toks = ['tk1','tk2','tk3','tk4'];
+  const whats = ['wt1','wt2','wt3','wt4'];
+  toks.forEach((id,i)=>{
+    setTimeout(()=>{
+      $('#'+id).classList.add('lit');
+      const w = $('#'+whats[i]); if(w) w.classList.add('show');
+    }, 1000 + i*1100);
+  });
+  setTimeout(()=>$('#fg1').classList.add('in'), 5200);
+  setTimeout(()=>$('#fg2').classList.add('in'), 6400);
+}
+
+/* ── s12：公式批注 AI（静态呈现 + 批注延迟浮现）── */
+function playS12(){
+  fadeIn('#v12', 200);
+  const boxes = document.querySelectorAll('#s12 .annbox');
+  boxes.forEach(b=>{ b.style.opacity=0; b.style.transition='all .5s'; b.style.transform='translateY(10px)'; });
+  setTimeout(()=>{ boxes[0].style.opacity=1; boxes[0].style.transform='none'; }, 2600);
+  setTimeout(()=>{ boxes[1].style.opacity=1; boxes[1].style.transform='none'; }, 6200);
+}
+
+/* ── s13：自包含 ── */
+function playS13(){
+  ['fp1','fp2','fp3','fp4'].forEach((id,i)=>setTimeout(()=>$('#'+id).classList.add('in'), 900 + i*800));
+}
+
+/* ── 时间线（scene_start 与 tts/timeline.json 同源，TTS 实测后回填）── */
 const TL = [
-  [0,      () => { show('#s0'); cap('MDEditor 2.8 · 在<span class="hl">文档</span>里跑自己的代码'); }],
-  [7900,   () => { show('#s1'); cap('写到要算一下，只能<span class="hl">切出去</span>：Excel、脚本、画图，走一遍再贴回来'); 
+  [0,      () => { show('#s0'); cap('MDEditor · 写<span class="hl">文档</span>，跑<span class="hl">代码</span>，<span class="hl">排成书</span>'); }],
+  [7200,   () => { show('#s1'); cap('写到要算一下，只能<span class="hl">切出去</span>：Excel、脚本、画图，走一遍再贴回来');
                    fadeIn('#p1', 400); fadeIn('#p2', 1400); fadeIn('#p3', 3200); }],
-  [17860,  () => { show('#s2'); cap('数据点写数据，执行点写<span class="hl">调用哪个函数</span>'); playS2(); }],
-  [33860,  () => { show('#s3'); cap('返回表格：<span class="hl">表头行 + 分隔行 + 数据行</span>，缺一行就不认'); playS3(); }],
-  [48700,  () => { show('#s4'); cap('返回图片：写到当前目录，返回 <span class="hl">![](文件名)</span>'); playS4(); }],
-  [63090,  () => { show('#s5'); cap('当前目录就是<span class="hl">文档资产目录</span>，名字必须逐字相同'); playS5(); }],
-  [78020,  () => { show('#s6'); cap('解释器改一行；三方包放 <span class="hl">runtime/pylibs</span>'); }],
-  [92410,  () => { show('#s7'); cap('默认<span class="hl">手动</span>：你点它，它才跑'); playS7(); }],
-  [104240, () => { show('#s8'); cap('数据进来，结果回去，代码只在<span class="hl">你自己的机器</span>上跑'); }],
-  [115030, () => { window.__DONE__ = true; }]
+  [16620,  () => { show('#s2'); cap('数据点写数据，执行点写<span class="hl">调用哪个函数</span>'); playS2(); }],
+  [32700,  () => { show('#s3'); cap('返回表格：<span class="hl">表头行 + 分隔行 + 数据行</span>，缺一行就不认'); playS3(); }],
+  [44160,  () => { show('#s4'); cap('作图也是返回<span class="hl">图片</span>：画好落盘，文件名就地上墙'); playS4(); }],
+  [55980,  () => { show('#s5'); cap('当前目录就是<span class="hl">文档资产目录</span>，名字必须逐字相同'); playS5(); }],
+  [64330,  () => { show('#s6'); cap('解释器改一行，三方包放 <span class="hl">runtime/pylibs</span>'); }],
+  [71530,  () => { show('#s7'); cap('默认<span class="hl">手动</span>：你点它，它才跑'); playS7(); }],
+  [77570,  () => { show('#s9'); cap('写完只是第一步，<span class="hl">排版</span>才是老大难');
+                   fadeIn('#b1', 400); fadeIn('#b2', 1300); fadeIn('#b3', 2200); fadeIn('#b4', 3800); }],
+  [87960,  () => { show('#s10'); cap('分页排版：<span class="hl">纸张 / 页边距 / 页码 / 自动目录</span>，预览即印刷品'); playS10(); }],
+  [102800, () => { show('#s11'); cap('图片排版语法：<span class="hl">对齐 / 题注 / 宽度 / 间距</span>，多图吸底拼版'); playS11(); }],
+  [116130, () => { show('#s12'); cap('公式本地渲染；批注与 <span class="hl">AI 润色</span>走本地模型，文稿不出机器'); playS12(); }],
+  [127240, () => { show('#s13'); cap('自包含文档：一个文件，<span class="hl">打开就能看 · 能跑</span>'); playS13(); }],
+  [137990, () => { show('#s14'); cap('数据进来，结果回去，<span class="hl">版式留下来</span>'); }],
+  [148150, () => { window.__DONE__ = true; }]
 ];
 
 if (window.__DRIVE__) { window.__start = function(){ TL.forEach(([t, fn]) => setTimeout(fn, t)); }; }
 else { TL.forEach(([t, fn]) => setTimeout(fn, t)); }
-window.__DUR__ = 115030;
+window.__DUR__ = 148150;
 </script>
 </body>
 </html>

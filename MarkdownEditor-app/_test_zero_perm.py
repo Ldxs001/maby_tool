@@ -67,7 +67,7 @@ def mk_smd(path, doc, assets=None):
     return stage
 
 
-shutil.rmtree(TD, ignore_errors=True)
+_smd._force_rmtree(TD)          # 只读残骸必须真删掉，否则本轮 ensure 会读到上一轮的旧档案
 os.makedirs(TD, exist_ok=True)
 
 # ---------------------------------------------------------------------------
@@ -175,9 +175,85 @@ with zipfile.ZipFile(smd_d) as z:
 check("E1 包内档案条目权限不是 0444", not (mode & 0o200) == 0, "mode=%s" % oct(mode))
 check("E2 包内档案条目为 0644", mode == 0o644, "mode=%s" % oct(mode))
 
+# ---------------------------------------------------------------------------
+# F. 已存在档案补锁（v2.42.1）：安装包/拷贝/老档案丢了属性必须补回来
+#    事故背景：.NET 的 ZipArchiveEntry.ExtractToFile 只写字节、不还原属性，
+#    安装包里的内置文档档案到用户机上是普通可写文件；.smd 包内条目是 0644；
+#    早期档案本来就没锁。而 ensure/update/sync 遇到「已存在」原本直接返回，
+#    锁位于是永远补不回来 —— 只读这条「防手滑」在用户机上等于没做。
+# ---------------------------------------------------------------------------
+import hashlib
+
+
+def sha(p):
+    with open(p, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+adir_f = os.path.join(TD, "f.assets")
+os.makedirs(adir_f, exist_ok=True)
+md_meta.ensure(adir_f, {"title": "补锁", "author": "wUwproject"}, lock=True)
+zdir_f = md_meta.meta_dir(adir_f)
+zp_f = os.path.join(zdir_f, md_meta.ZERO_NAME)
+check("F1 建档即锁", is_ro(zp_f) and is_hidden(zp_f), "attr=%s" % hex(attrs(zp_f)))
+check("F2 .mde 目录隐藏", is_hidden(zdir_f), "attr=%s" % hex(attrs(zdir_f)))
+
+# 模拟安装包解压：属性归 NORMAL，内容一个字节不动
+h_before = sha(zp_f)
+ctypes.windll.kernel32.SetFileAttributesW(zp_f, attrs(zp_f) & ~0x3)
+ctypes.windll.kernel32.SetFileAttributesW(zdir_f, 0x10)     # 只剩 DIRECTORY
+check("F3 构造未锁档案", not is_ro(zp_f) and not is_hidden(zp_f), "attr=%s" % hex(attrs(zp_f)))
+
+md_meta.ensure(adir_f, {"title": "补锁", "author": "wUwproject"}, lock=True)
+check("F4 ensure 补回只读", is_ro(zp_f), "attr=%s" % hex(attrs(zp_f)))
+check("F5 ensure 补回隐藏", is_hidden(zp_f), "attr=%s" % hex(attrs(zp_f)))
+check("F4b 补锁后与建档态逐位相同", attrs(zp_f) == 0x23, "attr=%s" % hex(attrs(zp_f)))
+check("F6 补锁不改内容（哈希一致）", sha(zp_f) == h_before)
+check("F7 补锁后仍读得到", md_meta.read(adir_f)["fields"]["title"] == "补锁")
+
+# update 路径（前端「应用元数据」）
+ctypes.windll.kernel32.SetFileAttributesW(zp_f, attrs(zp_f) & ~0x3)
+md_meta.update(adir_f, {"title": "补锁后改标题"}, lock=True)
+check("F8 update 路径也补锁", is_ro(zp_f) and is_hidden(zp_f), "attr=%s" % hex(attrs(zp_f)))
+check("F9 update 内容正常落地", md_meta.read(adir_f)["fields"]["title"] == "补锁后改标题")
+
+# sync 路径（前端保存的主入口，档案已存在时根本不进 ensure）
+ctypes.windll.kernel32.SetFileAttributesW(zp_f, attrs(zp_f) & ~0x3)
+md_meta.sync(adir_f, {"note": "sync 补锁"}, who="wUwproject", touch=True)
+check("F10 sync 路径也补锁", is_ro(zp_f) and is_hidden(zp_f), "attr=%s" % hex(attrs(zp_f)))
+
+# 已锁好的档案再走一遍：不重复写属性（mtime 不动）
+mt = os.stat(zp_f).st_mtime_ns
+r_f = md_meta.relock(adir_f)
+check("F11 已锁时不重复改属性", (r_f is False) and os.stat(zp_f).st_mtime_ns == mt,
+      "relock=%s" % r_f)
+
+# 方向不能搞反：lock=False 的副本，update 绝不允许把它锁上
+adir_g = os.path.join(TD, "g.assets")
+os.makedirs(adir_g, exist_ok=True)
+md_meta.ensure(adir_g, {"author": "wUwproject"}, lock=False)
+zp_g = os.path.join(md_meta.meta_dir(adir_g), md_meta.ZERO_NAME)
+ctypes.windll.kernel32.SetFileAttributesW(zp_g, attrs(zp_g) & ~0x3)
+md_meta.update(adir_g, {"title": "副本改标"}, lock=False)
+check("F12 update(lock=False) 不补锁", not is_ro(zp_g) and not is_hidden(zp_g),
+      "attr=%s" % hex(attrs(zp_g)))
+
+# 真实场景：拿内置指南的档案当「解压后」的样子（内容齐、属性全无）
+adir_h = os.path.join(TD, "h.assets")
+os.makedirs(adir_h, exist_ok=True)
+shutil.copytree(os.path.join(HERE, "docs", "MDEditor 使用指南.assets", ".mde"),
+                os.path.join(adir_h, ".mde"), dirs_exist_ok=True)
+zp_h = os.path.join(adir_h, ".mde", md_meta.ZERO_NAME)
+ctypes.windll.kernel32.SetFileAttributesW(zp_h, attrs(zp_h) & ~0x3)
+h3 = sha(zp_h)
+_rec_h, new_h = md_meta.ensure(adir_h, {}, lock=True)
+check("F13 真实档案补锁", is_ro(zp_h) and is_hidden(zp_h), "attr=%s" % hex(attrs(zp_h)))
+check("F14 真实档案内容未动", sha(zp_h) == h3)
+check("F15 未被误判为新建", new_h is False)
+
 # 收尾：清干净（含 _force_rmtree 对只读路径的验证）
 _smd.clear_tmp()
-shutil.rmtree(TD, ignore_errors=True)
+_smd._force_rmtree(TD)
 
 ok = sum(1 for _n, c, _d in results if c)
 bad = len(results) - ok

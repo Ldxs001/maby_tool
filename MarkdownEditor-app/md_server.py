@@ -67,7 +67,7 @@ except Exception as _e:
 PORT = int(os.environ.get("MD_PORT") or 18766)  # MD_PORT：多实例/测试隔离用，默认不变
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 150  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代（149：/api/version 增 app 产品版本号；150：块级字体对齐的产物侧 CSS 两条通道）
+MD_SERVER_VERSION = 151  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代（150：块级字体对齐的产物侧 CSS 两条通道；151：元数据档案锁位在已存在路径补回）
 
 _APP_VERSION = ""       # 缓存：CHANGELOG.md 首个版本号（与 detect_version 同源）
 
@@ -2550,6 +2550,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         lock=keep_lock, baseline=obj.get("baseline"),
                         touch=bool(obj.get("touch")), content=_body)
                 else:
+                    # 打开文档走的是 action=read，不是 ensure/sync。档案锁位在
+                    # 迁移中会丢（安装包解压不还原属性），而内置文档这类
+                    # 「只看不存」的文档永远不会走到 sync —— 补锁必须在这里
+                    # 也做一次，否则打开一百次也不会把锁补回来。relock 幂等、
+                    # 已锁直接返回，只改属性不动内容，read 的语义不受影响。
+                    if keep_lock:
+                        _meta.relock(adir)
                     rec = _meta.read(adir, content=_body)
                 if action in ("ensure", "update", "sync") and _smd is not None and _smd.is_smd(p):
                     with _smd.locked(p):

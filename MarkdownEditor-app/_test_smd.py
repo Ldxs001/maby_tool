@@ -28,7 +28,7 @@ def png_bytes(color, n=2048):
 
 
 # --- 准备 ---
-shutil.rmtree(TD, ignore_errors=True)
+_smd._force_rmtree(TD)
 os.makedirs(TD, exist_ok=True)
 smd = os.path.join(TD, "t1.smd")
 stage = os.path.join(_smd._tmp_root(), "test_stage_t1")
@@ -478,7 +478,7 @@ with zipfile.ZipFile(meta_smd) as z:
 check("T24 元数据档案进包",
       "assets/.mde/zero.json" in names and "assets/.mde/up.md" in names, ",".join(names))
 
-shutil.rmtree(mstage, ignore_errors=True)          # 丢掉工作目录，逼它重新解包
+_smd._force_rmtree(mstage)          # 丢掉工作目录，逼它重新解包（档案只读，裸 rmtree 会留残骸）
 base_m = _smd.base_dir_for(meta_smd)
 check("T24 解包目录里有档案", os.path.isfile(os.path.join(base_m, "assets", ".mde", "zero.json")))
 _smd.save_from_dir(meta_smd, base_m)               # 走孤儿清理那条路
@@ -554,7 +554,7 @@ check("T26 set_typeset 后解包读到新值",
       (got3.get("page") or {}).get("mt") == 30, str(got3))
 
 # --- 清理 ---
-shutil.rmtree(TD, ignore_errors=True)
+_smd._force_rmtree(TD)
 for s in (stage, big_stage, ps, orphan_stage, fstage, sstage, spstage,
           nstage, cc_stage, cstage2, estage, mstage, tsrc, tdst,
           ts_stage):

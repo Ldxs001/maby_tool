@@ -129,6 +129,38 @@ def _clear_readonly_tree(root):
                 pass
 
 
+def _copy_attrs(src, dst):
+    """把 Windows 文件属性位（含 Hidden）从 src 原样搬到 dst。
+
+    `shutil.copy2` 的 copystat 只带得动只读位——那是走 st_mode 的；`Hidden`
+    根本不在 st_mode 里，所以 `.mde` 目录与 `zero.json` 的隐藏位必须单独搬
+    一次，否则包里的档案只剩 RO、目录干脆是明面的，与源不一致。
+    """
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        a = k32.GetFileAttributesW(str(src))
+        if a != 0xFFFFFFFF:
+            k32.SetFileAttributesW(str(dst), a)
+    except Exception:
+        pass
+
+
+def _carry_mde_attrs(src_assets, dst_assets):
+    """按源把 asset 目录里 .mde（目录 + 其中每个文件）的属性位整体搬到目标。"""
+    smde = os.path.join(src_assets, ".mde")
+    tmde = os.path.join(dst_assets, ".mde")
+    if not (os.path.isdir(smde) and os.path.isdir(tmde)):
+        return
+    for fn in os.listdir(smde):
+        sp, tp = os.path.join(smde, fn), os.path.join(tmde, fn)
+        if os.path.isfile(sp) and os.path.isfile(tp):
+            _copy_attrs(sp, tp)
+    _copy_attrs(smde, tmde)     # 目录属性最后设，免得先上隐藏位影响写文件
+
+
 def make_staging(ver):
     # 覆盖式重建：不整目录 rmtree —— 70MB / 1200 个文件的批量删除既慢，也容易被
     # 环境的安全策略整批拦截（构建中间产物本就该可覆盖）。写完按「应到文件集合」
@@ -141,19 +173,28 @@ def make_staging(ver):
     os.makedirs(docs, exist_ok=True)
     for f in DIST_DOCS_FILES:
         shutil.copy2(os.path.join(SRC, "docs", f), os.path.join(docs, f))
-    # 内置文档的 .mde 元数据档案（zero.json）建档即只读。目标是只读文件时
-    # copytree 覆盖它必 PermissionError——实测报错的永远是 .mde/zero.json，
-    # 手删那一份就立刻成功、接着轮到下一份。所以每轮先把 .mde 整目录删掉再
-    # 复制（目录里只有 1~2 个文件），复制用 copyfile：只搬内容不带属性，
-    # 包内保持可写。上面 137 行的 _clear_readonly_tree 继续兜上一轮遗留。
+    # 内置文档的 .mde 元数据档案（zero.json）建档即 ReadOnly + Hidden，这是
+    # md_meta.ensure 的设计（写一次后永不改，只读防的是手滑与外部工具），
+    # **包里必须原样保留**：为了能覆盖就把属性剥掉，等于把 zero 的锁拆了。
+    #
+    # 冲突只发生在「目标已存在且只读」：copytree 覆盖它必 PermissionError，
+    # 且实测报错的永远先是 .mde/zero.json，手删那一份就立刻成功、接着轮到
+    # 下一份（《版权与开源组件声明》）。所以每轮先把 .mde 整目录删掉——目标
+    # 不存在时 copy2 才能正常写入，并把源上的 ReadOnly + Hidden 原样带进包。
+    # 走 copy2（copytree 默认）而不是 copyfile：属性必须跟着档案走。
     for d in DIST_DOCS_DIRS:
         tgt_mde = os.path.join(docs, d, ".mde")
         if os.path.isdir(tgt_mde):
-            _clear_readonly_tree(tgt_mde)
+            _clear_readonly_tree(tgt_mde)       # 只读文件先解位，rmtree 才删得掉
+            try:
+                os.chmod(tgt_mde, 0o777)        # 目录自身的只读位
+            except Exception:
+                pass
             shutil.rmtree(tgt_mde, ignore_errors=True)
     for d in DIST_DOCS_DIRS:
         shutil.copytree(os.path.join(SRC, "docs", d), os.path.join(docs, d),
-                        dirs_exist_ok=True, copy_function=shutil.copyfile)
+                        dirs_exist_ok=True)
+        _carry_mde_attrs(os.path.join(SRC, "docs", d), os.path.join(docs, d))
     for f in DIST_FILES:
         shutil.copy2(os.path.join(SRC, f), os.path.join(STAGING, f))
     # 举报收件邮箱种子：不入库（.gitignore 排除），只随构建产物分发。

@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""MDEditor 2.8 宣传片 · 合成器
+"""MDEditor 商店预告片 · 合成器
    python compose.py
-   入：raw28/capture.mp4（record.js 产出的无声画面轨）
-       tts/audio/000N_A.wav（gen_narration.py 产出的 9 段旁白）
+   入：raw28/capture.mp4（record.js 产出的无声画面轨，1920x1080）
+       tts/audio/000N_A.wav（gen_narration.py 产出的 14 段旁白）
        tts/timeline.json（实测时长与场景起点，由 gen_narration 后自动回填）
        音乐库/_draft.wav（BGM）
-   出：MDEditor-2.8.mp4（成品，覆盖写入）
+   出：MDEditor-Store.mp4（成品，覆盖写入，商店预告片编码口径）
 """
 import json
 import os
@@ -22,7 +22,7 @@ BGM_A = os.path.join(HERE, "bgm.m4a")
 TTS = os.path.join(HERE, "tts", "audio")
 TL = os.path.join(HERE, "tts", "timeline.json")
 BGM = r"C:\Users\sm001\WorkBuddy\podcast-maker\音乐库\_draft.wav"
-FINAL = r"C:\Users\sm001\WorkBuddy\MarkdownEditor-app\MDEditor-2.8.mp4"
+FINAL = r"C:\Users\sm001\WorkBuddy\MarkdownEditor-app\MDEditor-Store.mp4"
 
 meta = json.load(open(TL, encoding="utf-8"))
 DUR = float(meta["total"])
@@ -58,7 +58,7 @@ def main():
     flt = ";".join(flts) + ";" + "".join("[a%d]" % i for i in range(N)) \
         + "amix=inputs=%d:normalize=0[nar]" % N
     run([FF, "-y"] + ins + ["-filter_complex", flt, "-map", "[nar]",
-         "-ar", "48000", "-ac", "2", "-t", "%.2f" % DUR, NARR],
+         "-ar", "48000", "-ac", "2", "-b:a", "384k", "-t", "%.2f" % DUR, NARR],
         "2/4 %d 段旁白 → narr.m4a" % N)
 
     # 3) BGM：循环铺满，压低音量，首尾淡入淡出
@@ -67,13 +67,19 @@ def main():
                 % (DUR - 2.5), BGM_A], "3/4 BGM → bgm.m4a")
 
     # 4) 合流：画面 + 旁白 + BGM，响度归一到视频常用口径
+    #    商店预告片编码口径（MSIX 官方要求）：MP4/H.264(AVC1) High Profile、
+    #    2 连续 B 帧、封闭 GOP（GOP=半帧率）、CABAC、yuv420p；音频 AAC-LC
+    #    立体声 48kHz 384kbps；faststart。响度 -16 LUFS。
     run([FF, "-y", "-i", VID, "-i", NARR, "-i", BGM_A,
          "-filter_complex",
          "[1:a][2:a]amix=inputs=2:duration=longest:normalize=0[mix];"
          "[mix]loudnorm=I=-16:TP=-1.5:LRA=11[aout]",
          "-map", "0:v", "-map", "[aout]",
-         "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
-         "-movflags", "+faststart", "-shortest", FINAL], "4/4 合流 → MDEditor-2.8.mp4")
+         "-c:v", "libx264", "-profile:v", "high", "-level:v", "4.2",
+         "-bf", "2", "-x264-params", "bframes=2:open-gop=0:keyint=12:min-keyint=12",
+         "-preset", "slow", "-crf", "16", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-b:a", "384k", "-ar", "48000", "-ac", "2",
+         "-movflags", "+faststart", "-shortest", FINAL], "4/4 合流 → 商店预告片")
 
     print("\n成品：%s  %.2f MB  %.1fs" %
           (FINAL, os.path.getsize(FINAL) / 1048576, DUR))
