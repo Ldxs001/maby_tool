@@ -641,6 +641,19 @@ def _pop_font_style(prev):
     _TLS_FONT.style = prev or ""
 
 
+def _font_align():
+    """v2.41.0 块级 font 容器的对齐（font{… l|r|c|j}）。
+
+    CSS 里 text-align 是继承属性，容器上写一次块内全生效；Word 里段落对齐
+    **不继承**，每段都得显式落。容器 style 已由 _push_font_style 压进
+    _TLS_FONT，这里取它算 WD_ALIGN_PARAGRAPH，供没有自身对齐的段落兜底。
+    """
+    st = getattr(_TLS_FONT, "style", "")
+    if not st:
+        return None
+    return _align(_style_dict(st))
+
+
 def _apply_run_style(run, style_node):
     _own = style_node.get("style", "") if style_node is not None else ""
     _base = getattr(_TLS_FONT, "style", "")
@@ -1095,6 +1108,10 @@ def _walk(node, doc, md_path, ctx):
     if re.match(r"h[1-6]$", tag):
         level = int(tag[1])
         p = doc.add_heading(level=level)
+        # v2.41.0 块级对齐：标题段落在 Word 里同样不继承，跟 p 一条口径
+        _fa = _font_align()
+        if _fa is not None:
+            p.alignment = _fa
         _fill_inline(node, p, doc, md_path, max_in=ctx.get("max_in"))
         ctx["para"] = None
         return
@@ -1340,6 +1357,9 @@ def _walk(node, doc, md_path, ctx):
         p = doc.add_paragraph()
         sd = _style_dict(node.get("style", ""))
         al = _align(sd)
+        # v2.41.0：段落自己没写对齐时，沿用所在 .mde-font 容器的对齐
+        if al is None:
+            al = _font_align()
         # 语法级对齐（{N c/l/r}）优先于面板全局档（内联 text-align）
         _ia = None
         for ch in _children(node):

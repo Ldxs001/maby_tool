@@ -67,7 +67,7 @@ except Exception as _e:
 PORT = int(os.environ.get("MD_PORT") or 18766)  # MD_PORT：多实例/测试隔离用，默认不变
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 149  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代（149：/api/version 增 app 产品版本号）
+MD_SERVER_VERSION = 150  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代（149：/api/version 增 app 产品版本号；150：块级字体对齐的产物侧 CSS 两条通道）
 
 _APP_VERSION = ""       # 缓存：CHANGELOG.md 首个版本号（与 detect_version 同源）
 
@@ -3921,6 +3921,12 @@ PAGED_BASE_CSS = """
 .markdown-body .mde-font[data-ffw] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,table,pre,code,figcaption,td,th,.mde-tabcap){font-weight:var(--mff-w) !important;}
 .markdown-body .mde-font[data-ffi] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,table,pre,code,figcaption,td,th,.mde-tabcap){font-style:italic !important;}
 .markdown-body .mde-font[data-fs] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,table,pre,code,figcaption,td,th,.mde-tabcap){font-size:var(--mfs) !important;}
+/* v2.41.0 块级对齐（font{… l|r|c|j}）。选择器只认 data-fa、**不挂 .mde-font**：
+   打印/分页路径保留 class，而 HTML 导出走 inlineStylesInto 会 removeAttribute
+   ("class")、只留 data 属性与内联 style——挂 class 的规则在那条路径上打不中。
+   集合与预览同源、同样不含表格与代码：表格单元格自己的 text-align:left
+   一旦被右对齐吃掉，整张表就歪。 */
+.markdown-body [data-fa] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,figcaption,.mde-tabcap){text-align:var(--mfa) !important;}
 .markdown-body a{color:#4a6cf7;text-decoration:none;}
 .markdown-body strong{font-weight:700;}
 .markdown-body em{font-style:italic;}
@@ -5319,6 +5325,8 @@ def build_standalone_html(md_path, body_html, ts_css, page_cfg=None,
         '.markdown-body .mde-font[data-ffw] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,table,pre,code,figcaption,td,th,.mde-tabcap){font-weight:var(--mff-w) !important;}'
         '.markdown-body .mde-font[data-ffi] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,table,pre,code,figcaption,td,th,.mde-tabcap){font-style:italic !important;}'
         '.markdown-body .mde-font[data-fs] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,table,pre,code,figcaption,td,th,.mde-tabcap){font-size:var(--mfs) !important;}'
+        # v2.41.0 块级对齐（font{… l|r|c|j}）。这里 class 已被剥掉，只认 data-fa。
+        '.markdown-body [data-fa] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,figcaption,.mde-tabcap){text-align:var(--mfa) !important;}'
         'li.u-solid{list-style-type:disc;}li.u-hollow{list-style-type:circle;}'
         'li.task{list-style:none;}'
         'p:has(>img){text-indent:0 !important;}'

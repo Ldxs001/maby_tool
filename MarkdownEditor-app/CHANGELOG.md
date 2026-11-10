@@ -13,6 +13,30 @@
 ---
 
 
+## v2.42.0（2026-11-10）
+
+**本次改动：块级字体方言 `@@ begin font` 增加对齐参数（`l`/`c`/`r`/`j`），块内覆盖全局排版设定，预览、HTML 导出、打印/PDF 与 Word 四处一致；使用指南的「块级字体」一节、语法速查表与概览行同步**
+
+**新增**
+- **块级字体对齐 `@@ begin font{字体 对齐 字号}`**：花括号内三项顺序不限——恰好一个字母且值在 `lcrj`（大小写同收）才认作对齐，且在裸名 join 之前剥离，因此 `{"Microsoft YaHei Light" r 10.5}` 不会落进「有引号名又有多余裸词」的非法分支；只写对齐（`font{r}`）成立为纯对齐块。容器写出 `text-align` 与 `--mfa`，`[data-fa]` 高特异性规则压过排版面板与其它来源的对齐声明。对齐集合取正文、标题、引用、列表、图题表题，**不含**表格单元格与代码块（单元格自带左对齐，跟随会整表偏移）。老写法（引号名、裸名、只字号）逐字节不变。
+- **产物选择器只认 `data-fa`、不挂 `.mde-font`**：HTML 导出走 `inlineStylesInto` 会 `removeAttribute("class")`，挂 class 的规则在那条路径打不中；打印/分页路径反而保留 class，属性选择器两边都通。同时把 `--mff`/`--mff-w`/`--mfs`/`--mfa` 补进 `inlineStylesInto` 的属性清单，否则变量在导出件里未定义、`var(--mfa)` 那条 `!important` 会因 guaranteed-invalid 整条失效。
+- **Word 段落对齐**：Word 的段落对齐不继承，新增 `_font_align()` 从 font 容器样式取 `WD_ALIGN`，标题与段落两分支各落一次值；段落自带对齐仍优先于容器。
+
+**变更**
+- **使用指南「块级字体」一节改写**：标题改为 `@@ begin font{"字体名" 对齐 字号}`，补齐对齐字母表、纯对齐块、token 剥取顺序（数字当字号、单字母 `lcrj` 当对齐、其余拼成字体名）、表格与代码块不跟随的原因、引号名规避 `c` 冲突；并写一节的 `font` 表格行与嵌套规则同步，语法速查表与概览行同步。
+- **D215 诊断文案**：`font 参数非法` 的提示补上对齐字母集，与实际语法一致。
+
+**测试**
+- **块级字体对齐四路对拍**：`_fontParseParam` 19 例全过——引号名+对齐、裸名+对齐、大写 `R`、三项乱序、纯对齐 `{r}`、只字体、只字号、空参数→null、引号名+多余裸词→null、字号越界（6–72 两端各一）→null、`{"c" 10.5}` 的 `c` 视为字体名、`cc` 双字母不算对齐；`mdeFontOpen` 四形态输出核对（`data-ff`/`data-fs`/`data-fa` 与 `--mfa`、`text-align` 同写，纯对齐块无 `data-ff`）；产物侧两条 `[data-fa]` 规则落位（`PAGED_BASE_CSS` 与 HTML 导出样式清单各一）；Word 四段对拍——容器内 `p` 与 `h2` 均为 `RIGHT`、段落自带 `text-align:left` 仍为 `LEFT`、容器外段落为 `None`。
+- **预览与覆盖全局实测**（Playwright）：右对齐块内 `p`/`h2` 计算值 `right`、居中块为 `center`、表格 `td`/`th` 保持 `left`（容器写了 `r` 也不跟随）、容器外段落为 `start`；向 `#ts-style` 注入 `text-align:left !important` 与 `font-family:SimSun !important` 后，块内仍为 `right` 与 `Microsoft YaHei Light`；零 page error。
+- 回归：`_test_parser_sync` 重抽后 2116 行逐字节全等、`md-parser.test.cjs` 113/113、`_test_lint_diag` 27/27、`_test_version` 13/13、`_test_routes` ALL PASS、`_test_smd` 74/74、`_test_smd_history` 32/32、`_test_smd_ann` ALL PASS、`_test_docx_export` 40/40、`_test_v2410_ui` 12/12、`_test_v2400_ui` 9/9、`_test_v2400_table` 全部 PASS。
+- 既有欠账（与本版无关）：`_test_meta_api` 35 项里 `A4 up.md 存在` 与 `C2 补作者 default` 两条 FAIL，均为样本文件缺失导致的夹具问题；`_test_real_export` 的 docx 分支停在导出闸门（v2.40 low-runner 语义收紧后的既有欠账），预览图片加载一项照旧 PASS。
+
+**说明**
+- 版本号从 2.41.0 进 y 位到 2.42.0：v2.41.0 已完成双端 Release，本轮为新增语法参数与四处渲染落地，按「新增功能」收编 y 位，不折进已发布版本。`MD_SERVER_VERSION` 独立演进（149→150），不随包版本联动。
+
+---
+
 ## v2.41.0（2026-11-10）
 
 **本次改动：格式区重组为六组三角下拉并修复下拉定位与三角样式；新增下划线方言 `++`（普通 + 重复形态）、插入链接弹窗、可视化公式面板与 Word 导出 OMML 前置角标；工具栏右侧 12 钮收编为 6 槽；快捷键收编单一注册表，新增「关于与快捷键」面板（三 logo / 版本号 / 改键）；修复开窗插入后视图跳回文首，移除列表▾ 两项无效缩进操作；链接▾ 精简为三项，插入图片支持网络与本地双来源，新增插入本地文件并复用既有粘贴落盘链路；修复插入图片弹窗与导入面板按钮 id 重复导致的连开两个文件选择窗口；修复安装包未带关于面板资源导致的标识破图与版本号为空**

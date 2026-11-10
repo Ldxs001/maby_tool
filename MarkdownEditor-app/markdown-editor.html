@@ -452,6 +452,10 @@
   #preview .mde-font[data-ffw] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,table,pre,code,figcaption,td,th,.mde-tabcap){font-weight:var(--mff-w) !important;}
   #preview .mde-font[data-ffi] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,table,pre,code,figcaption,td,th,.mde-tabcap){font-style:italic !important;}
   #preview .mde-font[data-fs] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,table,pre,code,figcaption,td,th,.mde-tabcap){font-size:var(--mfs) !important;}
+  /* v2.41.0 块级对齐（font{… l|r|c|j}）。集合**故意不含** table/pre/code/td/th：
+     表格单元格自己有 text-align:left，跟着右对齐整张表会歪；代码块本来就是
+     左对齐语义。正文/标题/引用/列表/图题表题才是「全局排版」那一层。 */
+  #preview .mde-font[data-fa] :is(p,h1,h2,h3,h4,h5,h6,blockquote,li,figcaption,.mde-tabcap){text-align:var(--mfa) !important;}
   .markdown-body .fill-col{min-width:0;}
   .markdown-body .fill-col img{width:100% !important;height:auto;}
   .markdown-body .fill-col table img{width:auto !important;max-width:100% !important;height:auto;}
@@ -2269,19 +2273,26 @@ function _colorVal(s){
   return '';
 }
 /* ---- v2.33.0 @@ begin font{"字体名" 字号} 的参数解析 ----
-   两种写法都收，与主人给的语法一致：
+   v2.41.0 加对齐，三种参数都在同一个花括号里，顺序不限：
      font{"Microsoft YaHei Light" 12pt}   引号包名（名里有空格时用这个）
      font{楷体 10.5}                      裸名，最后一个 token 是字号
-   token 顺序不限：{12pt 楷体} 同样成立。字号只认 pt（无单位即 pt），
-   与排版面板同一把尺；px/em 一律判非法——面板不产出这两档，放进来只会
-   让「预览与打印同尺寸」这件事失去唯一口径。
-   两项至少要有一项，否则视为非法（fail-closed，原样露出），与 page/full
-   的参数纪律一致。返回 {ff, fs}，ff 是**字面名**（还没映射到 family），
+     font{"Microsoft YaHei Light" r 10.5} 名 + 对齐 + 字号
+     font{楷体 c 10.5}                    裸名 + 对齐 + 字号
+     font{r}                              只给对齐 = 一个纯对齐块
+   对齐字母 l/c/r/j（left/center/right/justify），大小写都收。
+   **认对齐的条件很窄**：token 必须恰好是一个字母、且值在 lcrj 里，并且
+   只能有一个。字体名一般是中文字或含空格的英文名，撞不上；真有名就叫 c
+   的字体，用引号写（"c"）即不会进这条分支——引号名在剥对齐之前就摘走了。
+   字号只认 pt（无单位即 pt），与排版面板同一把尺；px/em 一律判非法——
+   面板不产出这两档，放进来只会让「预览与打印同尺寸」失去唯一口径。
+   三项至少要有一项，否则视为非法（fail-closed，原样露出），与 page/full
+   的参数纪律一致。返回 {ff, fs, al}，ff 是**字面名**（还没映射到 family），
    映射放在 mdeFontOpen 里做——那一步要查本机字体表，表可能还没加载。 */
+var _FONT_AL={l:'left',c:'center',r:'right',j:'justify'};
 function _fontParseParam(raw){
   var s=String(raw==null?'':raw).replace(/\u3000/g,' ').trim();
   if(!s)return null;
-  var ff='',fs='',rest=s;
+  var ff='',fs='',al='',rest=s;
   var qi=s.match(/"([^"]+)"|\u201c([^\u201d]+)\u201d/);
   if(qi){
     ff=(qi[1]!==undefined?qi[1]:qi[2]).trim();
@@ -2295,14 +2306,16 @@ function _fontParseParam(raw){
       var n=parseFloat(mt[1]);
       if(!(n>=6&&n<=72))return null;      /* 与面板 min/max 同步 */
       fs=String(n);
+    }else if(!al&&/^[lcrj]$/i.test(toks[i])){
+      al=toks[i].toLowerCase();
     }else{
       keep.push(toks[i]);
     }
   }
   if(!ff)ff=keep.join(' ').trim();
   else if(keep.length)return null;        /* 有引号名又有多余裸词 → 非法 */
-  if(!ff&&!fs)return null;
-  return {ff:ff,fs:fs};
+  if(!ff&&!fs&&!al)return null;
+  return {ff:ff,fs:fs,al:al};
 }
 /* 字面名 → 本机真实面。先比显示名（full），再比 family——主人可能是照着
    下拉里的名字手写的，也可能是照着「微软雅黑」这类族名写的。
@@ -2344,6 +2357,14 @@ function mdeFontOpen(p){
     vars+='--mfs:'+p.fs+'pt;';
     css+='font-size:'+p.fs+'pt;';
     at+=' data-fs="1"';
+  }
+  /* v2.41.0 对齐：容器上写 text-align（text-align 是继承属性，块内全生效），
+     同时给 --mfa 让 :is() 规则用 !important 压过别处来的对齐声明。
+     data-fa 只是标记，取值在 --mfa 里（一个容器只有一个对齐）。 */
+  if(p.al){
+    vars+='--mfa:'+_FONT_AL[p.al]+';';
+    css+='text-align:'+_FONT_AL[p.al]+';';
+    at+=' data-fa="1"';
   }
   return '<div class="mde-font"'+at+' style="'+vars+css+'">';
 }
@@ -3555,13 +3576,13 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
         continue;
       }
     }
-    /* v2.33.0 @@ begin font{"字体名" 字号} … @@ end font：块级临时改字体/字号。
-       与 @@ begin color 同构（div 容器 + 内容按完整 markdown 渲染），但**必须**
-       靠高特异性规则才生效：ts-style 给 p/h1…/li 各自写了 font-family 与
-       font-size 且带 !important，纯继承一个都改不动。所以容器把值写进 CSS
-       变量，由 #preview .mde-font[data-ff] :is(...) 这类规则压过去。
-       字号只收 pt，与排版面板同一把尺；字体名可带引号也可裸写（裸写时最后
-       一个 token 视为字号，见 _fontParseParam）。
+    /* v2.33.0 @@ begin font{"字体名" 对齐 字号} … @@ end font：块级临时改
+       字体/字号/对齐。与 @@ begin color 同构（div 容器 + 内容按完整 markdown
+       渲染），但**必须**靠高特异性规则才生效：ts-style 给 p/h1…/li 各自写了
+       font-family 与 font-size 且带 !important，纯继承一个都改不动。所以容器
+       把值写进 CSS 变量，由 #preview .mde-font[data-ff] :is(...) 这类规则压过去。
+       字号只收 pt，与排版面板同一把尺；字体名可带引号也可裸写（裸写时第一个
+       数字 token 视为字号、单字母 l/c/r/j 视为对齐，见 _fontParseParam）。
        不嵌套、不跨缩进层（与 fill/color 同口径）。 */
     var fm=line.match(/^[ ]{0,3}@@\s*begin\s+font\s*\{([^{}]*)\}[ \t]*$/);
     if(fm){
@@ -3577,7 +3598,7 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
         continue;
       }
       if(fclosed){
-        if(!fpar)_dgE(i,'D215','font 参数非法：{...} 须为 {"字体名" 字号}，字号 6–72pt');
+        if(!fpar)_dgE(i,'D215','font 参数非法：{...} 须为 {"字体名" 对齐 字号}，字号 6–72pt，对齐 l/c/r/j');
         html+='<p>'+parseInline(line)+'</p>';
         var ftxt=finner.join('\n');
         if(ftxt.trim()){html+=parseMarkdown(ftxt,_lv,opts,_base+i+1,_lv3);}
@@ -7771,7 +7792,12 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
          导出克隆，否则打印 / HTML 导出丢裁剪与间距。宽度用自定义属性
          --figw 承载而不是 width——自定义属性不被 getComputedStyle 换算成
          px，{N} 的百分比能原样带到打印件；fitFig() 写的 px 也照原样带。 */
-      "white-space","overflow","text-overflow","--figw","--figgap","--tabgap"];
+      "white-space","overflow","text-overflow","--figw","--figgap","--tabgap",
+      /* v2.41.0 块级 font 的四个自定义属性必须一起抄：产物里 class 被剥、
+         只剩 data-* 与内联 style，而 `[data-fa] :is(...)` 规则读的是
+         var(--mfa)。不抄，变量在产物里未定义，那条 !important 会因
+         guaranteed-invalid 整条失效，只能靠内联 text-align 裸值兜。 */
+      "--mff","--mff-w","--mfs","--mfa"];
     /* color 不抄计算值，只抄作者显式上色的那部分：getComputedStyle 的 color
        恒有值（继承主题正文色，暗色主题是 #e6e6e8），无差别抄会把整篇刷成
        浅灰字——Word 白底上几乎看不见。判据：元素自身或祖先带内联 color
@@ -12946,9 +12972,9 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     [/^[ ]{0,3}@@\s*begin\s+fill/i,[['@@ begin fill{50|50}','分栏：各栏比例相加 =100；不带参数 = 2~4 栏等分'],['空行分栏','连续非空行属同一栏，末行写 @@ end fill 收尾']]],
     [/^[ ]{0,3}@@\s*begin\s+full/i,[['@@ begin full{t|m|b}','独占一页：t=居上 m=居中 b=居下（分页导出生效）'],['@@ begin full{m:![](图) o|c|f 九宫}','独占一页+背景图：o=原始尺寸 c=撑满 f=填充；九宫两字母 lt~rb 定位（预览/HTML/打印生效）']]],
     [/^[ ]{0,3}@@\s*begin\s+page/i,[['@@ begin page{noll|1|i|I}','页区页码：noll 不印页码／1 重编／i、I 罗马数字（分页导出生效）']]],
-    [/^[ ]{0,3}@@\s*begin\s+font/i,[['@@ begin font{"Microsoft YaHei Light" 12pt}','整块临时换字体／字号：字体名可加引号或直接写，字号 6–72pt，末行写 @@ end font 收尾']]],
+    [/^[ ]{0,3}@@\s*begin\s+font/i,[['@@ begin font{"Microsoft YaHei Light" 12pt}','整块临时换字体／字号：字体名可加引号或直接写，字号 6–72pt'],['@@ begin font{"Microsoft YaHei Light" r 10.5}','第三项可加对齐 l=左 c=中 r=右 j=两端；三项顺序不限，只写对齐也行（font{r}）'],['@@ end font','末行写 @@ end font 收尾；块内覆盖全局排版设定']]],
     [/^[ ]{0,3}@@\s*begin\s+color/i,[['@@ begin color{#c0392b}','整块着色：颜色名或 #rgb／#rrggbb，末行写 @@ end color 收尾']]],
-    [/^[ ]{0,3}@@\s*begin\b/i,[['@@ begin fill{a|b}','分栏'],['@@ begin full{t|m|b}','独占一页'],['@@ begin page{noll|1|i|I}','页区页码'],['@@ begin font{"字体名" 12pt}','整块换字体字号'],['@@ begin color{X}','整块着色'],['@@ begin page full font color …','并写时按 page→full→font→color 的顺序排列']]],
+    [/^[ ]{0,3}@@\s*begin\b/i,[['@@ begin fill{a|b}','分栏'],['@@ begin full{t|m|b}','独占一页'],['@@ begin page{noll|1|i|I}','页区页码'],['@@ begin font{"字体名" 12pt}','整块换字体字号'],['@@ begin font{"字体名" r 12pt}','可加对齐 l/c/r/j'],['@@ begin color{X}','整块着色'],['@@ begin page full font color …','并写时按 page→full→font→color 的顺序排列']]],
     [/^[ ]{0,3}@@\s*end\b/i,[['@@ end fill','关 fill'],['@@ end font','关 font，外层 page/full 继续收内容'],['@@ end color','只关 color，外层 page/full/font 继续收内容'],['@@ end page color','集合语义：一行同时关多个']]],
     [/^[ ]{0,3}@@\s*caption/i,[['@@ caption{…} 表注文字','题注：作用于紧随其后的那一个表格']]],
     /* v2.40.2 补 v2.23/v2.27 漏掉的方言提示：table 与 meta 此前落到 generic

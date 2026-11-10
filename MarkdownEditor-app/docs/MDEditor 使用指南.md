@@ -30,7 +30,7 @@ The interface is bilingual. The small **EN / 中** button in the status bar swit
 | Keys | **Config → About & shortcuts** lists every shortcut and lets you rebind it (Ctrl+letter, Ctrl+Shift/Alt+letter, F3); conflicts are refused. Ctrl+B / Ctrl+I are new; Ctrl+Z stays the browser's native undo. |
 | Language | Status bar **EN / 中**, remembered on this machine. |
 | Offline | KaTeX, Paged.js and the four diagram engines (Mermaid, Graphviz, WaveDrom, Vega-Lite) are bundled; only remote images and links need the network. |
-| Extensions | `@@ begin fill {50\|50}` … `@@ end fill` (columns), `@@ blank{n}` (exact vertical space), `@@ begin full` (own page on print), `@@ begin page{noll\|1\|i\|I}` (page-number regions: no numbers / arabic / roman, `{p}` page, `{P}` total, `{N}` pages in this region; `@@ begin font{"Name" 12pt}` … `@@ end font` (block font and size override; size in pt, 6–72), `page`+`full`+`font`+`color` can be combined in one block, write `fill` nested), `@@ MDE_…` (Python data points). The cheat sheet at the end carries an English note on every row. |
+| Extensions | `@@ begin fill {50\|50}` … `@@ end fill` (columns), `@@ blank{n}` (exact vertical space), `@@ begin full` (own page on print), `@@ begin page{noll\|1\|i\|I}` (page-number regions: no numbers / arabic / roman, `{p}` page, `{P}` total, `{N}` pages in this region; `@@ begin font{"Name" 12pt}` … `@@ end font` (block font, size and alignment override — optional `l`/`c`/`r`/`j` token; size in pt, 6–72), `page`+`full`+`font`+`color` can be combined in one block, write `fill` nested), `@@ MDE_…` (Python data points). The cheat sheet at the end carries an English note on every row. |
 
 ## 工具栏速览（v2.41.0）
 
@@ -1132,7 +1132,7 @@ note: 第一卷草稿
 |---|---|---|
 | `page{noll\|1\|i\|I}` | 断页 + 页码体系 | 打印／PDF |
 | `full{t\|m\|b}` | 撑满页心 + 垂直定位 | 打印／PDF |
-| `font{"字体名" 字号}` | 块内字体与字号（v2.33.0） | 预览／导出／打印／Word |
+| `font{"字体名" 对齐 字号}` | 块内字体、字号与对齐（v2.33.0 字体字号／v2.41.0 对齐） | 预览／导出／打印／Word |
 | `color{X}` | 继承色 | 预览／导出／打印 |
 
 - **书写顺序锁死 `page → full → font → color`**：展开后的嵌套顺序就是书写顺序。写反了（如 `@@ begin full page`、`@@ begin color r font{12}`）整行按原文露出，不猜意图；`color` 的色值写 `{r}` 或裸写 `r` 都行
@@ -1144,7 +1144,7 @@ note: 第一卷草稿
 
 1. **同族一律不许自己套自己**——`full` 套 `full`、`page` 套 `page`、`fill` 套 `fill`、`color` 块套 `color` 块都算违规。套了自己，外层会被内层的 `@@ end` 提前关掉，标记直接印到纸上（实测）。`color` 不需要套自己：行内 `@@ color r{文字}` 本来就是就近覆盖。
 2. **主链严格递增：`page`（最外）> `full`（中）> `fill`（最内）**——不管嵌套几层、中间缺谁，出现的都要保持这个相对顺序。`page` 哪怕只和 `fill` 嵌套，`page` 也必须是外层。跳级合法（`page` 直套 `fill`、`full` 直套 `fill` 都行），逆序不行（`fill` 里套 `full`、`full` 里套 `page`）。
-3. **`color` 与 `font` 不占主链**——`color` 只改颜色、`font` 只改字体与字号，都不建立新的布局容器，与任何家族自由组合、放哪层都行：`color` 块里套 `full`、`fill` 栏里套 `font` 都正常。两者唯一的硬约束是**并写时的先后**：`font` 必须写在 `full` 之后、`color` 之前（字号决定断行与页数，度量先于上色）。
+3. **`color` 与 `font` 不占主链**——`color` 只改颜色、`font` 只改字体字号与对齐，都不建立新的布局容器，与任何家族自由组合、放哪层都行：`color` 块里套 `full`、`fill` 栏里套 `font` 都正常。两者唯一的硬约束是**并写时的先后**：`font` 必须写在 `full` 之后、`color` 之前（字号决定断行与页数，度量先于上色）。
 4. **违规的可见形态**：begin 行与配对的 end 行**都**按原文露出（对称、不吞字），中间内容照常渲染。
 
 **并写外层 + 嵌套内层**（扉页左图右文，整页居中且不编号）：
@@ -1161,23 +1161,29 @@ note: 第一卷草稿
 
 **fail-closed**：同族重复（`page{noll} page{1}`）、书写顺序错（`full page`）、参数非法（`page{x}`、`full{q}`、`color zz`）、未闭合（关剩家族没关完）、end 了没开的家族、嵌套违规——标记行按原文露出（嵌套违规时 begin/end 成对露出），内容照常渲染，一个字段都不猜。
 
-### 块级字体 `@@ begin font{"字体名" 字号}`
+### 块级字体 `@@ begin font{"字体名" 对齐 字号}`
 
-排版面板按**元素类型**改字体（正文一套、各级标题各一套）；`@@ begin font` 改的是**某一段正文**——一本书里夹一页引文用仿宋、一段谱例用等宽，用它比在面板里调全局更省事。
+排版面板按**元素类型**改字体（正文一套、各级标题各一套）；`@@ begin font` 改的是**某一段正文**——一本书里夹一页引文用仿宋、一段谱例用等宽，用它比在面板里调全局更省事。块内这三项**覆盖全局排版设定**：面板设的字体字号一并让位。
 
 ```
 @@ begin font{"Microsoft YaHei Light" 10.5}
 这一段用雅黑 Light、10.5 pt，到 `@@ end font` 为止
 @@ end font
+
+@@ begin font{"Microsoft YaHei Light" r 10.5}
+这三行右对齐，字体字号同上；对齐与字号顺序不限
+@@ end font
 ```
 
 - **字体名**：名字里有空格就用引号包起来；没空格可以裸写（`font{楷体 10.5}`）
 - **字号**：**单位 pt**，写 `12pt` 或只写 `12` 都行（无单位即 pt）；范围 **6–72**，与排版面板同界；写 `px`、`em` 一律判非法
-- **token 顺序不限**：`{12pt 楷体}` 与 `{楷体 12pt}` 等价——**最后一个看起来像数字的 token 当字号，其余拼成字体名**
-- **两项至少写一项**：只写字体（`font{楷体}`）＝只换字体、字号不动；只写字号（`font{12}`）＝只换字号、字体不动。两项都不写整块 fail-closed
+- **对齐**：`l` 左、`c` 居中、`r` 右、`j` 两端，大小写都收。只写对齐也可以（`font{r}` ＝ 一个纯对齐块）。认对齐的条件很窄——**恰好一个字母、值是 l/c/r/j**；字体名若真叫 `c`，用引号写成 `"c"` 就不会被认成对齐
+- **token 顺序不限**：`{12pt 楷体 r}`、`{楷体 r 12pt}`、`{r 12pt 楷体}` 等价——数字 token 当字号，`l/c/r/j` 单字母当对齐，其余拼成字体名
+- **至少写一项**：只写字体（`font{楷体}`）＝只换字体；只写字号（`font{12}`）＝只换字号；三项都不写整块 fail-closed
 - **字重按字体文件的真值生效**：写 `Microsoft YaHei Light` 得到的就是 Light 那个面（不是把雅黑压细），同族的 `Semibold`、`Black` 同理——本机装了哪个面就能用哪个面
 - **作用面**：预览、HTML 导出、打印／PDF、Word(.docx) 四处一致；Word 里也落到 run 级字体，改完还能继续编辑
 - **块内字号是统一的**：块里的 h1~h6、代码、表格单元格一律用这一个字号，不按各自的元素档位再分（这是刻意的取舍——「这一段整体放大」比「标题相对正文再放大一级」更符合临时改版的意图）
+- **对齐作用于正文块**：正文、标题、引用、列表、图题表题跟着走；**表格单元格与代码块不受影响**（单元格自带左对齐，跟着右对齐整张表会歪；代码块本来就是左对齐语义）
 - **嵌套**：可与 `page`／`full`／`color` 并写或嵌套，位次见上一节；同族不许自己套自己
 
 fail-closed 两种：参数解析不出（D215）、`@@ end font` 没写（D216）——标记行都按原文露出，内容照常渲染。
@@ -1485,7 +1491,7 @@ AI 解释（批注弹窗内一键按钮）可请 AI 解读当前标注片段。�
 | `^{内容}` / `_{内容}` | 上标 / 下标（角标）：正文直写、不用 `$`；须紧跟花括号，不跨行、不嵌套 | 「基础语法 · 上下标」 | Super / subscript |
 | `@@ color x{内容}` | 行内文字着色；x = 简写字母（`r g b y o p c m k w a`）或 3/6/8 位 HEX（不带 `#`，8 位末两位是透明度） | 「基础语法 · 文字颜色」 | Inline text colour |
 | `@@ begin color x` … `@@ end color` | 块级着色，块内可再用行内写法局部覆盖（花括号写法 `@@ begin color {x}` 等价） | 「基础语法 · 文字颜色」 | Block colour |
-| `@@ begin font{"字体名" 字号}` … `@@ end font` | 块级改字体与字号：字体名带空格要加引号、没空格可裸写；字号**单位 pt**（`12` 即 `12pt`），范围 6–72，`px`／`em` 判非法；token 顺序不限，最后一个数字 token 当字号；两项至少写一项 | 「块级字体」 | Block font override |
+| `@@ begin font{"字体名" 对齐 字号}` … `@@ end font` | 块级改字体、字号与对齐，块内覆盖全局排版：字体名带空格要加引号、没空格可裸写；字号**单位 pt**（`12` 即 `12pt`），范围 6–72，`px`／`em` 判非法；对齐 `l`／`c`／`r`／`j`，只写对齐也行（`font{r}`）；数字 token 当字号、`l/c/r/j` 单字母当对齐、其余拼成字体名，顺序不限；至少写一项。对齐只作用于正文块，表格单元格与代码块不跟着走 | 「块级字体」 | Block font, size and alignment override |
 | `@@ begin page{noll} full{t} color{r}` … `@@ end <关剩的>` | 并写：嵌套的简写，展开成 page＞full＞font＞color 嵌套容器（书写顺序锁死）；end 也是并写——`@@ end X` 只关 X、`@@ end X Y` 同关多个、关剩的继续收内容；`fill` 不参与（用嵌套）。嵌套：同族禁套、主链 page＞full＞fill 严格递增、font 与 color 任意层但 font 须在 color 之前 | 「并写」 | Combine containers |
 | `$...$` / `$$...$$` | 行内 / 块级 LaTeX 公式 | 「数学公式」 | Inline / block LaTeX |
 | `<<< ... <<<` | 缩进包围块：块内容以上一段的缩进位置为起点整体右移；紧邻连续块逐级递进，空行/其他块打断 | 「缩进包围块」 | Indent block |

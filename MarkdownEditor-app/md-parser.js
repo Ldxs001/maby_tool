@@ -415,19 +415,26 @@ function _colorVal(s){
   return '';
 }
 /* ---- v2.33.0 @@ begin font{"字体名" 字号} 的参数解析 ----
-   两种写法都收，与主人给的语法一致：
+   v2.41.0 加对齐，三种参数都在同一个花括号里，顺序不限：
      font{"Microsoft YaHei Light" 12pt}   引号包名（名里有空格时用这个）
      font{楷体 10.5}                      裸名，最后一个 token 是字号
-   token 顺序不限：{12pt 楷体} 同样成立。字号只认 pt（无单位即 pt），
-   与排版面板同一把尺；px/em 一律判非法——面板不产出这两档，放进来只会
-   让「预览与打印同尺寸」这件事失去唯一口径。
-   两项至少要有一项，否则视为非法（fail-closed，原样露出），与 page/full
-   的参数纪律一致。返回 {ff, fs}，ff 是**字面名**（还没映射到 family），
+     font{"Microsoft YaHei Light" r 10.5} 名 + 对齐 + 字号
+     font{楷体 c 10.5}                    裸名 + 对齐 + 字号
+     font{r}                              只给对齐 = 一个纯对齐块
+   对齐字母 l/c/r/j（left/center/right/justify），大小写都收。
+   **认对齐的条件很窄**：token 必须恰好是一个字母、且值在 lcrj 里，并且
+   只能有一个。字体名一般是中文字或含空格的英文名，撞不上；真有名就叫 c
+   的字体，用引号写（"c"）即不会进这条分支——引号名在剥对齐之前就摘走了。
+   字号只认 pt（无单位即 pt），与排版面板同一把尺；px/em 一律判非法——
+   面板不产出这两档，放进来只会让「预览与打印同尺寸」失去唯一口径。
+   三项至少要有一项，否则视为非法（fail-closed，原样露出），与 page/full
+   的参数纪律一致。返回 {ff, fs, al}，ff 是**字面名**（还没映射到 family），
    映射放在 mdeFontOpen 里做——那一步要查本机字体表，表可能还没加载。 */
+var _FONT_AL={l:'left',c:'center',r:'right',j:'justify'};
 function _fontParseParam(raw){
   var s=String(raw==null?'':raw).replace(/\u3000/g,' ').trim();
   if(!s)return null;
-  var ff='',fs='',rest=s;
+  var ff='',fs='',al='',rest=s;
   var qi=s.match(/"([^"]+)"|\u201c([^\u201d]+)\u201d/);
   if(qi){
     ff=(qi[1]!==undefined?qi[1]:qi[2]).trim();
@@ -441,14 +448,16 @@ function _fontParseParam(raw){
       var n=parseFloat(mt[1]);
       if(!(n>=6&&n<=72))return null;      /* 与面板 min/max 同步 */
       fs=String(n);
+    }else if(!al&&/^[lcrj]$/i.test(toks[i])){
+      al=toks[i].toLowerCase();
     }else{
       keep.push(toks[i]);
     }
   }
   if(!ff)ff=keep.join(' ').trim();
   else if(keep.length)return null;        /* 有引号名又有多余裸词 → 非法 */
-  if(!ff&&!fs)return null;
-  return {ff:ff,fs:fs};
+  if(!ff&&!fs&&!al)return null;
+  return {ff:ff,fs:fs,al:al};
 }
 /* 字面名 → 本机真实面。先比显示名（full），再比 family——主人可能是照着
    下拉里的名字手写的，也可能是照着「微软雅黑」这类族名写的。
@@ -490,6 +499,14 @@ function mdeFontOpen(p){
     vars+='--mfs:'+p.fs+'pt;';
     css+='font-size:'+p.fs+'pt;';
     at+=' data-fs="1"';
+  }
+  /* v2.41.0 对齐：容器上写 text-align（text-align 是继承属性，块内全生效），
+     同时给 --mfa 让 :is() 规则用 !important 压过别处来的对齐声明。
+     data-fa 只是标记，取值在 --mfa 里（一个容器只有一个对齐）。 */
+  if(p.al){
+    vars+='--mfa:'+_FONT_AL[p.al]+';';
+    css+='text-align:'+_FONT_AL[p.al]+';';
+    at+=' data-fa="1"';
   }
   return '<div class="mde-font"'+at+' style="'+vars+css+'">';
 }
@@ -1701,13 +1718,13 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
         continue;
       }
     }
-    /* v2.33.0 @@ begin font{"字体名" 字号} … @@ end font：块级临时改字体/字号。
-       与 @@ begin color 同构（div 容器 + 内容按完整 markdown 渲染），但**必须**
-       靠高特异性规则才生效：ts-style 给 p/h1…/li 各自写了 font-family 与
-       font-size 且带 !important，纯继承一个都改不动。所以容器把值写进 CSS
-       变量，由 #preview .mde-font[data-ff] :is(...) 这类规则压过去。
-       字号只收 pt，与排版面板同一把尺；字体名可带引号也可裸写（裸写时最后
-       一个 token 视为字号，见 _fontParseParam）。
+    /* v2.33.0 @@ begin font{"字体名" 对齐 字号} … @@ end font：块级临时改
+       字体/字号/对齐。与 @@ begin color 同构（div 容器 + 内容按完整 markdown
+       渲染），但**必须**靠高特异性规则才生效：ts-style 给 p/h1…/li 各自写了
+       font-family 与 font-size 且带 !important，纯继承一个都改不动。所以容器
+       把值写进 CSS 变量，由 #preview .mde-font[data-ff] :is(...) 这类规则压过去。
+       字号只收 pt，与排版面板同一把尺；字体名可带引号也可裸写（裸写时第一个
+       数字 token 视为字号、单字母 l/c/r/j 视为对齐，见 _fontParseParam）。
        不嵌套、不跨缩进层（与 fill/color 同口径）。 */
     var fm=line.match(/^[ ]{0,3}@@\s*begin\s+font\s*\{([^{}]*)\}[ \t]*$/);
     if(fm){
@@ -1723,7 +1740,7 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
         continue;
       }
       if(fclosed){
-        if(!fpar)_dgE(i,'D215','font 参数非法：{...} 须为 {"字体名" 字号}，字号 6–72pt');
+        if(!fpar)_dgE(i,'D215','font 参数非法：{...} 须为 {"字体名" 对齐 字号}，字号 6–72pt，对齐 l/c/r/j');
         html+='<p>'+parseInline(line)+'</p>';
         var ftxt=finner.join('\n');
         if(ftxt.trim()){html+=parseMarkdown(ftxt,_lv,opts,_base+i+1,_lv3);}
