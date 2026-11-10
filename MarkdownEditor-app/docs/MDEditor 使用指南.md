@@ -30,7 +30,7 @@ The interface is bilingual. The small **EN / 中** button in the status bar swit
 | Keys | **Config → About & shortcuts** lists every shortcut and lets you rebind it (Ctrl+letter, Ctrl+Shift/Alt+letter, F3); conflicts are refused. Ctrl+B / Ctrl+I are new; Ctrl+Z stays the browser's native undo. |
 | Language | Status bar **EN / 中**, remembered on this machine. |
 | Offline | KaTeX, Paged.js and the four diagram engines (Mermaid, Graphviz, WaveDrom, Vega-Lite) are bundled; only remote images and links need the network. |
-| Extensions | `@@ begin fill {50\|50}` … `@@ end fill` (columns), `@@ blank{n}` (exact vertical space), `@@ begin full` (own page on print), `@@ begin page{noll\|1\|i\|I}` (page-number regions: no numbers / arabic / roman, `{p}` page, `{P}` total, `{N}` pages in this region; `@@ begin font{"Name" 12pt}` … `@@ end font` (block font, size and alignment override — optional `l`/`c`/`r`/`j` token; size in pt, 6–72), `page`+`full`+`font`+`color` can be combined in one block, write `fill` nested), `@@ MDE_…` (Python data points). The cheat sheet at the end carries an English note on every row. |
+| Extensions | `@@ begin fill {50\|50}` … `@@ end fill` (columns), `@@ blank{n}` (exact vertical space), `@@ blank{break}` (page break here, page numbers keep running), `@@ begin full` (own page on print), `@@ begin page{noll\|1\|i\|I}` (page-number regions: no numbers / arabic / roman, `{p}` page, `{P}` total, `{N}` pages in this region; `@@ begin font{"Name" 12pt}` … `@@ end font` (block font, size and alignment override — optional `l`/`c`/`r`/`j` token; size in pt, 6–72), `page`+`full`+`font`+`color` can be combined in one block, write `fill` nested), `@@ MDE_…` (Python data points). The cheat sheet at the end carries an English note on every row. |
 
 ## 工具栏速览（v2.41.0）
 
@@ -1008,7 +1008,7 @@ note: 第一卷草稿
 - 非首行的 `---…---` 一律不算元数据
 - 元数据区只在预览出现：打印／PDF 与 `.docx` 整块删除；`.html` 导出还原成源码块（`<pre class="mde-fm-src">`），保留原文但不渲染成元数据卡片
 
-## 独占一页 `@@ begin full`、硬控空白 `@@ blank`、页区页码、块级字体与并写
+## 独占一页 `@@ begin full`、硬控空白与断页 `@@ blank`、页区页码、块级字体与并写
 
 ### 独占一页 `@@ begin full{t|m|b}` 与整页背景图
 
@@ -1048,7 +1048,7 @@ note: 第一卷草稿
 - 未闭合（缺 `@@ end full`）同理：标记行原样显示，不吞后面的内容
 - 块内含标题行不会打乱它
 
-### 硬控空白 `@@ blank{n}`
+### 硬控空白与断页 `@@ blank{n}` / `@@ blank{break}`
 
 排版面板的段间距是**全局**的；某一处要精确留白（图前空半行、封底上方空三行），用它：
 
@@ -1065,6 +1065,21 @@ note: 第一卷草稿
 - 列表项内、分栏栏内同样可用
 - 连续多个空行本来就等于一个空行——要"空两块"写 `@@ blank{2}`，不要空两行
 - 导出 docx 时不出空档（Word 里用空段落代替）
+
+**就地断页 `@@ blank{break}`**：只做一件事——把后面的内容推到下一页。预览里这里是一条虚线加「分页」小字，打印与导出 PDF 才真正断页。
+
+```
+第一章结尾。
+@@ blank{break}
+## 第二章
+```
+
+- **不换页码体系**：页码照常连续往下数。要"另起一套页码"（封面不编号、附录用罗马数字）用页区 `@@ begin page{…}`——那是分区，断页只是它的副作用
+- **紧跟 `@@ begin page` 或 `@@ begin full` 时自动合并**：那个块自己就起新页，再断一次会空出一页，所以这一行静默失效，不报错。想让两块之间**留一张空白页**，写两个 `@@ blank{break}` 连着
+- 文末写一个 `@@ blank{break}` 会多出一页空白尾页
+- 断页点正好落在自然分页处时，合并为一页，不产生空白页
+- 与 `@@ blank{n}` 是两个参数，不能写 `@@ blank{break 2}`；要"先空三行再断页"，写两行：`@@ blank{3}` 与 `@@ blank{break}`
+- 导出 Word 时同样断页（Word 用段前分页实现）
 
 ### 页区页码 `@@ begin page{noll|1|i|I}`
 
@@ -1477,8 +1492,9 @@ AI 解释（批注弹窗内一键按钮）可请 AI 解读当前标注片段。�
 | ` ```mermaid "图题"{40l:c t} ` | 图表围栏带图题：`"…"` 题注 + `{图参:题参}` 同图片一套；无 `"题注"` 的围栏行为不变 | 「图片 · 图题」 | Caption in quotes |
 | ` ```mermaid ` / ` ```dot ` / ` ```wavedrom ` / ` ```vega ` | 四种本地图表引擎围栏，离线渲染 | 「图表作图」 | Mermaid, dot, wavedrom, vega |
 | `@@ begin fill {50\|50}` … `@@ end fill` | 图片/图表/文字分栏并排（2~4 栏、比例为版面宽度百分比、相加须 =100；**参数可省略 = 等分**；栏内 `{N}` 与图题宽度位失效、栏内图一律撑满栏；紧贴列表不继承列表缩进；docx 以无边框表格渲染） | 「图片 · 分栏」 | 2-4 columns side by side |
-| `@@ begin full{t\|m\|b}` … `@@ end full` | 独占一页：分页导出时前后强制断页、块撑满版心，`t/m/b` = 居上/居中/居下（缺省 m）；预览与 `.html` 无页概念，按普通块渲染 | 「独占一页与硬控空白」 | Own page on print |
-| `@@ blank{n}` | 硬控段间空白：n = 正文行数（可小数，上限 50），与段间距**不叠加**、压过排版面板的全局段间距；必须独占一行 | 「独占一页与硬控空白」 | Exact vertical space |
+| `@@ begin full{t\|m\|b}` … `@@ end full` | 独占一页：分页导出时前后强制断页、块撑满版心，`t/m/b` = 居上/居中/居下（缺省 m）；预览与 `.html` 无页概念，按普通块渲染 | 「独占一页与硬控空白与断页」 | Own page on print |
+| `@@ blank{n}` | 硬控段间空白：n = 正文行数（可小数，上限 50），与段间距**不叠加**、压过排版面板的全局段间距；必须独占一行 | 「独占一页与硬控空白与断页」 | Exact vertical space |
+| `@@ blank{break}` | 就地断页：只断页、不换页码体系；紧跟 `@@ begin page`／`@@ begin full` 时自动合并；必须独占一行 | 同上 | Page break here, page numbers keep running |
 | `@@ begin page{noll\|1\|i\|I}` … `@@ end page` | 页区：区内按档位重新编号（`noll` 不印 / `1` 阿拉伯 / `i`、`I` 罗马），起止都强制断页、一页只属一个区；占位符 `{p}`=当前页、`{P}`=全文总页数、`{N}`=本区总页数 | 「页区页码」 | Page-number regions |
 | `![说明](路径 "图题"){50l:c t s0.3}` | 图题：题注写 `()` 内末尾 `"…"`，图片须独占一段；`:` 前图参、后题参（l/c/r 对齐、t/b 上/下、w/n 裁剪/换行、s<n> 间距 = n×题注字号；图默认 b、间距默认 s0.3） | 「图片 · 图题」 | Figure caption with options |
 | `@@ caption{c t s0.3} 表题` | 表题：紧贴表格上一行；参数与图题同一套（表默认 t、间距默认 s0.3；`{}` 可省略）；后面不是表格则整行按普通文本露出 | 「表格」 | Table caption line above |

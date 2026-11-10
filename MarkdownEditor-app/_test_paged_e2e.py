@@ -7,7 +7,11 @@ import io, json, urllib.request
 BASE = "http://127.0.0.1:18766"
 FAILS = []
 
+NCHECK = [0]
+
+
 def check(name, cond, detail=""):
+    NCHECK[0] += 1
     print(("PASS" if cond else "FAIL") + " | " + name + ((" | " + detail) if detail and not cond else ""))
     if not cond:
         FAILS.append(name)
@@ -192,11 +196,19 @@ check("E61 export-html tabwrap css", ".markdown-body .mde-tblwrap{margin:.9em 0;
 check("E62 export-html fill col-100", ".fill-col img{width:100% !important;height:auto;}" in html8)
 check("E63 export-html figure markup passthrough", 'data-fig-side="t"' in html8 and "--figw:40%" in html8)
 check("E64 export-html old fill auto gone", ".fill-col img{width:auto !important" not in html8)
+# v2.43.0 @@ blank{break}：分页产物与 HTML 导出必须都带断页规则。
+# 两条路各写一份 CSS（FIGCAP_BASE_CSS 共用），漏一处就是「预览对、PDF 错」。
+check("E65 paged: blank{break} break-before",
+      '.markdown-body [data-blank="break"]{break-before:page;}' in html)
+check("E66 export-html: blank{break} break-before",
+      '.markdown-body [data-blank="break"]{break-before:page;}' in html8)
+check("E67 blank 的两侧 margin 清零用属性口径",
+      ".markdown-body [data-blank]{margin:0 !important;padding:0;border:0;overflow:hidden;break-inside:avoid;}" in html8)
 if _os.path.exists(_out_html):
     _os.remove(_out_html)
 
 print("---")
-print("TOTAL: %d, FAIL: %d" % (64, len(FAILS)))
+print("TOTAL: %d, FAIL: %d" % (NCHECK[0], len(FAILS)))
 if FAILS:
     print("FAILED: " + ", ".join(FAILS))
     raise SystemExit(1)

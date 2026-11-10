@@ -1425,8 +1425,30 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
           （.mde-blank 规则），实际空白恰为 n 行，也压过排版面板的全局
           段间距。高度写内联 style（克隆到分页导出/HTML 导出时随元素带走），
           calc 里乘 --mde-lh 保证行高口径与正文一致。 */
-    var _bm=/^[ ]{0,3}@@\s*blank[ \t]*\{([\d.]+)\}[ \t]*$/.exec(line);
+    /* v2.43.0 @@ blank{break}：就地断页，不改页码体系。
+       与 @@ begin page 的分工：page 区是「起新页 + 分区 + 换页码体系」
+       （noll/1/i/I），断页只是它的副作用；这里只做断页一件事——不产生
+       page-region，页码自然连续（页码按 .page-region[data-pr-id] 逐区算，
+       没有区就沿用外层，不靠 counter-reset）。
+       实现在零高度 div 上挂 break-before:page（原生打印引擎实测有效：
+       断点在第 8 段后 → 3 页、无空白页；两个连写 → 多一页空白，符合
+       「插空白页」的用法）。
+       **静默合并**：后面紧跟 page/full 的 begin 时本行不产出——那个块自己
+       就起新页，再断一次会空出一页（实测 break 后接 page 区 = 4 页含 1
+       空白页）。用户明确要「允许 break 后面接 page」，所以按合并处理，
+       不报诊断。 */
+    var _bm=/^[ ]{0,3}@@\s*blank[ \t]*\{(break|[\d.]+)\}[ \t]*$/.exec(line);
     if(_bm){
+      if(_bm[1]==='break'){
+        var _bkNx=i+1;
+        while(_bkNx<lines.length&&!/[^ \t]/.test(lines[_bkNx]))_bkNx++;
+        var _bkMerge=_bkNx<lines.length&&
+          /^[ ]{0,3}@@\s*begin\s+(page|full)\b/.test(lines[_bkNx]);
+        if(!_bkMerge){
+          html+='<div class="mde-blank" data-blank="break"></div>';
+        }
+        i++;curInd=0;continue;
+      }
       var _bn=parseFloat(_bm[1]);
       if(!isNaN(_bn)&&_bn>0){
         _bn=Math.min(_bn,50);
@@ -2129,7 +2151,7 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
         if(_dgT==='end')_dgE(i-1,'D401','孤 @@ end：前面没有打开的对应 begin 块（检查家族名与配对）');
         else if(_dgT==='begin')_dgE(i-1,'D402','@@ begin 未生效：家族名／参数／嵌套位置有误（fill 分栏／full 独占页／page 页区／color 着色）');
         else if(_dgT==='caption')_dgE(i-1,'D403','@@ caption 未生效：其后必须紧跟表格（下一行表体、再下一行分隔行）');
-        else if(_dgT==='blank')_dgE(i-1,'D404','@@ blank 未生效：须独占一行，n 为正数（0.1~50）');
+        else if(_dgT==='blank')_dgE(i-1,'D404','@@ blank 未生效：须独占一行，写 break（就地断页）或正数 n（0.1~50 行空白）');
         else if(_dgT==='meta')_dgE(i-1,'D406','@@ meta 未生效：须独占一行、不带任何参数');
         else _dgE(i-1,'D405','以 @@ 开头但不是有效方言指令，按普通文本渲染','warn');
       }

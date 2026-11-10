@@ -270,6 +270,40 @@ def test_regression_import():
           hasattr(md_server, "build_standalone_html"))
 
 
+def test_docx_blank_break():
+    """v2.43.0 @@ blank{break}：docx 侧必须真的断页（段前分页）。
+
+    判据：断页块之后的第一个段落 paragraph_format.page_break_before 为真，
+    且断页块自身那段压到 1pt 行高（否则新页顶部多出一行）；普通 blank{n}
+    不出分页（它只是视觉留白，Word 里本来就不占位）。
+    """
+    body = ('<p>第一段</p>'
+            '<div class="mde-blank" data-blank="break"></div>'
+            '<p>第二段</p>'
+            '<div class="mde-blank" data-blank="2" style="height:2em"></div>'
+            '<p>第三段</p>')
+    data = docx_export.build_docx(None, body)
+    doc = Document(io.BytesIO(data))
+    allp = list(doc.paragraphs)
+    ps = [p for p in allp if p.text.strip()]
+    check("docx 三段正文都在", len(ps) == 3, "n=%d" % len(ps))
+    brk = [p for p in allp if p.paragraph_format.page_break_before]
+    check("docx blank{break} 落在段前分页", len(brk) == 1, "n=%d" % len(brk))
+    check("docx 断页段落是空段", bool(brk) and not brk[0].text.strip())
+    if brk and len(ps) == 3:
+        # 断页段必须夹在「第一段」与「第二段」之间
+        i_brk = allp.index(brk[0])
+        check("docx 断页段位置正确",
+              allp.index(ps[0]) < i_brk < allp.index(ps[1]),
+              "i=%d" % i_brk)
+        check("docx 断页段行高压到 1pt",
+              abs((brk[0].paragraph_format.line_spacing or 0).pt - 1.0) < 0.01,
+              str(brk[0].paragraph_format.line_spacing))
+    check("docx 正文段落没被误标分页",
+          all(not p.paragraph_format.page_break_before for p in ps))
+    check("docx blank{2} 不产生分页", len(brk) == 1)
+
+
 def main():
     test_html_export()
     test_docx_export()
@@ -277,6 +311,7 @@ def main():
     test_docx_img_width_rules()
     test_docx_mroot_rad_structure()
     test_regression_import()
+    test_docx_blank_break()
     n_pass = sum(1 for _, ok in RESULTS if ok)
     n_all = len(RESULTS)
     print("%d/%d passed" % (n_pass, n_all))

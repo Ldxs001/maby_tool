@@ -1093,6 +1093,22 @@ def _walk(node, doc, md_path, ctx):
     cls = node.get("class", "") or ""
     tex = node.get("data-tex")
 
+    # v2.43.0 @@ blank{break}：就地断页。Word 没有「零高度断页块」这种东西，
+    # 用段前分页的空段落承担（pageBreakBefore 比插 w:br 稳：不依赖 run 落点）。
+    # 该段落自身压到 1pt 行高、零段距，否则新页顶部会凭空多出一行。
+    # 零高度 blank{n} 不在这里处理——它只是视觉留白，Word 由段间距承担。
+    if node.get("data-blank") == "break":
+        p = doc.add_paragraph()
+        r = p.add_run("")
+        r.font.size = Pt(1)
+        pf = p.paragraph_format
+        pf.page_break_before = True
+        pf.space_before = Pt(0)
+        pf.space_after = Pt(0)
+        pf.line_spacing = Pt(1)
+        ctx["para"] = None
+        return
+
     # 公式（样式节点 = 公式元素自身：inlineStylesInto 的字号/字体快照
     # 随 data-tex 一起传给 OMML run）
     if tex is not None:

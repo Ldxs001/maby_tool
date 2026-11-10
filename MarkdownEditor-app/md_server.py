@@ -67,7 +67,7 @@ except Exception as _e:
 PORT = int(os.environ.get("MD_PORT") or 18766)  # MD_PORT：多实例/测试隔离用，默认不变
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 151  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代（150：块级字体对齐的产物侧 CSS 两条通道；151：元数据档案锁位在已存在路径补回）
+MD_SERVER_VERSION = 152  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代（152：@@ blank{break} 的分页 CSS、页数测量镜像与搬页模拟；151：元数据档案锁位在已存在路径补回）
 
 _APP_VERSION = ""       # 缓存：CHANGELOG.md 首个版本号（与 detect_version 同源）
 
@@ -3898,9 +3898,18 @@ FIGCAP_BASE_CSS = """
    面板的全局段间距。--mde-lh 是行高的单一来源，与编辑器预览同值。
    一份规则两路共用：分页导出（拼在 PAGED_BASE_CSS 之后）与 HTML 导出（__FIGCAP__）。 */
 .markdown-body{--mde-lh:1.7;}
-.markdown-body .mde-blank{margin:0 !important;padding:0;border:0;overflow:hidden;break-inside:avoid;}
-.markdown-body *:has(+ .mde-blank){margin-bottom:0 !important;}
-.markdown-body .mde-blank + *{margin-top:0 !important;}
+.markdown-body [data-blank]{margin:0 !important;padding:0;border:0;overflow:hidden;break-inside:avoid;}
+.markdown-body *:has(+ [data-blank]){margin-bottom:0 !important;}
+.markdown-body [data-blank] + *{margin-top:0 !important;}
+/* v2.43.0 @@ blank{break}：就地断页。零高度 div 上挂 break-before 即足——
+   原生打印引擎实测：断点在第 8 段后 → 3 页且无空白页；两个连写 → 多一页
+   空白（插空白页的用法）；断点正好压在自然分页点 → 合并，不空页。
+   不产生 page-region，所以页码不换体系（页码按 .page-region 逐区算）。
+   **选择器只认 data-blank、不挂 .mde-blank**：HTML 导出走 inlineStylesInto
+   会 removeAttribute("class")，挂 class 的规则在那条路径打不中（v2.42.0 的
+   [data-fa] 同一个坑）；属性选择器在打印（保留 class）与导出（只剩 data）两路都通。
+   编辑器预览里的「分页」虚线标记不在产物里：那条规则锚的是 #preview。 */
+.markdown-body [data-blank="break"]{break-before:page;}
 """
 
 PAGED_BASE_CSS = """
@@ -4420,6 +4429,9 @@ PAGED_SPLIT_TMPL = """
     var forced = function(o){
       return o.tagName === 'H1' || o.classList.contains('full-page') ||
              o.classList.contains('page-region') ||
+             /* v2.43.0 blank{break}：零高度但断页，跟 page-region 同等对待，
+                否则模拟认为这里「有间隙才跳」，后续表的可用高度整体算多 */
+             (o.getAttribute && o.getAttribute('data-blank') === 'break') ||
              (o.getAttribute && o.getAttribute('data-mde-frag'));
     };
     var noLast = function(o){
@@ -5642,6 +5654,7 @@ _PN_FILL_JS = r"""
      真值 7 页量出 5 页，逐个标题错 1~2 页）。加打印规则时同步加这里。 */
   var MEAS_CSS = ''
     + '#pnmeas h1,#pnmeas .page-region,#pnmeas .full-page,#pnmeas .full-page + *,'
+    + '#pnmeas .mde-blank[data-blank="break"],'
     + '#pnmeas .md-toc-wrap{break-before:column !important;}'
     + '#pnmeas .page-region,#pnmeas .md-toc-wrap{break-after:column !important;}'
     + '#pnmeas .page-region:last-child{break-after:auto !important;}'

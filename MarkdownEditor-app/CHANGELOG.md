@@ -13,6 +13,39 @@
 ---
 
 
+## v2.43.0（2026-11-10）
+
+**本次改动：`@@ blank` 增加 `break` 参数——就地断页且不换页码体系；预览以虚线加「分页」胶囊标出断点；紧跟 `@@ begin page`／`@@ begin full` 时静默合并，不出空白页；打印/PDF、HTML 导出、Word 三处产物一致；页数测量与 Paged.js 表格搬页模拟同步识别**
+
+**新增**
+- **`@@ blank{break}` 就地断页**：`@@ blank` 原只有 `{n}`（n 行空白），断页此前只能借 `@@ begin page{…}` 或 `@@ begin full`——前者同时换了页码体系（`noll`/`1`/`i`/`I`），后者同时撑满页心并垂直定位，两者都带来了目的之外的行为。新参数只做一件事：把后面的内容推到下一页。实现为零高度 div 挂 `break-before:page`，不产生 `.page-region`，页码因此照常连续——页码按 `.page-region[data-pr-id]` 逐区计算（`md_server.py` 注释「实施不走 counter-reset」），没有区就沿用外层，不需要额外机制。
+- **预览分页标记**：`#preview` 下用一对伪元素画一条虚线（左右各缩进 1.6em）加居中的「分页」胶囊（`--border` 描边、`--preview-bg` 垫底、`--muted` 字色），英文界面为 `page break`（`body[data-lang="en"]`）。伪元素全部绝对定位、块自身 `height:0`，**不改变版面高度**——预览靠高度估算分页点，标记一旦占位，分页点与纸张就会漂。
+- **静默合并**：`@@ blank{break}` 下一非空行是 `@@ begin page` 或 `@@ begin full`（含并写）时，本行不产出元素。理由是那两个块自己就起新页，再断一次会空出一页（实测：break 后接 page 区 = 4 页含 1 张空白页）。不报诊断——「允许 break 后面接 page」是明确要支持的写法。
+
+**修复**
+- **断页块被 `blank{n}` 的相邻 margin 清零规则误伤**：`.mde-blank` 的「相邻块 margin 归零」是为「空白恰为 n 行」服务的，断页块不产生空白，继承这条规则后两段之间没有缝隙，虚线与胶囊直接压在上一段文字上（首版实测截图）。预览侧用 `#preview *:has(+ .mde-blank[data-blank="break"]){margin-bottom:revert}` 与 `+ *{margin-top:revert}` 撤销，乘积不变、只在缓冲区留缝。产物侧不受影响（打印的断页处本就各贴页边）。
+- **`blank{break}` 在 Word 里会丢断页**：`docx_export.py` 原先对 `.mde-blank` 无任何处理。新增分支：遇到 `data-blank="break"` 输出一个空段落并置 `page_break_before`（比插 `w:br` 稳，不依赖 run 落点），该段落字号压到 1pt、段距与行距归零，否则新页顶部凭空多一行。普通 `blank{n}` 仍不产出（沿用「Word 由段间距承担留白」的既有口径）。
+
+**变更**
+- **产物 CSS 落在共用变量 `FIGCAP_BASE_CSS`**：分页导出与 HTML 导出共用这一份（`md_server.py` 注释「一份规则两路共用」），新增一条 `.mde-blank[data-blank="break"]{break-before:page}` 即两路同改，不再各写一套。
+- **页数测量补 column 镜像**：`MEAS_CSS` 的「打印里每条 break-*:page 都要镜像成 column」清单加入 `.mde-blank[data-blank="break"]`。漏这条会少算一页，目录与 `{P}` 全错（2026-11-04 同类事故的注释在案）。
+- **Paged.js 表格搬页模拟把断页块认作 forced 单元**：与 `.page-region`／`.full-page` 同级，否则模拟按「有间隙才跳」处理，后续表的可用高度整体算多、分片偏小。
+- **D404 文案**：改为「须独占一行，写 break（就地断页）或正数 n（0.1~50 行空白）」；语法速查表加 `@@ blank{break}` 一行。
+- **使用指南**：小节改名「硬控空白与断页」并补 `@@ blank{break}` 一节（不换页码体系、紧跟 page/full 合并、两块之间留空白页写两个 break、文末 break 多一页尾页、断点压在自然分页处合并不空页、与 `{n}` 不能合写）；英文概览行与速查表同步。
+
+**测试**
+- **新增 `_test_v2430_blank_break.py`（16 项全 PASS）**：break 产出标记块、高度为 0、`::after` 中文「分页」与英文 `page break`、`::before` 虚线；紧跟 page 区／full 块／隔空行三种情形均合并（不产出）；`blank{2}` 行为不变（仍有高度）；非法参数与紧贴正文按原文露出并报 D404；文末 break 仍产出；全程零 page error。
+- **`_test_docx_export` 40→47**：新增 `test_docx_blank_break`——段前分页恰好一条、断页段为空段、位置在第二段之前、行距压到 1pt、正文段落不被误标、`blank{2}` 不产生分页。
+- **`_test_paged_e2e` 新增 E65–E67**：分页产物与 HTML 导出两份 CSS 都必须含断页规则（漏一处即「预览对、PDF 错」）、`blank{n}` 的 margin 清零仍在。汇总数从写死的 64 改为动态计数。
+- **打印链实测**（Playwright + PyMuPDF）：分页产物经 Paged.js 排版后打印成 PDF，断点在第 8 段后 → 第 1 页只到第 8 段、第 2 页从第 9 段起，与 `.page-region` 结果逐项相同、无空白页；原生打印引擎侧另测六种写法，零高度 div 单挂 `break-before` 全部正确，且「断点正好压在自然分页点」时合并不空页。
+- **回归**：`_test_parser_sync` 重抽后 2138 行逐字节全等、`md-parser.test.cjs` 113/113、`_test_lint_diag` 27/27、`_test_docx_export` 47/47（Python 3.11，docxdeps 的 PIL 是 cp311 编译，3.14 加载不了）。
+- **既有欠账（与本版无关）**：`_test_paged_e2e` 的 E7／E24／E36／E43／E44 五条长期 FAIL，已在 v2.42.1 已发布版同一处源码上复核——断言里的字符串在 PUB 基线同样不存在，属测试期望过期，不计入本版。
+
+**说明**
+- 版本走 y 位到 2.43.0：v2.42.1 已双端发布，本轮为新增语法参数与四处渲染落地，按「新增功能」收编 y 位。`MD_SERVER_VERSION` 独立演进（151→152）。
+
+---
+
 ## v2.42.1（2026-11-10）
 
 **本次改动：元数据档案锁位在「档案已存在」路径补回——`ensure`／`update`／`sync` 三处遇到已有档案时校正 ReadOnly+Hidden，只改属性、不读不写内容；测试夹具改为先解位再删，消除只读残骸造成的假失败；安装包构建保留档案属性位**

@@ -403,6 +403,29 @@
   .markdown-body .mde-blank{margin:0 !important;padding:0;border:0;overflow:hidden;break-inside:avoid;}
   .markdown-body *:has(+ .mde-blank){margin-bottom:0 !important;}
   .markdown-body .mde-blank + *{margin-top:0 !important;}
+  /* v2.43.0 @@ blank{break}：预览里的分页标记。
+     零高度 + 绝对定位的伪元素，**不改变版面高度**——预览要按纸面口径
+     估算分页点，标记一旦占位，分页点就跟着漂。
+     只认 #preview：打印产物与 HTML 导出件没有这个 id，标记不会跟着出去
+     （产物侧另有一条同名规则，只负责 break-before:page）。 */
+  #preview .mde-blank[data-blank="break"]{position:relative;overflow:visible;height:0;}
+  /* 撤销 blank{n} 的「相邻 margin 清零」：那条规则是为「空白恰为 n 行」
+     服务的，断页块不产生空白，两侧段距必须留着——标记要那条缝落笔，
+     否则虚线和胶囊直接压在上一段文字上（实测截图）。 */
+  #preview *:has(+ .mde-blank[data-blank="break"]){margin-bottom:revert !important;}
+  #preview .mde-blank[data-blank="break"] + *{margin-top:revert !important;}
+  #preview .mde-blank[data-blank="break"]::before{
+    content:"";position:absolute;left:1.6em;right:1.6em;top:-.42em;
+    border-top:1px dashed var(--border);
+  }
+  #preview .mde-blank[data-blank="break"]::after{
+    content:"分页";position:absolute;left:50%;top:-.42em;
+    transform:translate(-50%,-50%);padding:0 .6em;
+    background:var(--preview-bg);color:var(--muted);
+    border:1px solid var(--border);border-radius:999px;
+    font-size:.72em;line-height:1.7;letter-spacing:.14em;white-space:nowrap;
+  }
+  body[data-lang="en"] #preview .mde-blank[data-blank="break"]::after{content:"page break";letter-spacing:.06em;}
   /* v2.23.0 元数据区：front matter（通道 A）与 @@ meta（通道 B）共用同一视觉，
      深浅主题靠 --text/--border/--accent 自动跟随，不新增配色常量。
      **只在预览区出现**：三个导出出口按 data-mde-zone 整块剔除。
@@ -3283,8 +3306,30 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
           （.mde-blank 规则），实际空白恰为 n 行，也压过排版面板的全局
           段间距。高度写内联 style（克隆到分页导出/HTML 导出时随元素带走），
           calc 里乘 --mde-lh 保证行高口径与正文一致。 */
-    var _bm=/^[ ]{0,3}@@\s*blank[ \t]*\{([\d.]+)\}[ \t]*$/.exec(line);
+    /* v2.43.0 @@ blank{break}：就地断页，不改页码体系。
+       与 @@ begin page 的分工：page 区是「起新页 + 分区 + 换页码体系」
+       （noll/1/i/I），断页只是它的副作用；这里只做断页一件事——不产生
+       page-region，页码自然连续（页码按 .page-region[data-pr-id] 逐区算，
+       没有区就沿用外层，不靠 counter-reset）。
+       实现在零高度 div 上挂 break-before:page（原生打印引擎实测有效：
+       断点在第 8 段后 → 3 页、无空白页；两个连写 → 多一页空白，符合
+       「插空白页」的用法）。
+       **静默合并**：后面紧跟 page/full 的 begin 时本行不产出——那个块自己
+       就起新页，再断一次会空出一页（实测 break 后接 page 区 = 4 页含 1
+       空白页）。用户明确要「允许 break 后面接 page」，所以按合并处理，
+       不报诊断。 */
+    var _bm=/^[ ]{0,3}@@\s*blank[ \t]*\{(break|[\d.]+)\}[ \t]*$/.exec(line);
     if(_bm){
+      if(_bm[1]==='break'){
+        var _bkNx=i+1;
+        while(_bkNx<lines.length&&!/[^ \t]/.test(lines[_bkNx]))_bkNx++;
+        var _bkMerge=_bkNx<lines.length&&
+          /^[ ]{0,3}@@\s*begin\s+(page|full)\b/.test(lines[_bkNx]);
+        if(!_bkMerge){
+          html+='<div class="mde-blank" data-blank="break"></div>';
+        }
+        i++;curInd=0;continue;
+      }
       var _bn=parseFloat(_bm[1]);
       if(!isNaN(_bn)&&_bn>0){
         _bn=Math.min(_bn,50);
@@ -3987,7 +4032,7 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
         if(_dgT==='end')_dgE(i-1,'D401','孤 @@ end：前面没有打开的对应 begin 块（检查家族名与配对）');
         else if(_dgT==='begin')_dgE(i-1,'D402','@@ begin 未生效：家族名／参数／嵌套位置有误（fill 分栏／full 独占页／page 页区／color 着色）');
         else if(_dgT==='caption')_dgE(i-1,'D403','@@ caption 未生效：其后必须紧跟表格（下一行表体、再下一行分隔行）');
-        else if(_dgT==='blank')_dgE(i-1,'D404','@@ blank 未生效：须独占一行，n 为正数（0.1~50）');
+        else if(_dgT==='blank')_dgE(i-1,'D404','@@ blank 未生效：须独占一行，写 break（就地断页）或正数 n（0.1~50 行空白）');
         else if(_dgT==='meta')_dgE(i-1,'D406','@@ meta 未生效：须独占一行、不带任何参数');
         else _dgE(i-1,'D405','以 @@ 开头但不是有效方言指令，按普通文本渲染','warn');
       }
@@ -12981,7 +13026,7 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
        兜底，而兜底列表也不含它们——写这两条指令时看到的是一组不相干提示。 */
     [/^[ ]{0,3}@@\s*table/i,[['@@ table{50l:r(50|30|20)}','表格宽与列宽：50l/r/c=表宽50%左/右/居中；r(…)各列百分比，s(1x30,5x10)按列号指定；只作用于紧随其后的那一个表格（table → caption → 表格）']]],
     [/^[ ]{0,3}@@\s*meta/i,[['@@ meta','元数据锚点：须独占一行、不带任何参数；值在元数据面板填写，不进正文（只在预览显示，不打印、不进 Word/HTML 导出）']]],
-    [/^[ ]{0,3}@@\s*blank/i,[['@@ blank{2}','硬控段间空白：n=正文行数，取 0.1~50，单独占一行']]],
+    [/^[ ]{0,3}@@\s*blank/i,[['@@ blank{2}','硬控段间空白：n=正文行数，取 0.1~50，单独占一行'],['@@ blank{break}','就地断页：不换页码体系，单独占一行']]],
     [/@@\s*color/,[['@@ color r{这段是红的}','行内着色：色值 = 11 个字母简写（r红 g绿 b蓝 y黄 o橙 p紫 c青 m品红 k黑 w白 a灰）或 3/6/8 位十六进制（不带 #）'],['花括号按层配对','内容可与加粗、~~删除线~~、x^{2} 上标混排，如 @@ color r{价 x^{2}}']]],
     [/^[ ]{0,3}@@\s*MDE/i,[['@@ MDE_{k == v}','执行点数据（low runner）'],['@@ MDE__{…}','隐性公共池（不渲染）'],['@@ MDE import 名 [is 别名] [{global p}]','导入 run，正文原位替换执行结果'],['@@ MDE from 名 import 函数 [is 别名]','从 run 选择性导入']]],
     [/^[ ]{0,3}@@/,[['@@ begin …','块：fill 分栏／full 独占页／page 页区／font 字体字号／color 着色'],['@@ caption{…}','表格题注'],['@@ table{50l:r(…)}','表格宽与列宽方案'],['@@ blank{n}','段间空白'],['@@ meta','元数据锚点'],['@@ MDE_{k == v}','执行点数据（low runner）'],['@@ MDE__{…}','隐性公共池（不渲染）']]],
