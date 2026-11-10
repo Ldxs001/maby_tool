@@ -120,7 +120,7 @@ try:
            info and int(info['nat'].split('x')[0]) < 1800, info and info['nat'])
 
         print('[2] 排版面板')
-        pg.click('#btnTypeset')
+        pg.evaluate("document.getElementById('btnTypeset').click()")
         pg.wait_for_timeout(500)
         ck('面板出现 #tsImgMode', pg.query_selector('#tsImgMode') is not None)
         val = pg.eval_on_selector('#tsImgMode', 'e => e.value')

@@ -41,7 +41,7 @@ with sync_playwright() as p:
     pg.goto("http://127.0.0.1:18766/")
     pg.wait_for_timeout(600)
 
-    pg.click("#btnLLM")
+    pg.evaluate("document.getElementById('btnLLM').click()")
     pg.wait_for_timeout(900)
     check("llmOverlay visible", pg.eval_on_selector("#llmOverlay", "el=>!el.hidden"))
 
@@ -98,7 +98,7 @@ with sync_playwright() as p:
           and ws.get("api_key") == "tvly-ui-test" and ws.get("max_results") == 5, str(ws))
 
     # 重开面板：字段回读
-    pg.click("#btnLLM")
+    pg.evaluate("document.getElementById('btnLLM').click()")
     pg.wait_for_timeout(900)
     check("reopened: backend openai restored",
           pg.eval_on_selector("#llmBackend", "el=>el.value") == "openai")

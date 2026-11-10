@@ -8,7 +8,7 @@
 @@ begin page{1}
 **本工具由 AI 辅助生成**：零依赖单文件 Markdown 编辑器，左侧写作、右侧实时渲染，全程本地运行。
 
-> 本指南对应 **v2.40.1**。语法有增补时，先看文末「语法速查」；每条写法后面的章节名指向详细说明。
+> 本指南对应 **v2.41.0**。语法有增补时，先看文末「语法速查」；每条写法后面的章节名指向详细说明。
 
 ## English at a glance
 
@@ -16,21 +16,33 @@ The interface is bilingual. The small **EN / 中** button in the status bar swit
 
 | Task | How |
 | --- | --- |
-| Open | Double-click a `.md` file, or use **Open**. File association is created by the installer. |
+| Open | Double-click a `.md` file, or use **Open**. Its caret ▾ holds recent files and switching between open documents. File association is created by the installer. |
 | Import | The small caret ▾ right of **Open** → *Import…* converts external Markdown (web pages, AI answers, other editors) into this dialect: list markers, `~~~` fences, inline HTML, footnotes and reference links are rewritten, and nesting becomes `<<<` with one more chevron per level. The source file is never modified. |
-| Save / Save as | **Save** writes back to the original file; **As…** picks a folder and a format (`.md` with a sibling `.assets` folder, or a single-file `.smd`); the caret ▾ beside it holds **Save as template**, which writes a master into the fixed template library (`.smdm`) without asking for a folder. |
-| Split / follow | **Split** cycles editor-only, split, preview-only. **Follow** keeps the preview scrolled to the cursor. |
+| Save / Save as | **Save** writes back to the original file; **Save ▾ → Save as…** picks a folder and a format (`.md` with a sibling `.assets` folder, or a single-file `.smd`); the same menu holds **Save as template**, which writes a master into the fixed template library (`.smdm`) without asking for a folder. |
+| Split / follow | **Split** cycles editor-only, split, preview-only; its caret ▾ switches the light/dark theme. **Follow** is now a checkbox at the left of the preview bar (beside the margin-guide checkbox): checked keeps the preview scrolled to the cursor, unchecked lets the two panes scroll independently. The choice is remembered. |
 | Print / PDF | **Print** renders the true paper pages with the print engine itself (margins, page numbers, contents all final) into the preview pane; the bar above it opens the built-in print panel (printer, copies, range, duplex, paper, background) — no headers/footers exist at all. **Export ▾ → PDF** saves the same pages as a PDF file. |
 | Export | **Export ▾** — main button writes `.html` (styled single file) in one click; the dropdown holds HTML / PDF / Word. PDF shares the print pipeline, so its pagination is identical to printing; `.docx` is an editable Word file with styles and real formulas. |
-| Typesetting | **TS** opens fonts and sizes, table style, paragraph indent, paragraph gap, hanging list markers, page setup and autosave. |
+| Typesetting | **Config ▾ → Typesetting** opens fonts and sizes, table style, paragraph indent, paragraph gap, hanging list markers, page setup and autosave. The **Config** button itself opens **About & shortcuts** (three logos, version, editable key map). |
 | Image output | **TS → Image output**: *Original* (default, untouched), *300 dpi* or *150 dpi*. Export copies are downscaled to each image's real printed width (`width_mm ÷ 25.4 × dpi`), never upscaled, and only when it actually saves bytes. Print/PDF, `.html` and `.docx` all follow; the files on disk are never modified and the preview always uses thumbnails. |
+| Formatting | Six format groups each have a caret ▾: H1 (H2–H6 / body), B (italic, strikethrough, underline, inline code, super/subscript, ruled blanks), Quote (nest / remove), List (ordered / task), Table (width and caption commands). Every main button keeps its original action. |
+| Equations | The **∑** button opens a visual canvas: choose a template (four-corner scripts, fraction, brackets, root, accents), type into its slots and nest structures freely; inserting writes ordinary `$…$` LaTeX, validated before it can reach the document. |
+| Links & files | **Link** opens a dialog with separate text and address fields. **Link ▾** holds *Insert image…* (a network URL or a local file), *Insert local file…* and *Remove link*. Local files are copied into the document's asset folder and appear in the preview with an **Open** button — exactly the same result as pasting the file with Ctrl+V. |
+| Keys | **Config → About & shortcuts** lists every shortcut and lets you rebind it (Ctrl+letter, Ctrl+Shift/Alt+letter, F3); conflicts are refused. Ctrl+B / Ctrl+I are new; Ctrl+Z stays the browser's native undo. |
 | Language | Status bar **EN / 中**, remembered on this machine. |
 | Offline | KaTeX, Paged.js and the four diagram engines (Mermaid, Graphviz, WaveDrom, Vega-Lite) are bundled; only remote images and links need the network. |
 | Extensions | `@@ begin fill {50\|50}` … `@@ end fill` (columns), `@@ blank{n}` (exact vertical space), `@@ begin full` (own page on print), `@@ begin page{noll\|1\|i\|I}` (page-number regions: no numbers / arabic / roman, `{p}` page, `{P}` total, `{N}` pages in this region; `@@ begin font{"Name" 12pt}` … `@@ end font` (block font and size override; size in pt, 6–72), `page`+`full`+`font`+`color` can be combined in one block, write `fill` nested), `@@ MDE_…` (Python data points). The cheat sheet at the end carries an English note on every row. |
 
+## 工具栏速览（v2.41.0）
+
+左侧是格式区，六组按钮各带一枚小三角 ▾：**H1**（H2~H6、正文）、**B**（斜体 / 删除线 / 下划线 / 行内代码 / 上下标 / 填空线 / 填空格）、**引用**（嵌套 / 取消引用）、**列表**（有序 / 任务）、**链接**（主按钮开窗填链接文字与地址；▾ 里是插入图片… / 插入本地文件… / 取消链接）、**表格**（主按钮开可视化填表窗口；▾ 里是列宽与题注指令）。格式区末尾另有一枚独立的 **∑**，开可视化公式面板。
+
+右侧六槽：**分屏**▾（主按钮切仅编辑 / 分屏 / 仅预览，▾ 里切深浅主题）、**打开**▾（导入外部 Markdown / 最近文件与切换）、**打印**▾（镜像打印）、**导出**▾（主按钮出 HTML，▾ 里 PDF / Word）、**配置**（主按钮＝关于与快捷键；▾ 里排版 / run / AI）、**保存**▾（另存为… / 存为母版）。「新建」右侧的小三角仍管母版库。
+
+「跟随」不再是工具栏按钮：它在**预览栏横栏最左边**，与「参考线」并排，同为勾选框。
+
 ## 基础语法
 
-支持 *斜体*、**加粗**、~~删除线~~、`行内代码`，以及 [链接](https://example.com)。
+支持 *斜体*、**加粗**、~~删除线~~、`行内代码`、++下划线++，以及 [链接](https://example.com)。
 
 > 引用块：把「>」放在行首。引用内部同样支持**加粗**等行内语法。
 
@@ -45,6 +57,22 @@ The interface is bilingual. The small **EN / 中** button in the status bar swit
 - 要显示字面的 `^{1}`，写 `\^{1}`（反斜杠转义）
 - `行内代码`与代码块内**不转**角标，保持原样
 - 与数学公式的分工：包进美元符的整段交给 KaTeX（数学字体、数学间距）；角标只是正文里的 HTML 上下标，跟随正文字体与字号
+
+### 下划线与填空线 `++`（v2.41.0）
+
+普通写法 `++文字++` 给一段文字加下划线，可与**加粗**、~~删除线~~、`x^{2}` 混排；B▾ 菜单里也有「下划线 ++」「填空线」「填空格」三项。
+
+填空线用重复写法 `++{单元 x 次数}++`，整段带下划线：
+
+| 写法 | 结果 | 用途 |
+| --- | --- | --- |
+| `++{0 x 9}++` | 九个不换行空格连成一条空线 | 手写填空、签名栏 |
+| `++{□ x 5}++` | 五个方框连成一排 | 逐格填写 |
+
+- 单元只认 `0`（空字符，占一个正文字宽）与 `□`（方框）两种；次数 1–200，分隔符半角 `x`、全角 `×` 都认
+- B▾ 里点「填空线」插的是 `++{0 x 9}++`，插入后自动选中次数 `9`，直接打字改数即可
+- 单元、次数或整体写法不合法时，整段按原文显示（便于发现笔误）；不支持双下划线
+- `行内代码`与代码块内不解析，保持字面
 
 ### 文字颜色 `@@ color`
 
@@ -259,6 +287,8 @@ pip install foo
 
 块级公式：
 
+$${}^{1}_{2}C^{4}_{3}$$
+
 $$\int_a^b f(x)\,dx = F(b)-F(a)$$
 
 $$\sum_{k=1}^{n} k = \frac{n(n+1)}{2}$$
@@ -282,6 +312,18 @@ $$
 $$
 
 公式标记只在正文生效：`行内代码`与代码块里的 `$…$` 保持字面，不会变成公式（想展示语法原文就写进反引号里）。正文里要显示字面的美元符，写 `\$`。
+
+### 可视化公式面板（格式区 `∑`，v2.41.0）
+
+不写 LaTeX 也能排公式：点格式区末尾的 **∑** 开一块画布，选模板后往格子里打字，点「插入到光标处」时由编辑器生成标准 `$…$` 写进正文。面板里看不到任何 LaTeX 字符，产出的仍是普通公式，之后照旧可以手工编辑源码。
+
+- **五类范式**：四角标（中心格 + 左右四角；左上 / 左下画在中心**左**侧）、分数（上格 / 横线 / 下格；关掉横线变二项式）、容器（各类括号与矩阵、行列式、分段）、根号（含 n 次根）、帽线（上划线、箭头、尖帽、波浪线等）
+- **槽位可嵌套**：任意格子里都能再放任意范式——分数的分母里放四角标也行，最多 20 层
+- **模板条**带常用变体：二项式、∑ / ∏ / ∫ / ∮ / lim 预填、矩阵与分段、n 次根、十种帽线；**符号板**五组（希腊字母 / 运算符 / 关系符 / 箭头 / 大型符号），点一下进当前格子
+- **Tab / Shift+Tab** 按顺序跳槽，空槽里按 **Backspace** 删掉整个结构；粘贴只收纯文本
+- 中文自动包 `\text{…}`；符号板里的 ∑、≤、→ 等会还原成对应命令，不会变成文本体小符号；`\ { } $ % # & _ ^ ~` 这些特殊字符自动转义
+- 插入前先按 KaTeX 实渲染一遍，**写错就拒绝插入并指出原因**，正文不会被半截公式污染；只有角标却没写中心内容时同样拒绝
+- 导出到 Word 时，四角标的前置角标按 Word 正规的 `m:sPre` 结构写出，不是靠空格拼出来的假对齐
 
 
 ## 图表作图（四种，全部本地渲染、离线可用）
@@ -430,6 +472,22 @@ digraph G {
 
 > 提示：`Ctrl+V` 前请先保存文档（无文件路径时无法确定资源目录）。`.md` 与 `.assets` 目录是一对，一起拷贝给别人即可完整打开。
 
+### 从菜单插入图片、链接与本地文件（v2.41.0）
+
+工具栏「链接」按钮与它右侧的 ▾ 是几条不同的路：
+
+| 入口 | 做什么 | 产物 |
+| --- | --- | --- |
+| **链接**（主按钮） | 开一个窗口，分「链接文字」「链接地址」两栏填写（文字预填编辑区选区），回车即插入 | `[文字](地址)` |
+| **链接 ▾ → 插入图片…** | 开一个窗口，可填网络图片地址（只收 http / https），也可点「选择本地图片…」选一张本机图片 | `![说明](网址)` 或 `![](相对路径)` |
+| **链接 ▾ → 插入本地文件…** | 选任意文件（文档、表格、压缩包等），复制进本文档资产目录 | 一行数据点，渲染区带「打开」按钮 |
+| **链接 ▾ → 取消链接** | 把 `[文字](地址)` 还原成文字 | 纯文字 |
+
+- 两条本地路径与**复制文件后 `Ctrl+V` 粘贴**共用同一套落盘流程：原名清洗、不覆盖同名不同内容、20 MB 上限、`.smd` 随包携带、渲染区「打开」按钮调系统关联程序——只是「把文件放进来的方式」不同，后续完全一致（详见「low runner · 外部文件引用」）
+- 网络图片与手写 `![说明](https://…)` 等价，需要联网才显示
+- 本地图片选择器一次只收一张 png / jpeg / webp / gif；其余文件走「插入本地文件…」
+- 插入落在当前光标处；长文档里从弹窗或系统选择框回来，视图不会跳回文首
+
 ### 图片宽度参数 {N} 与对齐后缀 c / l / r
 
 在图片引用后加 `{数字}`，这张图的宽度就 = **版面宽度的 N%**，高度等比缩放。基准是**版面**而不是原图：两张原图大小不同的图，只要参数相同，显示宽度就相同。下面是同一张图两次——第一次不带参数（大图按版面 100% 显示），第二次 `{40}`（版面的 40%）：
@@ -492,7 +550,7 @@ digraph G {
 - 预览 / 导出 HTML / 打印 / 导出 docx 同口径渲染；docx 里题注用 Word 的 Caption 样式（已钉黑不随主题变色），题注段落缩窄到图宽、带间距与对齐，`w/n` 按 Word 自然行为处理
 - **四种图表围栏同样支持图题**：` ```mermaid "图 1　流程"{40l:c t s0.5} ` —— `"…"` 写题注、`{图参:题参}` 与图片同一套 token（冒号前宽/对齐、冒号后 l/c/r、t/b、w/n、s<n>）；无 `"题注"` 的围栏（` ```mermaid {30r} `）行为不变。docx 里图表先栅格化成图片再进 Word，题注同走 Caption 样式
 
-## low runner（工具栏「run」按钮）：文档内数据自动化计算
+## low runner（配置▾ → run 库）：文档内数据自动化计算
 
 在写作中声明**数据点**，再调用 Python run（自己写或 AI 生成）对全文数据做计算、合并、筛选、统计、画图——文档数据的自动化加工，不做系统级功能。
 
@@ -516,7 +574,7 @@ digraph G {
 
 ### 外部文件引用（v2.8：把 xlsx / pdf / csv 交给 run）
 
-从资源管理器复制一个文件，在编辑区 `Ctrl+V`：
+从资源管理器复制一个文件，在编辑区 `Ctrl+V`；也可以点「链接 ▾ → 插入本地文件…」直接选文件。两条路的后续流程完全一致：
 
 1. 字节复制进本文档资产目录，**保留原文件名**（`.md` → `<文档名>.assets/`，`.smd` → 包内 `assets/`）；
 2. 自动插入一行数据点，值是相对路径：`@@ MDE_甲{销售数据 == <文档名>.assets/销售数据.csv}`；
@@ -717,7 +775,7 @@ run 库里的 `plotimg` 用工具自带的 Pillow 直接把编辑区的数据画
 - 数值照人话写：`128,000`、`12万`（=120000）、`1.5万元`、`8%`（纵轴自动带百分号）；读不懂的值跳过，不影响别的柱子
 - 换画法：照 `plotimg.py` 里的 `bar` 抄一份改，`_save()` 负责落盘并给出 `![](x.png)`
 
-### 管理界面（工具栏「run」）
+### 管理界面（配置▾ → run 库）
 
 - 顶部**运行模式**（三选一互斥，即改即生效）：**手动**（**默认**，不自动跑，执行点显示 ▶ 待运行，点单点 ▶ 或左下角「全部运行」才跑）/ **立即**（渲染后 0.4 秒自动跑）/ **等待 N 秒**（停止输入 N 秒后跑，N 自己填，默认 5）
   - 选一次就记住（本地 + 云端双写），换文档、重启程序都沿用；想改回自动跑在这里点一下即可
@@ -733,7 +791,7 @@ run 库里的 `plotimg` 用工具自带的 Pillow 直接把编辑区的数据画
 - 导出（HTML/docx/打印）剥离全部按钮与错误块；未运行/失败的执行点导出原文（fail-closed）
 
 
-## 排版（工具栏「排版」按钮）
+## 排版（配置▾ → 排版设置）
 
 - **页边距与参考线只在预览栏横栏**（v2.40.0）：预览栏顶部那条横栏依次是「参考线」开关、四个边距框（上 / 右 / 下 / 左，mm，`step 0.5`，0~100）、预设下拉、「分页」按钮。**改一处即存**——下拉与勾选当场落盘，手输防抖 400ms（每敲一个数字就重建纸面样式会抖），刷新后仍在。它只改预览容器的宽与内边距，内容 DOM 不重建，所以边距调多大都不会打断正在输入的内容
   - **预设**：常规 25/18/25/18、书册 25/18/25/30、紧凑 20/15/20/15、宽松 30/25/30/25、满版 0/0/0/0（上/右/下/左）。四框值与某档全等时下拉自动显示该档，改出别的值即显示「自定义」
@@ -1275,12 +1333,12 @@ fail-closed 两种：参数解析不出（D215）、`@@ end font` 没写（D216�
 
 - 编辑停顿即**存入浏览器缓存**，防丢稿
 - 「排版」面板可设置**自动落盘间隔**（0~60 分钟），到点自动写回原文件
-- 「保存」按钮立即写回原 .md 文件（**尚未另存为的新文档，「保存」不可用，请先「另存为」**；只有「另存为」会弹出选择窗口）
-- **「另存为」里有格式选择器**，两种容器任选：
+- 「保存」按钮立即写回原 .md 文件（**尚未另存为的新文档，「保存」不可用，请先「保存 ▾ → 另存为…」**；只有另存为会弹出选择窗口）
+- **「保存 ▾ → 另存为…」里有格式选择器**，两种容器任选：
   - **Markdown 文档（`.md`）**：正文是纯文本，图片存进同名 `<文档名>.assets/` 目录——`.md` 与 `.assets/` 是一对，一起拷走即可完整迁移，任何 Markdown 工具都能打开
   - **自包含文档（`.smd`）**：单个文件装下正文、全部图片与批注（内部是 ZIP 容器：`doc.md` + `assets/` + `meta.json`），一个文件拷走即完整；代价是只有本工具能打开，浏览器兜底不支持
-- **「另存为 ▾」→「存为母版」**：把当前文档存进母版库（`.smdm`）。母版库位置固定，所以这条路不问目录、只取名；撞名才弹框（见本章「母版」）
-- 打开 `.smd` 后点「保存」写回包内（不是导出），「另存为」可换格式另存一份（`.smd` → `.md` 会把图片解到同名 `.assets/`，反之收进包内）
+- **「保存 ▾」→「存为母版（含排版）」**：把当前文档存进母版库（`.smdm`）。母版库位置固定，所以这条路不问目录、只取名；撞名才弹框（见本章「母版」）
+- 打开 `.smd` 后点「保存」写回包内（不是导出），「保存 ▾ → 另存为…」可换格式另存一份（`.smd` → `.md` 会把图片解到同名 `.assets/`，反之收进包内）
 - 打开文档时若含 base64 内嵌图或本机绝对路径图，保存/另存**会自动把图片收进同名 `.assets/` 并把引用改写为相对路径**
 - **.md** 另存即纯文本出一份；**导出 ▾**（一个按钮 + 格式下拉）：主按钮直接导出 **HTML**（最常用，一步到位）；下拉里是 **HTML / PDF · 固定分页 / PDF（镜像） / Word · 可编辑** 四项。**PDF 与打印同一链路**（两遍出片后由打印引擎落盘），分页与打印完全一致，不做「另存 HTML 再让浏览器打」的中间态；**PDF（镜像）**就是镜像版，文件名自动加 `-镜像` 后缀（英文界面 `-mirrored`），免得与普通版同名互盖
 - **打印**：点「打印」→ 两遍法出片（第一遍量真值、第二遍带真值重出）→ 最终纸面用打印引擎落成预览，直接铺在预览栏——看到的边距、分页、页码就是最终形态；预览栏顶部横栏的「打印」→ **自建打印面板**（打印机 / 份数 / 页码范围 / 单双面 / 纸张 / 背景图形）。页眉页脚从根上不存在——不依赖任何浏览器的勾选项
@@ -1328,7 +1386,7 @@ fail-closed 两种：参数解析不出（D215）、`@@ end font` 没写（D216�
 
 - **新建**：工具栏「新建」右侧多了一个小三角 `▾`（v2.28.0）。点它列出母版库里全部母版（名称 + 修改时间），点一条即按它新建；菜单末尾是「管理母版…」。左半边的「新建」仍是空白新文档，Ctrl+N 也还是空白新文档
 - **从母版新建后**：状态栏写「母版：X（未保存）」，「保存」按钮是灰的——**必须先另存为**。存成 `.md` 时母版里的图会解到同名 `.assets/`，存成 `.smd` 时图跟着进包，两条路都不丢图
-- **存成母版**：工具栏「**另存为 ▾**」里唯一一项「存为母版」。母版库位置固定，所以这条路**不问目录、只取名**（名字默认取当前文件名，未保存的新文档用「未命名」），点了就写进库并按 `.smdm` 打包，图片随正文进包，存完立刻出现在「新建 ▾」里
+- **存成母版**：工具栏「**保存 ▾**」里的一项「存为母版（含排版）」（另一项是「另存为…」）。母版库位置固定，所以这条路**不问目录、只取名**（名字默认取当前文件名，未保存的新文档用「未命名」），点了就写进库并按 `.smdm` 打包，图片随正文进包，存完立刻出现在「新建 ▾」里
   - 库里没有同名：直接入库，toast 说一句「已存为母版 X」，不弹任何框
   - 库里已有同名：才弹框。名字预填原名并写明「直接确认将覆盖它」；改成别的名字即存成一份新母版。**不会自动加序号**——那会攒出一堆看不出区别的副本
   - 当前文档本身就是母版时，这一项变成「**保存母版**」，等同 Ctrl+S 写回它自己，不会派生副本
@@ -1360,11 +1418,11 @@ fail-closed 两种：参数解析不出（D215）、`@@ end font` 没写（D216�
 
 联动以**标题为硬锚**：编辑区滚到某个标题附近时，预览精确锁定到该标题；两个标题之间按滚动百分比平滑过渡。因此哪怕文档里夹着一张几十行的大表格，预览也能连续扫过、不跳段、不丢行。
 
-跟随行为可用工具栏「**跟随**」开关随时切换：开了预览跟随编辑区滚动，关了则两侧各滚各的。开关状态会记住，重启后保持。
+跟随行为由**预览栏横栏最左边的「跟随」勾选框**控制（在「参考线」左边，与它同款）：勾选＝预览跟随编辑区滚动，去勾＝两侧各滚各的。勾选状态会记住，重启后保持。v2.41.0 之前它是工具栏上一枚独立按钮，现已移进横栏。
 
 ## 查找与替换
 
-- **Ctrl+F** 唤起查找、**Ctrl+H** 唤起并展开替换行；面板悬在编辑区右上角，非模态，不打断写作
+- **Ctrl+F** 唤起查找、**Ctrl+H** 唤起并展开替换行；面板悬在编辑区右上角，非模态，不打断写作。七个快捷键（新建 / 保存 / 查找 / 替换 / 查找下一个 / 加粗 / 斜体）在「**配置 → 关于与快捷键**」面板里可以改：支持 Ctrl+字母、Ctrl+Shift/Alt+字母与 F3，撞键红字拒绝；只保存改过的项，跟随设置同步。Ctrl+Z 是浏览器原生撤销，不开放改键
 - **Enter / Shift+Enter**（或 ↑/↓ 按钮、F3/Shift+F3）跳下/上一个命中，到文末自动从头循环并提示；**Esc** 或 × 关闭，焦点回到编辑区
 - 编辑区里**选中一段文字再按 Ctrl+F**，选区文字自动带入查找词
 - 三个开关：**`Aa`** 区分大小写、**`.*`** 正则、**`\b`** 全字匹配；开关状态会记住，重启后保持
@@ -1422,6 +1480,8 @@ AI 解释（批注弹窗内一键按钮）可请 AI 解读当前标注片段。�
 | `@@ MDE import 名 [is 别名]` / `@@ MDE from 文件 import 函数 [is 别名]` | low runner 执行点：按别名吃对应数据池（无 is = 公共池），调 Python run（便携解释器）替换执行点 | 「low runner」 | Python exec point |
 | `- [x]` / `- [ ]` | 任务列表（可勾选样式的待办项） | 「列表与任务」 | Task list |
 | `~~文字~~` | 删除线 | 「基础语法」 | Strikethrough |
+| `++文字++` | 下划线，可与加粗 / 删除线 / 角标混排 | 「基础语法 · 下划线与填空线」 | Underline |
+| `++{0 x 9}++` / `++{□ x 5}++` | 带下划线的填空线 / 填空格；单元只认 `0`、`□`，次数 1–200 | 「基础语法 · 下划线与填空线」 | Ruled blanks / boxes |
 | `^{内容}` / `_{内容}` | 上标 / 下标（角标）：正文直写、不用 `$`；须紧跟花括号，不跨行、不嵌套 | 「基础语法 · 上下标」 | Super / subscript |
 | `@@ color x{内容}` | 行内文字着色；x = 简写字母（`r g b y o p c m k w a`）或 3/6/8 位 HEX（不带 `#`，8 位末两位是透明度） | 「基础语法 · 文字颜色」 | Inline text colour |
 | `@@ begin color x` … `@@ end color` | 块级着色，块内可再用行内写法局部覆盖（花括号写法 `@@ begin color {x}` 等价） | 「基础语法 · 文字颜色」 | Block colour |
@@ -1441,7 +1501,7 @@ AI 解释（批注弹窗内一键按钮）可请 AI 解读当前标注片段。�
 
 ## 离线可用
 
-公式渲染（KaTeX）、分页引擎（Paged.js）与四种图表引擎（Mermaid / Graphviz / WaveDrom / Vega-Lite）均已本地部署，**断网不影响任何功能**；仅内容中的网络图片与链接需要联网。
+公式渲染（KaTeX）、分页引擎（Paged.js）与四种图表引擎（Mermaid / Graphviz / WaveDrom / Vega-Lite）均已本地部署，**断网不影响任何功能**；仅内容中的网络图片与链接需要联网。v2.41.0 的可视化公式面板、插入图片弹窗与本地文件落盘同样全在本机完成。
 
 
 ---

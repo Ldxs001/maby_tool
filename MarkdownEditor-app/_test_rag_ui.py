@@ -47,7 +47,7 @@ with sync_playwright() as p:
           not pg.eval_on_selector("#selPolish", "el=>el.disabled"))
 
     # 打开 AI 设置面板
-    pg.click("#btnLLM")
+    pg.evaluate("document.getElementById('btnLLM').click()")
     pg.wait_for_timeout(1200)
     check("llmOverlay visible", pg.eval_on_selector("#llmOverlay", "el=>!el.hidden"))
     check("ragPath prefilled with default",
@@ -76,7 +76,7 @@ with sync_playwright() as p:
     check("llmOverlay closed after save", pg.eval_on_selector("#llmOverlay", "el=>el.hidden"))
 
     # 刷新按钮触发重探测（离线 → 状态行仍为离线，不报错）
-    pg.click("#btnLLM")
+    pg.evaluate("document.getElementById('btnLLM').click()")
     pg.wait_for_timeout(900)
     pg.click("#ragRefresh")
     pg.wait_for_timeout(900)

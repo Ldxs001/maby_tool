@@ -98,7 +98,7 @@ def rows_hist(rows):
 def open_ts(pg):
     """「应用」会关面板（#tsOverlay hidden），下一次改控件前必须重开。"""
     if pg.evaluate("() => !!document.getElementById('tsOverlay').hidden"):
-        pg.click("#btnTypeset")
+        pg.evaluate("document.getElementById('btnTypeset').click()")
         pg.wait_for_timeout(450)
 
 

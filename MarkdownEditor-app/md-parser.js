@@ -746,6 +746,26 @@ function parseInline(text,noMde){
   }
   if(_cPos>0)text=_cOut+text.slice(_cPos);
   }
+  /* v2.41.0 下划线·重复形态：++{y x n}++ → y 重复 n 次并整体加下划线。
+     y 受控集只有两种：0=空字符（U+00A0，一个正文字宽的空白）、□=方框（U+25A1）。
+     n 限 1–200（防一次展开上万节点卡死预览）；单元不在集合内、次数越界、
+     正则不匹配 → 整段原文保留（fail-closed，与 @@ color 未闭合同口径）。
+     位置必须在 ^{}/_{} 上下标规则之前：整段进 toks 占位，展开结果不受
+     任何后续行内规则影响；A 形态是纯字面展开，不参与强调/链接。 */
+  text=text.replace(/\+\+\{(.)\s*[x×*]\s*(\d+)\}\+\+/g,function(m,u,n){
+    n=parseInt(n,10);
+    if((u==='0'||u==='□')&&n>=1&&n<=200){
+      var rep=(u==='0')?'\u00A0':'□',out='';
+      for(var qi=0;qi<n;qi++)out+=rep;
+      toks.push('<u class="uline">'+out+'</u>');
+    }else{
+      /* fail-closed 也要占位：原文若留在 text 里，后面 B 普通形态的
+         ++..++ 正则会把它捡走（++{a x 3}++ → <u>{a x 3}</u>），等于
+         非法写法被静默放行。占位后任何规则都碰不到它。 */
+      toks.push(m);
+    }
+    return '\x00T'+(toks.length-1)+'\x00';
+  });
   /* v2.6.10：LaTeX 风格上下标，正文直接写、不加 $：
      ^{任意内容} → <sup>、_{任意内容} → <sub>（^{[1]}、^{1}、^{世界之光} 均可）。
      放在 escapeHtml 之后：花括号里的内容此时已转义，带不进 HTML；再经 toks
@@ -817,6 +837,12 @@ function parseInline(text,noMde){
   text=text.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/__([^_]+)__/g,'<strong>$1</strong>');
   text=text.replace(/\*([^*]+)\*/g,'<em>$1</em>').replace(/_([^_]+)_/g,'<em>$1</em>');
   text=text.replace(/~~([^~]+)~~/g,'<del>$1</del>');
+  /* v2.41.0 下划线·普通形态：++文字++ → <u class="uline">。必须放在强调规则
+     之后：内容里的 **x** / ~~x~~ / *x* 先完成转换，下划线包住成品
+     （++**粗**++ 出来的是带下划线的粗体）。A 重复形态的产物已进占位符，
+     不会被这里碰到。内容不含 + 且不跨行；+++x+++ 从第 2 个 + 起匹配
+     （+<u>x</u>+），fail-open 无害，不特判。 */
+  text=text.replace(/\+\+([^+\n]+)\+\+/g,'<u class="uline">$1</u>');
   text=text.replace(/@@C([0-9]+)@@/g,function(m,i){return '<code>'+escapeHtml(codes[+i])+'</code>';});
   text=text.replace(/\x00T(\d+)\x00/g,function(m,i){return toks[+i];});
   /* 转义还原放最后：逐字符 escapeHtml（如 \< → &lt;），只作用于还原出的单个字符，
@@ -1954,9 +1980,9 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
             continue;
           }
           if(!_mgOk2){_dgE(_mgK2,'D242','并写块：@@ end 关闭了未打开的家族');_dgHit=true;}
-          else{_dgE(i,'D243','并写块未闭合：文末仍有开着的 page/full/color 层');_dgHit=true;}
+          else{_dgE(i,'D243','并写块未闭合：文末仍有开着的 page/full/font/color 层');_dgHit=true;}
         }else{
-          _dgE(i,'D241','并写 begin 不成立：家族顺序须 page→full→color、同族不重复、参数合法');_dgHit=true;
+          _dgE(i,'D241','并写 begin 不成立：家族顺序须 page→full→font→color、同族不重复、参数合法');_dgHit=true;
         }
       }
       /* 不成立（单家族 / 参数非法 / 顺序错 / end 未开家族 / 未闭合）→ 落到下面普通段落按原文露出 */

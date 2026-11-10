@@ -238,6 +238,9 @@
   .markdown-body strong{font-weight:700;}
   .markdown-body em{font-style:italic;}
   .markdown-body del{opacity:.6;}
+  /* v2.41.0 下划线 u.uline：UA 默认线偏粗且 offset 随字体漂，统一 1px/2px；
+     打印与 Word 导出抄的都是 text-decoration 计算值，这里只动视觉参数不改机制 */
+  .markdown-body u.uline{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px;}
   .markdown-body code{
     font-family:var(--mono); font-size:.88em; background:var(--code-bg);
     padding:.15em .4em; border-radius:5px;
@@ -530,6 +533,135 @@
     #openMoreMenu button,#exportMenu button,#printMenu button{display:block;width:100%;text-align:left;padding:7px 14px;border:none;
       background:none;color:inherit;font:inherit;font-size:13px;cursor:pointer;border-radius:5px;}
     #openMoreMenu button:hover,#exportMenu button:hover,#printMenu button:hover{background:var(--accent-soft);}
+    /* v2.41.0 六组格式下拉共用皮（与打开▾/导出▾同源） */
+    #fmtMenu{position:fixed;z-index:120;min-width:218px;padding:4px;border-radius:8px;
+      background:#23272f;border:1px solid rgba(128,128,128,.34);box-shadow:0 10px 28px rgba(0,0,0,.42);}
+    body.light #fmtMenu{background:#fff;}
+    #fmtMenu[hidden]{display:none !important;}
+    #fmtMenu button{display:block;width:100%;text-align:left;padding:7px 14px;border:none;
+      background:none;color:inherit;font:inherit;font-size:13px;cursor:pointer;border-radius:5px;}
+    #fmtMenu button:hover{background:var(--accent-soft);}
+    #fmtMenu button[disabled]{opacity:.42;cursor:not-allowed;}
+    #fmtMenu button[disabled]:hover{background:none;}
+    #fmtMenu .nmm-sep{height:1px;background:rgba(128,128,128,.26);margin:4px 6px;}
+    /* v2.41.1 修「下拉跑到左下角」：右侧四组下拉（分屏▾/配置▾/保存▾）共用的
+       #rmenu 此前只有 JS、没有 CSS——没有 position:fixed，JS 写的 left/top
+       对静态定位元素全部无效，菜单按文档流落在 body 末尾（左下角）。
+       补上与 fmtMenu 同源的一张皮，一行都不许少。 */
+    #rmenu{position:fixed;z-index:120;min-width:180px;padding:4px;border-radius:8px;
+      background:#23272f;border:1px solid rgba(128,128,128,.34);
+      box-shadow:0 10px 28px rgba(0,0,0,.42);}
+    body.light #rmenu{background:#fff;}
+    #rmenu[hidden]{display:none !important;}
+    #rmenu button{display:block;width:100%;text-align:left;padding:7px 14px;border:none;
+      background:none;color:inherit;font:inherit;font-size:13px;cursor:pointer;border-radius:5px;}
+    #rmenu button:hover{background:var(--accent-soft);}
+    #rmenu .nmm-sep{height:1px;background:rgba(128,128,128,.26);margin:4px 6px;}
+    /* v2.41.1 插入链接弹窗与公式面板共用弹窗骨架（ts-head/ts-body/ts-foot） */
+    /* 三个遮罩都是内联 display:flex——不补这条 [hidden] 硬规则，隐藏中的
+       遮罩仍然铺满全屏吃掉所有点击（tplOverlay 同款坑，v2.28 实测过）；
+       两个隐藏的选文件 input 同上一并钉死，防全局 input 样式把它显出来。 */
+    #eqOverlay[hidden],#linkOverlay[hidden],#imgOverlay[hidden]{display:none !important;}
+    #imFile[hidden],#atFile[hidden]{display:none !important;}
+    #eqWrap{width:min(880px,96vw);max-height:min(760px,94vh);display:flex;flex-direction:column;
+      background:var(--panel,#23272f);border:1px solid rgba(128,128,128,.34);border-radius:10px;
+      box-shadow:0 18px 48px rgba(0,0,0,.5);overflow:hidden;}
+    body.light #eqWrap{background:#fff;}
+    /* 公式面板（v2.41.1，方案 §7）：格子画布——虚线框=空槽，点进去打字；
+       面板内零 LaTeX 字符，序列化是最后一步，用户看不见。 */
+    .eq-tplbar{display:flex;align-items:center;gap:8px;padding:8px 12px;
+      border-bottom:1px solid rgba(128,128,128,.18);flex-wrap:wrap;}
+    .eq-grp{font-size:12px;color:var(--muted,#8b93a3);}
+    .eq-tpl{display:inline-flex;align-items:stretch;}
+    .eq-tbtn{background:none;border:1px solid rgba(128,128,128,.34);color:inherit;font:inherit;
+      font-size:13px;padding:4px 10px;cursor:pointer;border-radius:6px 0 0 6px;}
+    .eq-tbtn.eq-tcaret{border-radius:0 6px 6px 0;border-left:none;padding:4px 6px;font-size:9px;}
+    .eq-tbtn:hover{background:var(--accent-soft);}
+    #eqCanvas{min-height:130px;max-height:280px;overflow:auto;padding:16px 14px;
+      font-size:22px;line-height:1.5;outline:none;cursor:text;}
+    .eq-node{display:inline-flex;align-items:center;vertical-align:middle;margin:0 3px;white-space:nowrap;}
+    .eq-slot{display:inline-block;min-width:36px;min-height:30px;padding:0 6px;margin:1px;
+      border:1px dashed rgba(128,128,128,.55);border-radius:4px;text-align:center;outline:none;
+      vertical-align:middle;line-height:28px;box-sizing:border-box;}
+    .eq-slot:focus{border-color:var(--accent);border-style:solid;background:var(--accent-soft);}
+    .eq-slot:empty::before{content:attr(data-ph);opacity:.4;font-size:13px;pointer-events:none;}
+    /* 四角标（方案 §7.5 第 8 条）：左上/左下格画在中心格【左侧】，右上/右下在
+       右侧——手绘图 1 的几何，前置角标在 LaTeX 里就占左侧一列 */
+    .eq-node[data-eqtype="script"]{gap:1px;}
+    .eq-node[data-eqtype="script"] .eq-col{display:inline-flex;flex-direction:column;justify-content:center;}
+    .eq-node[data-eqtype="script"] .eq-col .eq-slot{min-width:26px;min-height:22px;font-size:14px;line-height:20px;}
+    /* 分数：上格 / 横线 / 下格；二项式：两格夹圆括号、无横线 */
+    .eq-node[data-eqtype="frac"]{flex-direction:column;align-items:stretch;}
+    .eq-node[data-eqtype="frac"] .eq-slot{border-left-style:solid;border-right-style:solid;}
+    .eq-node[data-eqtype="frac"] .eq-slot[data-role="num"]{border-bottom:2px solid rgba(128,128,128,.7);border-radius:4px 4px 0 0;}
+    .eq-node[data-eqtype="frac"] .eq-slot[data-role="den"]{border-radius:0 0 4px 4px;}
+    .eq-node[data-eqtype="frac"][data-noline]{padding:0 10px;}
+    .eq-node[data-eqtype="frac"][data-noline] .eq-slot,
+    .eq-node[data-eqtype="frac"][data-noline] .eq-slot[data-role="num"]{border:none;border-radius:4px;}
+    .eq-node[data-eqtype="frac"][data-noline]::before,
+    .eq-node[data-eqtype="frac"][data-noline]::after{font-size:46px;font-weight:200;line-height:1;opacity:.85;}
+    .eq-node[data-eqtype="frac"][data-noline]::before{content:'(';}
+    .eq-node[data-eqtype="frac"][data-noline]::after{content:')';}
+    /* 容器：左右符 + 单槽，或网格（矩阵/行列式/分段） */
+    .eq-dchar{font-size:30px;opacity:.9;padding:0 1px;}
+    .eq-grid{display:inline-flex;flex-direction:column;gap:2px;padding:2px 4px;}
+    .eq-row{display:inline-flex;gap:6px;}
+    .eq-node[data-eqtype="delim"] .eq-grid .eq-slot{min-width:34px;min-height:26px;font-size:16px;line-height:24px;}
+    /* 根号：√ 钢字形 + 顶线当覆盖线，指数格悬在钩的左外上方 */
+    .eq-node[data-eqtype="sqrt"]{align-items:flex-end;}
+    .eq-rad{font-size:30px;line-height:1;opacity:.9;}
+    .eq-node[data-eqtype="sqrt"] .eq-slot[data-role="body"]{border:none;border-radius:0;
+      border-top:2px solid rgba(128,128,128,.8);min-width:52px;}
+    .eq-idx{display:inline-flex;align-self:flex-start;margin-left:-8px;}
+    .eq-node[data-eqtype="sqrt"] .eq-slot[data-role="idx"]{min-width:20px;min-height:18px;font-size:12px;line-height:16px;}
+    /* 帽线：符号压在内容正中上方（data-pos=down 时正下方） */
+    .eq-node[data-eqtype="accent"]{position:relative;flex-direction:column;align-items:center;padding-top:16px;}
+    .eq-node[data-eqtype="accent"][data-pos="down"]{padding-top:0;padding-bottom:16px;}
+    .eq-node[data-eqtype="accent"]::before{content:attr(data-sym);position:absolute;left:50%;
+      transform:translateX(-50%);top:0;font-size:14px;line-height:1;opacity:.9;}
+    .eq-node[data-eqtype="accent"][data-pos="down"]::before{top:auto;bottom:0;}
+    .eq-node[data-eqtype="accent"] .eq-slot{min-width:44px;}
+    /* 符号板（C 类：点一下插一个字符，不是范式） */
+    .eq-symbar{display:flex;align-items:center;gap:6px;padding:6px 12px 0;flex-wrap:wrap;}
+    .eq-symtab{background:none;border:1px solid rgba(128,128,128,.34);color:inherit;font:inherit;
+      font-size:12px;padding:3px 10px;cursor:pointer;border-radius:5px;}
+    .eq-symtab.on{border-color:var(--accent);color:var(--accent);}
+    #eqSyms{display:flex;flex-wrap:wrap;gap:4px;padding:6px 12px 10px;max-height:96px;overflow:auto;}
+    #eqSyms button{min-width:30px;height:28px;background:none;border:1px solid rgba(128,128,128,.25);
+      border-radius:4px;color:inherit;font:inherit;font-size:14px;cursor:pointer;}
+    #eqSyms button:hover{background:var(--accent-soft);}
+    #eqFoot{display:flex;align-items:center;gap:8px;padding:10px 14px;border-top:1px solid rgba(128,128,128,.25);}
+    #eqMsg{font-size:12px;color:#e06c75;}
+    /* 模板参数菜单：与 fmtMenu 同源的皮 */
+    #eqMenu{position:fixed;z-index:130;min-width:230px;padding:4px;border-radius:8px;
+      background:#23272f;border:1px solid rgba(128,128,128,.34);box-shadow:0 10px 28px rgba(0,0,0,.42);}
+    body.light #eqMenu{background:#fff;}
+    #eqMenu[hidden]{display:none !important;}
+    #eqMenu button{display:block;width:100%;text-align:left;padding:7px 14px;border:none;
+      background:none;color:inherit;font:inherit;font-size:13px;cursor:pointer;border-radius:5px;}
+    #eqMenu button:hover{background:var(--accent-soft);}
+    #eqMenu .nmm-sep{height:1px;background:rgba(128,128,128,.26);margin:4px 6px;}
+    /* v2.41.0 关于与快捷键面板：骨架与母版/表格弹窗同一套（ts-head/body） */
+    #aboutOverlay[hidden]{display:none !important;}
+    .about-wrap{width:min(600px,94vw);max-height:min(680px,calc(100vh - 40px));
+      display:flex;flex-direction:column;background:var(--panel,#23272f);
+      border:1px solid rgba(128,128,128,.34);border-radius:10px;
+      box-shadow:0 18px 48px rgba(0,0,0,.5);overflow:hidden;}
+    body.light .about-wrap{background:#fff;}
+    .about-logos{display:flex;gap:28px;justify-content:center;padding:10px 0 2px;}
+    .about-logo{text-align:center;font-size:12px;opacity:.92;}
+    .about-logo img{width:64px;height:64px;border-radius:10px;display:block;margin:0 auto 6px;}
+    .about-ver{text-align:center;font-size:13px;opacity:.75;padding:2px 0 8px;}
+    .about-sep{font-size:12px;font-weight:600;color:var(--muted,#8b93a3);
+      margin:6px 0 4px;padding-top:8px;border-top:1px solid rgba(128,128,128,.18);}
+    .about-kb{width:100%;border-collapse:collapse;font-size:13px;}
+    .about-kb td{padding:6px 8px;border-bottom:1px solid rgba(128,128,128,.14);}
+    .about-kb tr.kb-cap td{color:var(--accent);font-weight:600;}
+    .about-kb .kb-key{font-family:var(--mono,monospace);font-size:12px;opacity:.9;white-space:nowrap;}
+    .about-kb .kb-capture{color:var(--accent);font-weight:600;}
+    #aboutMsg{min-height:18px;font-size:12px;padding:4px 2px 0;}
+    #aboutMsg.err{color:#e06c75;}
+    .about-foot{padding:8px 0 2px;display:flex;justify-content:flex-end;}
     #exportMenu{min-width:172px;}
     /* v2.40.0 打印▾：只有一项，宽度取 196 与 printMenuBind 里的定位常量同值
        ——菜单按 right-w 对齐三角右缘，两处数字不一致就会偏出半个菜单位。 */
@@ -539,19 +671,21 @@
        只是宽一些：条目里要放名称 + 修改时间两段。 */
     /* 左半边「新建」的右内边距留下了十几像素空隙，三角看着像漂在外面；
        负外边距把它拉回按钮边上（只动这一个按钮，不改共用的 .tb-btn） */
-    #btnNewMore,#btnSaveAsMore{margin-left:-5px;}
+    #btnNewMore{margin-left:-5px;}
+    /* v2.41.0 兼容垫片按钮必须真隐藏（防未来 .tb-btn 加 display 规则后漏出） */
+    #toolbar .tb-btn[hidden]{display:none !important;}
     /* 「新建▾」与「另存为▾」共用一套下拉外观：两者都是 split 按钮的右半，
        宽度与左右留白必须一致，否则两个三角看起来一大一小 */
-    #newMoreMenu,#saveAsMenu{position:fixed;z-index:120;min-width:240px;max-height:70vh;overflow:auto;
+    #newMoreMenu{position:fixed;z-index:120;min-width:240px;max-height:70vh;overflow:auto;
       padding:4px;border-radius:8px;background:#23272f;
       border:1px solid rgba(128,128,128,.34);box-shadow:0 10px 28px rgba(0,0,0,.42);}
-    body.light #newMoreMenu,body.light #saveAsMenu{background:#fff;}
-    #newMoreMenu[hidden],#saveAsMenu[hidden]{display:none !important;}
-    #newMoreMenu button,#saveAsMenu button{display:block;width:100%;text-align:left;padding:7px 14px;border:none;
+    body.light #newMoreMenu{background:#fff;}
+    #newMoreMenu[hidden]{display:none !important;}
+    #newMoreMenu button{display:block;width:100%;text-align:left;padding:7px 14px;border:none;
       background:none;color:inherit;font:inherit;font-size:13px;cursor:pointer;border-radius:5px;}
-    #newMoreMenu button:hover,#saveAsMenu button:hover{background:var(--accent-soft);}
+    #newMoreMenu button:hover{background:var(--accent-soft);}
     #newMoreMenu .nmm-when{float:right;opacity:.5;font-size:11px;margin-left:18px;}
-    #newMoreMenu .nmm-sep,#saveAsMenu .nmm-sep{height:1px;background:rgba(128,128,128,.26);margin:4px 6px;}
+    #newMoreMenu .nmm-sep{height:1px;background:rgba(128,128,128,.26);margin:4px 6px;}
     #newMoreMenu .nmm-empty,#saveAsMenu .nmm-empty{padding:8px 14px;font-size:12px;opacity:.6;line-height:1.5;}
     /* v2.40.1 勾选行：从母版新建时排版是否一并套用（全局开关，存 localStorage） */
     #newMoreMenu .nmm-tswrap{display:flex;align-items:center;gap:7px;
@@ -1109,19 +1243,24 @@
   <div class="tb-group" id="fmtBtns"></div>
   <div class="tb-group"><span class="tb-split"><button id="btnNew" class="tb-btn" title="新建文档 (Ctrl+N)">新建</button><button id="btnNewMore" class="tb-btn tb-caret" title="从母版新建（排版是否一并套用，菜单首行可勾）/ 管理母版">▾</button></span></div>
   <div class="tb-group right">
-    <button id="btnView" class="tb-btn" title="视图切换">分屏</button>
-    <button id="btnFollow" class="tb-btn" title="预览跟随编辑区滚动（仅分屏模式生效），点击开/关">跟随</button>
-    <button id="btnTheme" class="tb-btn" title="主题切换">暗色</button>
-    <button id="btnFiles" class="tb-btn" title="最近文件与切换">文件</button>
-    <span class="tb-split"><button id="btnOpen" class="tb-btn" title="打开 .md 文件">打开</button><button id="btnOpenMore" class="tb-btn tb-caret" title="导入外部 Markdown：按本方言映射转换后放进编辑器">▾</button></span>
-    
-    
+    <span class="tb-split"><button id="btnView" class="tb-btn" title="视图切换">分屏</button><button id="btnViewMore" class="tb-btn tb-caret" title="切换亮色/暗色主题">▾</button></span>
+    <span class="tb-split"><button id="btnOpen" class="tb-btn" title="打开 .md 文件">打开</button><button id="btnOpenMore" class="tb-btn tb-caret" title="导入外部 Markdown / 最近文件与切换">▾</button></span>
+
+
     <span class="tb-split"><button id="btnExportPaged" class="tb-btn" title="打印：先按真值分页预览，再从预览栏顶部那条「打印」发给打印机（纸张/边距/页码在排版面板与预览栏横栏配置）">打印</button><button id="btnPrintMore" class="tb-btn tb-caret" title="镜像打印：奇数页左右边距对调（装订版）">▾</button></span><span class="tb-split"><button id="btnExportHtml" class="tb-btn" title="导出 HTML：点击直接导出单文件网页（样式内联、图片内嵌，双击即看）">导出</button><button id="btnExportMore" class="tb-btn tb-caret" title="更多导出格式：PDF / Word">▾</button></span>
-    <button id="btnLLM" class="tb-btn" title="AI 设置：润色 / 智能备注的后端与模型">AI</button>
-    <button id="btnTypeset" class="tb-btn" title="排版设置：字体/表格/缩进/自动落盘">排版</button>
-    <button id="btnRun" class="tb-btn" title="low runner：写/生成 Python run，供 @@ MDE 数据点与执行点调用">run</button>
-    <button id="btnSave" class="tb-btn" title="保存（Ctrl+S）">保存</button>
-    <span class="tb-split"><button id="btnSaveAs" class="tb-btn" title="另存为…">另存为</button><button id="btnSaveAsMore" class="tb-btn tb-caret" title="存为母版（含排版）">▾</button></span>
+    <span class="tb-split"><button id="btnConfig" class="tb-btn" title="关于与快捷键">配置</button><button id="btnConfigMore" class="tb-btn tb-caret" title="排版设置 / run 库 / AI 设置">▾</button></span>
+    <span class="tb-split"><button id="btnSave" class="tb-btn" title="保存（Ctrl+S）">保存</button><button id="btnSaveMore" class="tb-btn tb-caret" title="另存为… / 存为母版（含排版）">▾</button></span>
+    <!-- v2.41.0 兼容垫片：以下 7 个按钮的视觉入口已收编进上方四个下拉
+         （跟随→预览栏勾选框、主题→分屏▾、文件→打开▾、另存为/母版→保存▾、
+         排版/run/AI→配置▾），但既有 UI 测试按 id 点击它们。保留 hidden
+         元素 + 原监听，视觉不占位、行为照旧；测试零改动。 -->
+    <button id="btnFollow" class="tb-btn" hidden title="预览跟随编辑区滚动（入口已移至预览栏勾选框）">跟随</button>
+    <button id="btnTheme" class="tb-btn" hidden title="主题切换（入口已移至分屏▾）">主题</button>
+    <button id="btnFiles" class="tb-btn" hidden title="最近文件与切换（入口已移至打开▾）">文件</button>
+    <button id="btnSaveAs" class="tb-btn" hidden title="另存为…（入口已移至保存▾）">另存为</button>
+    <button id="btnLLM" class="tb-btn" hidden title="AI 设置（入口已移至配置▾）">AI</button>
+    <button id="btnTypeset" class="tb-btn" hidden title="排版设置（入口已移至配置▾）">排版</button>
+    <button id="btnRun" class="tb-btn" hidden title="low runner（入口已移至配置▾）">run</button>
   </div>
 </header>
 <main id="main">
@@ -1150,6 +1289,7 @@
   </section>
   <section id="previewPane" class="pane">
     <div id="pvbar">
+      <label title="预览跟随编辑区滚动（仅分屏模式生效）：勾选开启、去勾关闭，两栏各滚各的"><input id="pvFollow" type="checkbox" checked><span>跟随</span></label>
       <label title="页边参考线：在预览里画出这张纸的四边与版心。纸边界=灰实线，版心=红虚线，顶边距带里标注四边距实测值。只作用于预览，打印与导出都不含参考线"><input id="pvGuide" type="checkbox"><span>参考线</span></label>
       <span class="pv-mm">
         <input id="pvMt" type="number" min="0" max="100" step="0.5" title="上边距（mm）">
@@ -1220,7 +1360,9 @@
       </div>
     </div>
   </div>
-  <div id="openMoreMenu" hidden><button id="openMoreImport">导入…</button></div>
+  <div id="openMoreMenu" hidden><button id="openMoreImport">导入…</button><button id="openMoreFiles">文件（最近文件与切换）</button></div>
+  <div id="fmtMenu" hidden></div>
+  <div id="rmenu" hidden></div>
   <!-- v2.39.0 导出▾：主按钮直接导 HTML（最常用，一步到位），三角里放另外
        两种格式。原本「.html / .docx」是两个平铺按钮，加上「.pdf」会挤成
        一排等宽小方块，主次不分。 -->
@@ -1274,8 +1416,7 @@
     </div>
   </div>
   <div id="newMoreMenu" hidden></div>
-  <div id="saveAsMenu" hidden></div>
-  <!-- v2.28.0 存为母版：只有撞名时才弹。母版库位置固定、无人可选，
+    <!-- v2.28.0 存为母版：只有撞名时才弹。母版库位置固定、无人可选，
        所以这里问的是「叫什么」，不问「存哪」——存哪是库的事。 -->
   <div id="tplSaveOverlay" hidden>
     <div class="dlg-card">
@@ -1304,6 +1445,23 @@
       </div>
     </div>
   </div>
+  <div id="aboutOverlay" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:110;display:flex;align-items:center;justify-content:center;">
+    <div class="about-wrap">
+      <div class="ts-head"><span>关于与快捷键</span><span class="ts-head-r"><button id="aboutX" title="关闭">×</button></span></div>
+      <div class="ts-body">
+        <div class="about-logos">
+          <div class="about-logo"><img src="about_md.png" alt="MDEditor"><div>MDEditor</div></div>
+          <div class="about-logo"><img src="about_author.png" alt="作者"><div>作者</div></div>
+          <div class="about-logo"><img src="about_repo.png" alt="仓库"><div>仓库</div></div>
+        </div>
+        <div class="about-ver" id="aboutVer">版本 -</div>
+        <div class="about-sep">快捷键（点「改键」后直接按新组合：Ctrl+字母 / Ctrl+Shift 或 Ctrl+Alt +字母；Ctrl+Z 是浏览器原生撤销，不开放改键）</div>
+        <table class="about-kb"><tbody id="aboutKbBody"></tbody></table>
+        <div id="aboutMsg"></div>
+        <div class="about-foot"><button id="aboutKbReset" class="sv-btn">恢复默认键位</button></div>
+      </div>
+    </div>
+  </div>
   <div id="tbOverlay" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:110;display:flex;align-items:center;justify-content:center;">
     <div id="tbWrap">
       <div class="ts-head"><span>插入表格</span><span class="ts-head-r"><button id="tbX" title="关闭">×</button></span></div>
@@ -1326,6 +1484,80 @@
       </div>
     </div>
   </div>
+  <!-- v2.41.1 插入链接弹窗：链接主按钮与菜单项都开这个窗。 -->
+  <div id="linkOverlay" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:110;display:flex;align-items:center;justify-content:center;">
+    <div class="dlg-card">
+      <div class="ts-head"><span>插入链接</span><span class="ts-head-r"><button id="lkX" title="关闭">×</button></span></div>
+      <div class="dlg-body">
+        <div class="dlg-lbl">链接文字</div>
+        <input id="lkText" class="dlg-input" placeholder="链接文字">
+        <div class="dlg-lbl">链接地址</div>
+        <input id="lkUrl" class="dlg-input" placeholder="https://">
+      </div>
+      <div class="dlg-foot">
+        <button id="lkCancel" class="sv-btn">取消</button>
+        <button id="lkGo" class="sv-btn primary">插入</button>
+      </div>
+    </div>
+  </div>
+  <!-- v2.41.0 V2（方案 §11）插入图片弹窗：网络地址 / 本地选文件两条来源。
+       网络走 [说明](地址) 内嵌图；本地走与粘贴逐字相同的图片落盘链路。 -->
+  <div id="imgOverlay" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:110;display:flex;align-items:center;justify-content:center;">
+    <div class="dlg-card">
+      <div class="ts-head"><span>插入图片</span><span class="ts-head-r"><button id="imX" title="关闭">×</button></span></div>
+      <div class="dlg-body">
+        <div class="dlg-lbl">网络图片地址（http:// 或 https://）</div>
+        <input id="imUrl" class="dlg-input" placeholder="https://">
+        <div class="dlg-lbl">图片说明（可空，仅网络图片）</div>
+        <input id="imAlt" class="dlg-input" placeholder="图片说明">
+        <div class="dlg-lbl">或选择本地图片（png / jpg / webp / gif）</div>
+        <button id="imPickImg" class="sv-btn" type="button">选择本地图片…</button>
+        <div id="imHint" style="font-size:12px;color:var(--muted);line-height:1.6;margin-top:12px;">网络图片填地址后点「插入」；本地图片点上方按钮选中即插入，与从剪贴板粘贴走同一条落盘链路（需先保存文档）。</div>
+      </div>
+      <div class="dlg-foot">
+        <button id="imCancel" class="sv-btn">取消</button>
+        <button id="imGo" class="sv-btn primary">插入（网络图片）</button>
+      </div>
+    </div>
+  </div>
+  <input type="file" id="imFile" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+  <input type="file" id="atFile" hidden>
+  <!-- v2.41.1 公式面板（方案 §7）：LaTeX 的可视化输入层。面板里只有格子与
+       图形，零 LaTeX 字符；「插入到光标处」那一刻由序列化器生成 $…$，
+       先过 KaTeX 硬闸门，非法 TeX 污染不到文档。 -->
+  <div id="eqOverlay" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:110;display:flex;align-items:center;justify-content:center;">
+    <div id="eqWrap">
+      <div class="ts-head"><span>公式</span><span class="ts-head-r"><button id="eqX" title="关闭">×</button></span></div>
+      <div class="ts-body" id="eqBody">
+        <div class="eq-tplbar" id="eqTplbar">
+          <span class="eq-grp">通用</span>
+          <span class="eq-tpl"><button class="eq-tbtn" data-eqv="frac">a/b</button><button class="eq-tbtn eq-tcaret" data-eqv="frac:" title="分数 / 二项式">▾</button></span>
+          <span class="eq-tpl"><button class="eq-tbtn" data-eqv="script">◱</button><button class="eq-tbtn eq-tcaret" data-eqv="script:" title="角标组合 / 大运算符">▾</button></span>
+          <span class="eq-tpl"><button class="eq-tbtn" data-eqv="delim">( )</button><button class="eq-tbtn eq-tcaret" data-eqv="delim:" title="括号 / 矩阵 / 分段">▾</button></span>
+          <span class="eq-grp">特殊</span>
+          <span class="eq-tpl"><button class="eq-tbtn" data-eqv="sqrt">√</button><button class="eq-tbtn eq-tcaret" data-eqv="sqrt:" title="平方根 / n 次根">▾</button></span>
+          <span class="eq-tpl"><button class="eq-tbtn" data-eqv="accent">x̄</button><button class="eq-tbtn eq-tcaret" data-eqv="accent:" title="上 / 下帽线符号">▾</button></span>
+        </div>
+        <div id="eqCanvas" contenteditable="true" spellcheck="false" aria-label="公式画布：虚线框是空槽，点进去打字"></div>
+        <div class="eq-symbar">
+          <span class="eq-grp">符号</span>
+          <button class="eq-symtab on" data-tab="greek">希腊</button>
+          <button class="eq-symtab" data-tab="ops">运算符</button>
+          <button class="eq-symtab" data-tab="rel">关系符</button>
+          <button class="eq-symtab" data-tab="arrow">箭头</button>
+          <button class="eq-symtab" data-tab="big">大型</button>
+        </div>
+        <div id="eqSyms"></div>
+      </div>
+      <div class="ts-foot" id="eqFoot">
+        <span id="eqMsg"></span>
+        <span style="flex:1"></span>
+        <button id="eqClear" class="sv-btn">清空</button>
+        <button id="eqInsert" class="sv-btn primary">插入到光标处</button>
+      </div>
+    </div>
+  </div>
+  <div id="eqMenu" hidden></div>
   <div id="importOverlay" hidden>
    <div id="importPanel">
     <div class="ts-head"><span>导入 · 外部 Markdown 转换</span><span class="ts-head-r"><button id="importClose" title="关闭">×</button></span></div>
@@ -2368,6 +2600,26 @@ function parseInline(text,noMde){
   }
   if(_cPos>0)text=_cOut+text.slice(_cPos);
   }
+  /* v2.41.0 下划线·重复形态：++{y x n}++ → y 重复 n 次并整体加下划线。
+     y 受控集只有两种：0=空字符（U+00A0，一个正文字宽的空白）、□=方框（U+25A1）。
+     n 限 1–200（防一次展开上万节点卡死预览）；单元不在集合内、次数越界、
+     正则不匹配 → 整段原文保留（fail-closed，与 @@ color 未闭合同口径）。
+     位置必须在 ^{}/_{} 上下标规则之前：整段进 toks 占位，展开结果不受
+     任何后续行内规则影响；A 形态是纯字面展开，不参与强调/链接。 */
+  text=text.replace(/\+\+\{(.)\s*[x×*]\s*(\d+)\}\+\+/g,function(m,u,n){
+    n=parseInt(n,10);
+    if((u==='0'||u==='□')&&n>=1&&n<=200){
+      var rep=(u==='0')?'\u00A0':'□',out='';
+      for(var qi=0;qi<n;qi++)out+=rep;
+      toks.push('<u class="uline">'+out+'</u>');
+    }else{
+      /* fail-closed 也要占位：原文若留在 text 里，后面 B 普通形态的
+         ++..++ 正则会把它捡走（++{a x 3}++ → <u>{a x 3}</u>），等于
+         非法写法被静默放行。占位后任何规则都碰不到它。 */
+      toks.push(m);
+    }
+    return '\x00T'+(toks.length-1)+'\x00';
+  });
   /* v2.6.10：LaTeX 风格上下标，正文直接写、不加 $：
      ^{任意内容} → <sup>、_{任意内容} → <sub>（^{[1]}、^{1}、^{世界之光} 均可）。
      放在 escapeHtml 之后：花括号里的内容此时已转义，带不进 HTML；再经 toks
@@ -2439,6 +2691,12 @@ function parseInline(text,noMde){
   text=text.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/__([^_]+)__/g,'<strong>$1</strong>');
   text=text.replace(/\*([^*]+)\*/g,'<em>$1</em>').replace(/_([^_]+)_/g,'<em>$1</em>');
   text=text.replace(/~~([^~]+)~~/g,'<del>$1</del>');
+  /* v2.41.0 下划线·普通形态：++文字++ → <u class="uline">。必须放在强调规则
+     之后：内容里的 **x** / ~~x~~ / *x* 先完成转换，下划线包住成品
+     （++**粗**++ 出来的是带下划线的粗体）。A 重复形态的产物已进占位符，
+     不会被这里碰到。内容不含 + 且不跨行；+++x+++ 从第 2 个 + 起匹配
+     （+<u>x</u>+），fail-open 无害，不特判。 */
+  text=text.replace(/\+\+([^+\n]+)\+\+/g,'<u class="uline">$1</u>');
   text=text.replace(/@@C([0-9]+)@@/g,function(m,i){return '<code>'+escapeHtml(codes[+i])+'</code>';});
   text=text.replace(/\x00T(\d+)\x00/g,function(m,i){return toks[+i];});
   /* 转义还原放最后：逐字符 escapeHtml（如 \< → &lt;），只作用于还原出的单个字符，
@@ -3797,8 +4055,8 @@ function _i18nEl(el){
 /* 只翻这些 UI 根；#editor、#preview、#outline（用户内容/文档标题）不在列 */
 var I18N_ROOTS=['#toolbar','#status','#findBar','#svOverlay','#tsOverlay','#lrOverlay',
                 '#fmOverlay','#llmOverlay','#annOverlay','#rwOverlay','#rpOverlay',
-                '#histOverlay','#importOverlay','#openMoreMenu','#newMoreMenu','#tplOverlay',
-                '#saveAsMenu','#tplSaveOverlay','#tbOverlay',
+                '#histOverlay','#importOverlay','#openMoreMenu','#newMoreMenu','#fmtMenu','#rmenu','#aboutOverlay','#tplOverlay',
+                '#tplSaveOverlay','#tbOverlay','#linkOverlay','#eqOverlay','#eqMenu','#imgOverlay',
                 /* v2.40.0：预览栏横栏、打印▾、导出▾。导出▾此前只在词表里有词条
                    却不在扫描根里——菜单文字一直没真正翻过去，这次一并补上。 */
                 '#pvbar','#printMenu','#exportMenu',
@@ -4314,6 +4572,50 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
       }
     }catch(e){}
     return false;
+  }
+  /* ===== v2.41.0 唯一插入入口：滚动位置守恒 =====
+     现象：表格/链接/公式弹窗一开，焦点离开编辑区；插入函数里的
+     setSel() → editor.focus() 让 Chromium 按默认焦点位置把容器滚动清零，
+     而 addRange 不会把视图滚回插入点——内容落点与光标都对，视图却跳回文首。
+     口径：所有「往编辑区写内容」的路径一律走 replaceAtCaret（整篇替换）
+     或 insertNativeAtCaret（execCommand 片段，保住原生撤销栈）；弹窗取消
+     只设选区走 focusKeepScroll。三者共用同一份滚动快照，focus 之后恢复。
+     setSel 本身不动——查找下一个、点行号、大纲跳转依赖它自己的滚动语义。 */
+  function _insScrollEl(){
+    return document.getElementById('previewPane');
+  }
+  function _insSnap(){
+    var pv=_insScrollEl();
+    return {ed:editor.scrollTop, pv:pv?pv.scrollTop:0};
+  }
+  function _insRestore(sc){
+    var pv=_insScrollEl();
+    editor.scrollTop=sc.ed;
+    if(pv)pv.scrollTop=sc.pv;
+    /* 下一帧兜一次：防同帧内的布局/重渲染把值改回去 */
+    if(window.requestAnimationFrame)requestAnimationFrame(function(){
+      editor.scrollTop=sc.ed;
+      if(pv)pv.scrollTop=sc.pv;
+    });
+  }
+  function replaceAtCaret(nv,cs,ce,sc){
+    sc=sc||_insSnap();
+    setText(nv);
+    if(cs!==null&&cs!==undefined)setSel(cs,ce==null?cs:ce);
+    editor.focus();
+    _insRestore(sc);
+  }
+  function insertNativeAtCaret(frag,s,e,sc){
+    sc=sc||_insSnap();
+    setSel(s,e);
+    insertPlainText(frag);       /* execCommand：进原生 undo 栈，不改 setText 语义 */
+    editor.focus();
+    _insRestore(sc);
+  }
+  function focusKeepScroll(s,e,sc){
+    sc=sc||_insSnap();
+    setSel(s,e);
+    _insRestore(sc);
   }
   var PLAINTEXT_ONLY=(function(){
     try{return getComputedStyle(editor).webkitUserModify==='read-write-plaintext-only';}
@@ -5826,30 +6128,187 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
   editor.addEventListener('scroll',syncPreviewToEditor);
   editor.addEventListener('scroll',gutterScroll);
 
+  /* v2.41.0 格式按钮重组：12 个平铺按钮 → 6 组 split（主按钮 + ▾ 下拉）。
+     主按钮 = 原第一行为（H1/B/引用/无序列表/链接/表格弹窗），行为不变；
+     下拉项按需组合。每项带 key（英文稳定标识），fmtApply 按 key 分派——
+     label 是文案（i18n 会翻译、措辞会改），不能当逻辑契约。 */
   var fmtDefs=[
-    {label:'H1',title:'一级标题',wrap:false,pre:'# ',post:'',ph:'标题'},
-    {label:'H2',title:'二级标题',wrap:false,pre:'## ',post:'',ph:'标题'},
-    {label:'B',title:'加粗',wrap:true,pre:'**',post:'**',ph:'粗体'},
-    {label:'I',title:'斜体',wrap:true,pre:'*',post:'*',ph:'斜体'},
-    {label:'S',title:'删除线',wrap:true,pre:'~~',post:'~~',ph:'删除'},
-    {label:'</>',title:'行内代码',wrap:true,pre:'`',post:'`',ph:'code'},
-    {label:'引用',title:'引用块',wrap:false,pre:'> ',post:'',ph:'引用'},
-    {label:'列表',title:'无序列表',wrap:false,pre:'- ',post:'',ph:'列表项'},
-    {label:'序号',title:'有序列表',wrap:false,pre:'1. ',post:'',ph:'列表项'},
-    {label:'任务',title:'任务列表',wrap:false,pre:'- [ ] ',post:'',ph:'任务'},
-    {label:'链接',title:'插入链接',wrap:false,pre:'[',post:'](https://)',ph:'链接文字'},
-    {label:'表格',title:'插入表格（窗口里直接输入，可复制或插入到光标处）',wrap:false,pre:'',post:'',ph:''}
+    {key:'h1',label:'H1',title:'一级标题（▾ 选 H2~H6 / 正文）',wrap:false,pre:'# ',post:'',ph:'标题'},
+    {key:'bold',label:'B',title:'加粗（▾=斜体/删除线/下划线/上下标/填空线）',wrap:true,pre:'**',post:'**',ph:'粗体'},
+    {key:'quote',label:'引用',title:'引用块（▾=嵌套/取消引用）',wrap:false,pre:'> ',post:'',ph:'引用'},
+    {key:'list',label:'列表',title:'无序列表（▾=有序/任务）',wrap:false,pre:'- ',post:'',ph:'列表项'},
+    {key:'link',label:'链接',title:'插入链接（窗口）；▾=图片/本地文件/取消链接',wrap:false,pre:'[',post:'](https://)',ph:'链接文字'},
+    {key:'table',label:'表格',title:'插入表格（窗口里直接输入；▾=宽列/题注指令）',wrap:false,pre:'',post:'',ph:''}
   ];
+  /* 各组下拉内容（函数：每次打开现生成，文案走 T() 跟随界面语言） */
+  var fmtMenus={
+    h1:function(){return [
+      {t:'H2 二级标题',run:function(){fmtHeading(2);}},
+      {t:'H3 三级标题',run:function(){fmtHeading(3);}},
+      {t:'H4 四级标题',run:function(){fmtHeading(4);}},
+      {t:'H5 五级标题',run:function(){fmtHeading(5);}},
+      {t:'H6 六级标题',run:function(){fmtHeading(6);}},
+      {sep:1},
+      {t:'正文（去掉行首 #）',run:function(){fmtHeading(0);}}
+    ];},
+    bold:function(){return [
+      {t:'斜体 *',run:function(){fmtApply({wrap:true,pre:'*',post:'*',ph:'斜体'});}},
+      {t:'删除线 ~~',run:function(){fmtApply({wrap:true,pre:'~~',post:'~~',ph:'删除'});}},
+      {t:'下划线 ++',run:function(){fmtApply({wrap:true,pre:'++',post:'++',ph:'下划线'});}},
+      {t:'行内代码 `',run:function(){fmtApply({wrap:true,pre:'`',post:'`',ph:'code'});}},
+      {sep:1},
+      {t:'上标 ^{}',run:function(){fmtApply({wrap:true,pre:'^{',post:'}',ph:'上标'});}},
+      {t:'下标 _{}',run:function(){fmtApply({wrap:true,pre:'_{',post:'}',ph:'下标'});}},
+      {sep:1},
+      {t:'填空线（空字符 × 字数，带下划线）',run:function(){fmtInsert('++{0 x 9}++',7,8);}},
+      {t:'填空格（方框 × 个数，带下划线）',run:function(){fmtInsert('++{□ x 9}++',7,8);}}
+    ];},
+    quote:function(){return [
+      {t:'嵌套引用 >>',run:function(){fmtApply({wrap:false,pre:'>> ',post:'',ph:''});}},
+      {t:'取消引用',run:function(){fmtUnquote();}}
+    ];},
+    list:function(){return [
+      {t:'有序列表 1.',run:function(){fmtApply({wrap:false,pre:'1. ',post:'',ph:'列表项'});}},
+      {t:'任务列表 - [ ]',run:function(){fmtApply({wrap:false,pre:'- [ ] ',post:'',ph:'任务'});}}
+    ];},
+    /* v2.41.0 V2（方案 §11）：插入链接只由主按钮开窗，下拉不再重复；
+       图片支持网络/本地；本地文件复用粘贴链路，渲染区照旧出「打开」按钮。 */
+    link:function(){return [
+      {t:'插入图片…（网络 / 本地）',run:function(){imgOpen();}},
+      {t:'插入本地文件…',run:function(){pickLocalFile();}},
+      {sep:1},
+      {t:'取消链接（[t](u) → t）',run:function(){fmtUnlink();}}
+    ];},
+    table:function(){return [
+      {t:'表格宽与列宽 @@ table{…}',run:function(){fmtInsert('@@ table{50l:r(50|30|20)}\n');}},
+      {t:'表格题注 @@ caption{…}',run:function(){fmtInsert('@@ caption{表题}\n');}}
+    ];}
+  };
+  /* ---- 行级小工具（下拉项共用；统一重渲染 + 落盘标记） ----
+     focus 已由 replaceAtCaret 在恢复滚动前完成，此处不再二次 focus。 */
+  function _fmtAfter(){
+    scheduleRender(); scheduleSave();
+  }
+  /* 标题级：0=去掉行首 #，1~6=替换成对应级别（只作用于选区起点所在行的
+     行首到选区终点，与旧 wrap:false 前缀行为同口径） */
+  function fmtHeading(lv){
+    var selR=getSel(),s=selR.s,e=selR.e,val=getText();
+    var lineStart=val.lastIndexOf('\n',Math.max(0,s-1))+1;
+    var body=val.substring(lineStart,e).replace(/^[ ]{0,3}#{1,6}[ \t]+/,'');
+    var hash='';for(var i=0;i<lv;i++)hash+='#';
+    var rep2=lv?(hash+' '+body):body;
+    replaceAtCaret(val.substring(0,lineStart)+rep2+val.substring(e),
+                   lineStart,lineStart+rep2.length);
+    _fmtAfter();
+  }
+  /* 去引用：选区各行行首剥掉 "> " / ">" */
+  function fmtUnquote(){
+    var selR=getSel(),s=selR.s,e=selR.e,val=getText();
+    var lineStart=val.lastIndexOf('\n',Math.max(0,s-1))+1;
+    var lineEnd=val.indexOf('\n',e);if(lineEnd<0)lineEnd=val.length;
+    var lines=val.substring(lineStart,lineEnd).split('\n'),out=[];
+    for(var i=0;i<lines.length;i++)out.push(lines[i].replace(/^[ ]{0,3}>[ \t]?/,''));
+    var nb=out.join('\n');
+    replaceAtCaret(val.substring(0,lineStart)+nb+val.substring(lineEnd),
+                   lineStart,lineStart+nb.length);
+    _fmtAfter();
+  }
+  /* 取消链接：只处理选区内的 [t](u)（多个全剥；无选区不动并提示） */
+  function fmtUnlink(){
+    var selR=getSel(),s=selR.s,e=selR.e,val=getText();
+    var sel=val.substring(s,e);
+    if(!sel){ showToast(T('先选中要取消链接的文字')); return; }
+    var nb=sel.replace(/\[([^\]]+)\]\([^)]*\)/g,'$1');
+    if(nb===sel){ showToast(T('选区里没有 [文字](路径) 形式的链接')); return; }
+    replaceAtCaret(val.substring(0,s)+nb+val.substring(e),s,s+nb.length);
+    _fmtAfter();
+  }
+  /* 光标处插入定长片段，可选选中 [a,b) 相对偏移（填空线插完直接选中次数 9） */
+  function fmtInsert(str,sa,sb){
+    var selR=getSel(),s=selR.s,e=selR.e,val=getText();
+    var cs=(sa==null?null:s+sa),ce=(sa==null?null:s+(sb!=null?sb:sa));
+    replaceAtCaret(val.substring(0,s)+str+val.substring(e),cs,ce);
+    _fmtAfter();
+  }
   var fmtBtns=document.getElementById('fmtBtns');
   fmtDefs.forEach(function(d){
     var b=document.createElement('button');
     b.className='tb-btn';
     b.textContent=d.label;
     b.title=d.title;
-    b.addEventListener('click',function(){applyFormat(d);});
-    fmtBtns.appendChild(b);
+    b.addEventListener('click',function(){
+      fmtMenuClose();
+      /* v2.41.1 链接主按钮改开弹窗：文字与地址分开填，不再包一层
+         [文字](https://) 让人手改两处 */
+      if(d.key==='link'){linkOpen();return;}
+      fmtApply(d);
+    });
+    if(fmtMenus[d.key]){
+      var c=document.createElement('button');
+      c.className='tb-btn tb-caret';
+      c.textContent='▾';
+      c.title=d.title+'（更多）';
+      c.addEventListener('click',function(ev){
+        ev.stopPropagation();
+        if(!fmtMenu.hidden&&fmtMenuOwner===c){fmtMenuClose();return;}
+        fmtMenuItems=fmtMenus[d.key]();
+        fmtMenuOpen(c,fmtMenuItems);
+      });
+      /* v2.41.1 修「三角样式不统一」：.tb-caret 的窄身样式写在
+         .tb-split .tb-caret 里，此前三角裸挂在组里选择器打不中，
+         六个三角全渲染成正常按钮大小。主钮+三角包进 .tb-split，
+         与打开▾/导出▾同一副面孔。 */
+      var sp=document.createElement('span');
+      sp.className='tb-split';
+      sp.appendChild(b);sp.appendChild(c);
+      fmtBtns.appendChild(sp);
+    }else{
+      fmtBtns.appendChild(b);
+    }
   });
-  function applyFormat(d){
+  /* v2.41.1 公式面板入口：独立 ∑ 按钮紧邻表格组（方案 §4.4/§7.8：
+     公式与表格不同源，塞进任何下拉发现性归零） */
+  var eqBtn=document.createElement('button');
+  eqBtn.className='tb-btn';
+  eqBtn.id='btnMath';
+  eqBtn.textContent='∑';
+  eqBtn.title='公式面板：往格子里填，出来就是 LaTeX（$…$），预览区 KaTeX 渲染';
+  eqBtn.addEventListener('click',function(){ fmtMenuClose(); eqOpen(); });
+  fmtBtns.appendChild(eqBtn);
+  /* 六组共用一个下拉皮（样式与打开▾/导出▾同源），一次只开一个 */
+  var fmtMenu=document.getElementById('fmtMenu');
+  var fmtMenuOwner=null,fmtMenuItems=[];
+  function fmtMenuOpen(btn,items){
+    var h='';
+    for(var i=0;i<items.length;i++){
+      var it=items[i];
+      if(it.sep){h+='<div class="nmm-sep"></div>';continue;}
+      h+='<button data-fi="'+i+'"'+(it.dis?' disabled':'')+'>'+escapeHtml(T(it.t))+'</button>';
+    }
+    fmtMenu.innerHTML=h;
+    var r=btn.getBoundingClientRect();
+    fmtMenu.style.left=Math.max(6,Math.min(r.left,window.innerWidth-250))+'px';
+    fmtMenu.style.top=(r.bottom+4)+'px';
+    fmtMenuOwner=btn;
+    fmtMenu.hidden=false;
+  }
+  function fmtMenuClose(){
+    if(fmtMenu&&!fmtMenu.hidden)fmtMenu.hidden=true;
+    fmtMenuOwner=null;
+  }
+  if(fmtMenu){
+    fmtMenu.addEventListener('click',function(ev){
+      ev.stopPropagation();
+      var b=ev.target&&ev.target.closest?ev.target.closest('button'):null;
+      if(!b||b.disabled)return;
+      var idx=parseInt(b.getAttribute('data-fi'),10);
+      var it=fmtMenuItems[idx];
+      fmtMenuClose();
+      if(it&&it.run)it.run();
+    });
+    document.addEventListener('click',function(){fmtMenuClose();});
+  }
+  function fmtApply(d){
     var selR=getSel();
     var s=selR.s,e=selR.e;
     var val=getText();
@@ -5857,15 +6316,9 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     if(d.wrap){
       var text=sel||d.ph;
       var rep=d.pre+text+d.post;
-      setText(val.substring(0,s)+rep+val.substring(e));
       var np=s+d.pre.length;
-      setSel(np,np+text.length);
-    } else if(d.label==='链接'){
-      var t=sel||d.ph;
-      var rep=d.pre+t+d.post;
-      setText(val.substring(0,s)+rep+val.substring(e));
-      setSel(s+1,s+1+t.length);
-    } else if(d.label==='表格'){
+      replaceAtCaret(val.substring(0,s)+rep+val.substring(e),np,np+text.length);
+    } else if(d.key==='table'){
       /* v2.40.0：不再直插固定模板，改为开可视化表格弹窗。
          选区先交出——弹窗一开焦点就离开编辑器，之后再读 getSel() 拿到的
          只会是丢失后的 0,0，表格会插到文首。 */
@@ -5876,12 +6329,615 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
       var after=val.substring(e);
       var lineStart=before.lastIndexOf('\n')+1;
       var rep2=d.pre+val.substring(lineStart,e);
-      setText(val.substring(0,lineStart)+rep2+after);
-      setSel(lineStart,lineStart+rep2.length);
+      replaceAtCaret(val.substring(0,lineStart)+rep2+after,
+                     lineStart,lineStart+rep2.length);
     }
-    editor.focus();
     scheduleRender();scheduleSave();
   }
+
+  /* ===== 插入链接弹窗（v2.41.1）：文字与地址分开填 ===== */
+  var linkOverlay=document.getElementById('linkOverlay'),
+      lkText=document.getElementById('lkText'),
+      lkUrl=document.getElementById('lkUrl'),
+      linkCaret={s:0,e:0}, linkScroll=null;
+  function linkOpen(){
+    var selR=getSel(),val=getText();
+    linkCaret={s:selR.s,e:selR.e};
+    linkScroll=_insSnap();
+    var sel=val.substring(selR.s,selR.e);
+    lkText.value=sel;
+    lkUrl.value='';
+    linkOverlay.hidden=false;
+    (sel?lkUrl:lkText).focus();
+  }
+  function linkClose(){
+    linkOverlay.hidden=true;
+    focusKeepScroll(linkCaret.s,linkCaret.e,linkScroll);
+  }
+  function linkInsert(){
+    var t=lkText.value,u=lkUrl.value.trim()||'https://';
+    if(!t){lkText.focus();showToast(T('链接文字不能为空'));return;}
+    var s=linkCaret.s,val=getText();
+    var rep='['+t+']('+u+')';
+    linkOverlay.hidden=true;
+    replaceAtCaret(val.substring(0,s)+rep+val.substring(linkCaret.e),
+                   s+1,s+1+t.length,linkScroll);
+    scheduleRender();scheduleSave();
+  }
+  (function linkBind(){
+    document.getElementById('lkX').addEventListener('click',linkClose);
+    document.getElementById('lkCancel').addEventListener('click',linkClose);
+    document.getElementById('lkGo').addEventListener('click',linkInsert);
+    linkOverlay.addEventListener('click',function(ev){ if(ev.target===linkOverlay) linkClose(); });
+    linkOverlay.addEventListener('keydown',function(ev){
+      if(ev.key==='Enter'){ev.preventDefault();linkInsert();}
+      if(ev.key==='Escape'){ev.preventDefault();linkClose();}
+    });
+  })();
+
+  /* ===== 插入图片 / 插入本地文件（v2.41.0 V2，方案 §11.4/§11.5）=====
+     网络图片：只收 http(s) 绝对地址，产 ![说明](地址) 内嵌图；
+     本地图片 / 本地文件：隐藏 input 选文件后立即交给上面两个唯一函数，
+     与粘贴链路逐字一致（含未保存提示、20MB、落盘、产物形态、打开按钮）。
+     选文件框会让编辑区失焦，所以插入点与滚动一律在弹窗打开 / 点选文件
+     之前抓快照，不能等文件回来再读 getSel()——那会插到文首。 */
+  var imgOverlay=document.getElementById('imgOverlay'),
+      imUrl=document.getElementById('imUrl'),
+      imAlt=document.getElementById('imAlt'),
+      imFile=document.getElementById('imFile'),
+      atFile=document.getElementById('atFile'),
+      imgCaret={s:0,e:0}, imgScroll=null,
+      atCaret={s:0,e:0}, atScroll=null;
+  function imgOpen(){
+    var r=getSel();
+    imgCaret={s:r.s,e:r.e}; imgScroll=_insSnap();
+    imUrl.value=''; imAlt.value='';
+    imgOverlay.hidden=false;
+    imUrl.focus();
+  }
+  function imgClose(){
+    imgOverlay.hidden=true;
+    focusKeepScroll(imgCaret.s,imgCaret.e,imgScroll);
+  }
+  function imgInsertNet(){
+    var u=imUrl.value.trim();
+    if(!/^https?:\/\/\S+$/i.test(u)){
+      imUrl.focus();
+      showToast('请填写完整的 http:// 或 https:// 图片地址（或改用「选择本地图片…」）');
+      return;
+    }
+    var alt=imAlt.value.trim();
+    var rep='!['+alt+']('+u+')';
+    var s=imgCaret.s, val=getText();
+    imgOverlay.hidden=true;
+    replaceAtCaret(val.substring(0,s)+rep+val.substring(imgCaret.e),
+                   s+2,s+2+alt.length,imgScroll);
+    scheduleRender();scheduleSave();
+  }
+  function pickLocalFile(){
+    var r=getSel();
+    atCaret={s:r.s,e:r.e}; atScroll=_insSnap();
+    atFile.value='';
+    atFile.click();
+  }
+  (function v2Bind(){
+    document.getElementById('imX').addEventListener('click',imgClose);
+    document.getElementById('imCancel').addEventListener('click',imgClose);
+    document.getElementById('imGo').addEventListener('click',imgInsertNet);
+    document.getElementById('imPickImg').addEventListener('click',function(){
+      imFile.value=''; imFile.click();
+    });
+    imgOverlay.addEventListener('click',function(ev){ if(ev.target===imgOverlay) imgClose(); });
+    imgOverlay.addEventListener('keydown',function(ev){
+      if(ev.key==='Enter'){ev.preventDefault();imgInsertNet();}
+      if(ev.key==='Escape'){ev.preventDefault();imgClose();}
+    });
+    imFile.addEventListener('change',function(){
+      var f=imFile.files&&imFile.files[0];
+      imFile.value='';
+      if(!f)return;
+      imgOverlay.hidden=true;
+      pasteImageFile(f,imgCaret,imgScroll);
+    });
+    atFile.addEventListener('change',function(){
+      var f=atFile.files&&atFile.files[0];
+      atFile.value='';
+      if(!f)return;
+      pasteAttachFile(f,atCaret,atScroll);
+    });
+  })();
+
+  /* ===== 公式面板（v2.41.1，方案 §7）=====
+     LaTeX 的可视化输入层：面板里只有格子与图形，零 LaTeX 字符；
+     「插入到光标处」那一刻由序列化器生成 $…$，先过 KaTeX 硬闸门
+     （throwOnError 渲染一遍，抛错即拒绝插入），非法 TeX 污染不到文档。
+     节点六种（§7.4 节点表）：text / script(四角标) / frac(分数) /
+     delim(容器) / sqrt(根号) / accent(帽线)——不多一个。 */
+  var eqOverlay=document.getElementById('eqOverlay'),
+      eqCanvas=document.getElementById('eqCanvas'),
+      eqMenuEl=document.getElementById('eqMenu'),
+      eqMsgEl=document.getElementById('eqMsg'),
+      eqCaret={s:0,e:0}, eqScroll=null,
+      eqLastSlot=null,
+      eqMenuItems=[];
+  var EQ_MAX_DEPTH=20;   /* 槽位递归深度上限（§0：防手滑，不是功能边界） */
+  var EQ_FUNCS=('sin cos tan cot sec csc arcsin arccos arctan sinh cosh tanh log ln lg exp lim max min sup inf det gcd deg dim ker arg').split(' ');
+  /* 非 ASCII 符号映射表：点符号板插进来的是字符，序列化时还原成命令——
+     ∑ 进 \text{} 会变成文本体的小求和号，没有大型字形与极限位置 */
+  var EQ_CHARMAP={
+    '∑':'\\sum','∏':'\\prod','∫':'\\int','∬':'\\iint','∭':'\\iiint','∮':'\\oint',
+    '⋃':'\\bigcup','⋂':'\\bigcap','∞':'\\infty',
+    '−':'-','×':'\\times','÷':'\\div','±':'\\pm','∓':'\\mp','·':'\\cdot','∘':'\\circ',
+    '⊗':'\\otimes','⊕':'\\oplus','∪':'\\cup','∩':'\\cap','∈':'\\in','∉':'\\notin',
+    '⊂':'\\subset','⊃':'\\supset','⊆':'\\subseteq','⊇':'\\supseteq','∅':'\\emptyset',
+    '=':'=','≠':'\\ne','≤':'\\le','≥':'\\ge','≈':'\\approx','≡':'\\equiv',
+    '∼':'\\sim','≃':'\\simeq','∝':'\\propto',
+    '→':'\\to','←':'\\leftarrow','↔':'\\leftrightarrow','⇒':'\\Rightarrow',
+    '⇐':'\\Leftarrow','⇔':'\\Leftrightarrow','↦':'\\mapsto',
+    '↑':'\\uparrow','↓':'\\downarrow','⇑':'\\Uparrow','⇓':'\\Downarrow',
+    'α':'\\alpha','β':'\\beta','γ':'\\gamma','δ':'\\delta','ε':'\\varepsilon',
+    'ζ':'\\zeta','η':'\\eta','θ':'\\theta','ι':'\\iota','κ':'\\kappa','λ':'\\lambda',
+    'μ':'\\mu','ν':'\\nu','ξ':'\\xi','π':'\\pi','ρ':'\\rho','σ':'\\sigma',
+    'τ':'\\tau','υ':'\\upsilon','φ':'\\varphi','χ':'\\chi','ψ':'\\psi','ω':'\\omega',
+    'Γ':'\\Gamma','Δ':'\\Delta','Θ':'\\Theta','Λ':'\\Lambda','Ξ':'\\Xi',
+    'Π':'\\Pi','Σ':'\\Sigma','Φ':'\\Phi','Ψ':'\\Psi','Ω':'\\Omega'
+  };
+  function eqMsgShow(m,err){
+    eqMsgEl.textContent=m||'';
+    eqMsgEl.style.color=err?'#e06c75':'';
+  }
+  function eqEl(tag,cls){ var e=document.createElement(tag); if(cls)e.className=cls; return e; }
+  function eqSlot(role,ph){
+    var s=eqEl('span','eq-slot');
+    s.setAttribute('data-role',role);
+    s.setAttribute('data-ph',ph||'');
+    s.contentEditable='true';
+    return s;
+  }
+  /* 结构节点工厂：节点本体 contenteditable=false，格子才是可打字的 */
+  function eqNode(type,opt){
+    opt=opt||{};
+    var n=eqEl('span','eq-node');
+    n.setAttribute('data-eqtype',type);
+    n.contentEditable='false';
+    if(type==='script'){
+      var open=opt.open||'lt,lb,c,rt,rb';
+      n.setAttribute('data-open',open);
+      function has(r){return (','+open+',').indexOf(','+r+',')>=0;}
+      var colL=eqEl('span','eq-col'),colR=eqEl('span','eq-col'),c=eqSlot('c','');
+      if(has('lt'))colL.appendChild(eqSlot('lt','上'));
+      if(has('lb'))colL.appendChild(eqSlot('lb','下'));
+      if(colL.childNodes.length)n.appendChild(colL);
+      n.appendChild(c);
+      if(has('rt'))colR.appendChild(eqSlot('rt','上'));
+      if(has('rb'))colR.appendChild(eqSlot('rb','下'));
+      if(colR.childNodes.length)n.appendChild(colR);
+      if(opt.fill)c.textContent=opt.fill;
+      return n;
+    }
+    if(type==='frac'){
+      if(opt.noline)n.setAttribute('data-noline','1');
+      n.appendChild(eqSlot('num','分子'));
+      n.appendChild(eqSlot('den','分母'));
+      return n;
+    }
+    if(type==='delim'){
+      if(opt.env){
+        n.setAttribute('data-env',opt.env);
+        var g=eqEl('span','eq-grid'),r,cc;
+        for(r=0;r<opt.rows;r++){
+          var row=eqEl('span','eq-row');
+          for(cc=0;cc<opt.cols;cc++)row.appendChild(eqSlot('c'+r+cc,''));
+          g.appendChild(row);
+        }
+        n.appendChild(g);
+        if(opt.env==='cases'){
+          var dr=eqEl('span','eq-dchar');dr.textContent='}';
+          n.appendChild(dr);
+        }
+        return n;
+      }
+      n.setAttribute('data-left',opt.left||'(');
+      n.setAttribute('data-right',opt.right||')');
+      var dl=eqEl('span','eq-dchar'),drr=eqEl('span','eq-dchar');
+      dl.textContent=opt.left==='.'?'':opt.left;
+      drr.textContent=opt.right==='.'?'':opt.right;
+      n.appendChild(dl);
+      n.appendChild(eqSlot('in',''));
+      n.appendChild(drr);
+      return n;
+    }
+    if(type==='sqrt'){
+      if(!opt.noidx){
+        var iw=eqEl('span','eq-idx');
+        iw.appendChild(eqSlot('idx','n'));
+        n.appendChild(iw);
+      }
+      var rad=eqEl('span','eq-rad');rad.textContent='√';
+      n.appendChild(rad);
+      n.appendChild(eqSlot('body',''));
+      return n;
+    }
+    if(type==='accent'){
+      n.setAttribute('data-cmd',opt.cmd);
+      n.setAttribute('data-sym',opt.sym||'');
+      n.setAttribute('data-pos',opt.pos||'up');
+      n.appendChild(eqSlot('body',''));
+      return n;
+    }
+    return n;
+  }
+  /* 遍历本节点的直属槽位（跨过 eq-col/eq-grid 等结构壳；
+     eq-node 子树不进——那是嵌套节点自己的槽，由递归负责） */
+  function eqSlotsOf(n,cb){
+    (function walk(el){
+      for(var i=0;i<el.childNodes.length;i++){
+        var c=el.childNodes[i];
+        if(c.nodeType!==1)continue;
+        if(c.classList.contains('eq-slot'))cb(c);
+        else if(!c.classList.contains('eq-node'))walk(c);
+      }
+    })(n);
+  }
+  /* ---- 序列化（§7.5 契约，逐条可测）---- */
+  function eqSerText(str){
+    str=String(str).replace(/\u00a0/g,' ').replace(/[\r\n\t]+/g,' ');
+    if(!str)return '';
+    var out='',run='',buf='',i,ch,code;
+    var esc=/[\\{}$%&#_^~]/g;
+    function escAll(t){return t.replace(esc,function(m){return '\\'+m;});}
+    function flushRun(){ if(run){out+='\\text{'+escAll(run)+'}';run='';} }
+    function flushBuf(){
+      if(!buf)return;
+      var words=buf.split(/(\s+)/);
+      for(var w=0;w<words.length;w++){
+        var t=words[w];
+        if(!t)continue;
+        if(/^\s+$/.test(t)){out+=t;continue;}
+        if(EQ_FUNCS.indexOf(t)>=0){out+='\\'+t;continue;}   /* 第 6 条：函数名转正体 */
+        out+=escAll(t);                                     /* 第 2 条：特殊字符转义 */
+      }
+      buf='';
+    }
+    for(i=0;i<str.length;i++){
+      ch=str.charAt(i);code=str.charCodeAt(i);
+      if(code>=32&&code<=126){                              /* 第 1 条：ASCII 作数学 */
+        flushRun();buf+=ch;
+      }else if(EQ_CHARMAP[ch]){
+        flushRun();flushBuf();out+=EQ_CHARMAP[ch];
+      }else{
+        flushBuf();run+=ch;                                 /* 非 ASCII 包 \text{} */
+      }
+    }
+    flushRun();flushBuf();
+    return out;
+  }
+  function eqSerSlot(slot,depth){
+    var out='';
+    for(var i=0;i<slot.childNodes.length;i++){
+      var c=slot.childNodes[i];
+      if(c.nodeType===3){out+=eqSerText(c.nodeValue);}
+      else if(c.nodeType===1&&c.classList.contains('eq-node')){out+=eqSerNode(c,depth+1);}
+      else if(c.nodeType===1){out+=eqSerText(c.textContent);}
+    }
+    return out;
+  }
+  function eqSerNode(n,depth){
+    if(depth>EQ_MAX_DEPTH)throw {eq:'嵌套超过 '+EQ_MAX_DEPTH+' 层'};
+    var ty=n.getAttribute('data-eqtype');
+    if(ty==='script'){
+      var sl={};
+      eqSlotsOf(n,function(s){sl[s.getAttribute('data-role')]=eqSerSlot(s,depth+1);});
+      var c=sl.c||'',lt=sl.lt||'',lb=sl.lb||'',rt=sl.rt||'',rb=sl.rb||'';
+      if(!c&&!(lt||lb||rt||rb))throw {eq:'四角标是空的'};
+      if(!c&&(lt||lb||rt||rb))throw {eq:'角标需要有中心内容（只有角标没有主体）'};
+      var tex='';
+      if(lt||lb)tex+='{}'+(lt?'^{'+lt+'}':'')+(lb?'_{'+lb+'}':'');  /* 第 8 条：前置角标 */
+      tex+=c;
+      if(rt||rb)tex+=(rt?'^{'+rt+'}':'')+(rb?'_{'+rb+'}':'');
+      return tex;
+    }
+    if(ty==='frac'){
+      var num='',den='';
+      eqSlotsOf(n,function(s){
+        var r=s.getAttribute('data-role');
+        if(r==='num')num=eqSerSlot(s,depth+1);
+        if(r==='den')den=eqSerSlot(s,depth+1);
+      });
+      return n.hasAttribute('data-noline')?('\\binom{'+num+'}{'+den+'}'):('\\frac{'+num+'}{'+den+'}');
+    }
+    if(ty==='delim'){
+      var env=n.getAttribute('data-env');
+      if(env){
+        var rows=[],cur=null;
+        eqSlotsOf(n,function(s){
+          var row=s.parentNode;
+          if(cur!==row){cur=row;rows.push([]);}
+          rows[rows.length-1].push(eqSerSlot(s,depth+1));
+        });
+        var body=rows.map(function(rw){return rw.join(' & ');}).join(' \\\\ ');
+        return '\\begin{'+env+'}'+body+'\\end{'+env+'}';
+      }
+      var L=n.getAttribute('data-left')||'(',R=n.getAttribute('data-right')||')',inner='';
+      eqSlotsOf(n,function(s){inner=eqSerSlot(s,depth+1);});
+      return '\\left'+eqDelimChr(L)+inner+'\\right'+eqDelimChr(R);
+    }
+    if(ty==='sqrt'){
+      var idx='',bd='';
+      eqSlotsOf(n,function(s){
+        var r=s.getAttribute('data-role');
+        if(r==='idx')idx=eqSerSlot(s,depth+1);
+        if(r==='body')bd=eqSerSlot(s,depth+1);
+      });
+      return idx?('\\sqrt['+idx+']{'+bd+'}'):('\\sqrt{'+bd+'}');
+    }
+    if(ty==='accent'){
+      var b='',cmd=n.getAttribute('data-cmd')||'overline';
+      eqSlotsOf(n,function(s){b=eqSerSlot(s,depth+1);});
+      return '\\'+cmd+'{'+b+'}';
+    }
+    throw {eq:'未知节点类型 '+ty};
+  }
+  function eqDelimChr(ch){
+    if(ch==='{')return '\\{';
+    if(ch==='}')return '\\}';
+    if(ch==='‖')return '\\|';
+    return ch;   /* ( [ | . 都可以直接跟在 \left \right 后 */
+  }
+  function eqSerialize(){
+    var tex=eqSerSlot(eqCanvas,1);
+    if(!tex)throw {eq:'画布是空的'};
+    if(/[\u0000-\u001f\u007f]/.test(tex))throw {eq:'产物含不可见字符，拒绝插入'};  /* R12 白名单 */
+    return tex;
+  }
+  /* ---- 画布交互 ---- */
+  function eqPlaceCaret(slot){
+    slot.focus();
+    var r=document.createRange();
+    r.selectNodeContents(slot);r.collapse(false);
+    var sel=window.getSelection();
+    sel.removeAllRanges();sel.addRange(r);
+  }
+  function eqCurSlot(){
+    if(eqLastSlot&&eqCanvas.contains(eqLastSlot))return eqLastSlot;
+    var f=eqCanvas.querySelector('.eq-slot');
+    if(f)eqLastSlot=f;
+    return f;
+  }
+  function eqAddNode(v){
+    var nd=eqNodeFor(v);
+    if(!nd)return;
+    var slot=eqCurSlot();
+    if(slot){
+      var sel=window.getSelection(),r;
+      if(sel&&sel.rangeCount&&slot.contains(sel.getRangeAt(0).startContainer)){
+        r=sel.getRangeAt(0);r.deleteContents();
+      }else{
+        r=document.createRange();r.selectNodeContents(slot);r.collapse(false);
+      }
+      r.insertNode(nd);
+      eqLastSlot=slot;
+    }else{
+      eqCanvas.appendChild(nd);
+    }
+    var f=nd.querySelector('.eq-slot');
+    if(f){eqLastSlot=f;eqPlaceCaret(f);}
+    eqMsgShow('');
+  }
+  eqCanvas.addEventListener('focusin',function(ev){
+    var s=ev.target&&ev.target.closest?ev.target.closest('.eq-slot'):null;
+    if(s)eqLastSlot=s;
+  });
+  eqCanvas.addEventListener('keydown',function(ev){
+    if(ev.key==='Escape'){ev.preventDefault();eqClose();return;}
+    if(ev.key==='Enter'){ev.preventDefault();return;}   /* 格内不换行 */
+    var t=ev.target;
+    var slot=t&&t.classList&&t.classList.contains('eq-slot')?t:null;
+    if(!slot)return;
+    if(ev.key==='Tab'){
+      ev.preventDefault();
+      var all=eqCanvas.querySelectorAll('.eq-slot'),idx=-1,i;
+      for(i=0;i<all.length;i++)if(all[i]===slot){idx=i;break;}
+      idx+=ev.shiftKey?-1:1;
+      if(idx<0)idx=all.length-1;
+      if(idx>=all.length)idx=0;
+      eqPlaceCaret(all[idx]);
+      return;
+    }
+    if(ev.key==='Backspace'&&slot.textContent===''){
+      var nd=slot.closest('.eq-node');
+      if(nd&&nd!==eqCanvas){
+        ev.preventDefault();
+        var outer=nd.parentNode;
+        nd.parentNode.removeChild(nd);
+        if(outer&&outer.classList&&outer.classList.contains('eq-slot'))eqPlaceCaret(outer);
+        else eqCanvas.focus();
+      }
+    }
+  });
+  eqCanvas.addEventListener('paste',function(ev){
+    ev.preventDefault();                                  /* R10：只收纯文本 */
+    var t=(ev.clipboardData||window.clipboardData).getData('text/plain')||'';
+    t=t.replace(/[\r\n\t]+/g,' ');
+    if(t)document.execCommand('insertText',false,t);
+  });
+  eqCanvas.addEventListener('drop',function(ev){ev.preventDefault();});
+  /* ---- 模板条与参数菜单 ---- */
+  function eqNodeFor(v){
+    switch(v){
+      case 'frac':return eqNode('frac',{});
+      case 'frac:binom':return eqNode('frac',{noline:1});
+      case 'script':return eqNode('script',{open:'lt,lb,c,rt,rb'});
+      case 'script:rt':return eqNode('script',{open:'c,rt'});
+      case 'script:rb':return eqNode('script',{open:'c,rb'});
+      case 'script:tb':return eqNode('script',{open:'c,rt,rb'});
+      case 'script:sum':return eqNode('script',{open:'c,rt,rb',fill:'∑'});
+      case 'script:prod':return eqNode('script',{open:'c,rt,rb',fill:'∏'});
+      case 'script:int':return eqNode('script',{open:'c,rt,rb',fill:'∫'});
+      case 'script:oint':return eqNode('script',{open:'c,rt,rb',fill:'∮'});
+      case 'script:lim':return eqNode('script',{open:'c,rt,rb',fill:'lim'});
+      case 'delim':return eqNode('delim',{left:'(',right:')'});
+      case 'delim:bracket':return eqNode('delim',{left:'[',right:']'});
+      case 'delim:brace':return eqNode('delim',{left:'{',right:'}'});
+      case 'delim:abs':return eqNode('delim',{left:'|',right:'|'});
+      case 'delim:norm':return eqNode('delim',{left:'‖',right:'‖'});
+      case 'delim:none':return eqNode('delim',{left:'.',right:'.'});
+      case 'delim:pmatrix':return eqNode('delim',{env:'pmatrix',rows:2,cols:2});
+      case 'delim:bmatrix':return eqNode('delim',{env:'bmatrix',rows:2,cols:2});
+      case 'delim:vmatrix':return eqNode('delim',{env:'vmatrix',rows:2,cols:2});
+      case 'delim:cases':return eqNode('delim',{env:'cases',rows:2,cols:1});
+      case 'sqrt':return eqNode('sqrt',{noidx:1});
+      case 'sqrt:n':return eqNode('sqrt',{});
+      case 'accent':
+      case 'accent:overline':return eqNode('accent',{cmd:'overline',sym:'¯'});
+      case 'accent:vec':return eqNode('accent',{cmd:'vec',sym:'→'});
+      case 'accent:hat':return eqNode('accent',{cmd:'hat',sym:'^'});
+      case 'accent:tilde':return eqNode('accent',{cmd:'tilde',sym:'~'});
+      case 'accent:dot':return eqNode('accent',{cmd:'dot',sym:'˙'});
+      case 'accent:check':return eqNode('accent',{cmd:'check',sym:'ˇ'});
+      case 'accent:breve':return eqNode('accent',{cmd:'breve',sym:'˘'});
+      case 'accent:acute':return eqNode('accent',{cmd:'acute',sym:'´'});
+      case 'accent:underline':return eqNode('accent',{cmd:'underline',sym:'＿',pos:'down'});
+      case 'accent:underbar':return eqNode('accent',{cmd:'underbar',sym:'⎵',pos:'down'});
+    }
+    return null;
+  }
+  var EQ_MENUS={
+    'frac':[
+      {t:'分数（上格 / 横线 / 下格）',v:'frac'},
+      {t:'二项式（两格夹圆括号）',v:'frac:binom'}],
+    'script':[
+      {t:'右上角标',v:'script:rt'},{t:'右下角标',v:'script:rb'},
+      {t:'上下标（右侧两格）',v:'script:tb'},{t:'四角全开（左右夹中心）',v:'script'},
+      {sep:1},
+      {t:'∑ 求和（中心预填）',v:'script:sum'},{t:'∏ 求积（中心预填）',v:'script:prod'},
+      {t:'∫ 积分（中心预填）',v:'script:int'},{t:'∮ 环积分（中心预填）',v:'script:oint'},
+      {t:'lim 极限（中心预填）',v:'script:lim'}],
+    'delim':[
+      {t:'圆括号 ( )',v:'delim'},{t:'方括号 [ ]',v:'delim:bracket'},{t:'花括号 { }',v:'delim:brace'},
+      {t:'绝对值 | |',v:'delim:abs'},{t:'范数 ‖ ‖',v:'delim:norm'},{t:'无框',v:'delim:none'},
+      {sep:1},
+      {t:'矩阵（圆括号 2×2）',v:'delim:pmatrix'},{t:'矩阵（方括号 2×2）',v:'delim:bmatrix'},
+      {t:'行列式（竖线 2×2）',v:'delim:vmatrix'},{t:'分段函数（右侧花括号 2×1）',v:'delim:cases'}],
+    'sqrt':[
+      {t:'平方根',v:'sqrt'},{t:'n 次根（左上指数格）',v:'sqrt:n'}],
+    'accent':[
+      {t:'上划线 ¯',v:'accent:overline'},{t:'向量箭头 →',v:'accent:vec'},{t:'尖帽 ^',v:'accent:hat'},
+      {t:'波浪线 ~',v:'accent:tilde'},{t:'单点 ˙',v:'accent:dot'},{t:'楔符 ˇ',v:'accent:check'},
+      {t:'短音符 ˘',v:'accent:breve'},{t:'锐音符 ´',v:'accent:acute'},
+      {sep:1},
+      {t:'下划线（公式内部画线）',v:'accent:underline'},{t:'下方花括号 ⎵',v:'accent:underbar'}]
+  };
+  function eqMenuOpen(btn,items){
+    var h='';
+    for(var i=0;i<items.length;i++){
+      var it=items[i];
+      if(it.sep){h+='<div class="nmm-sep"></div>';continue;}
+      h+='<button data-qi="'+i+'"'+(it.dis?' disabled':'')+'>'+escapeHtml(T(it.t))+'</button>';
+    }
+    eqMenuEl.innerHTML=h;eqMenuItems=items;
+    var r=btn.getBoundingClientRect();
+    eqMenuEl.style.left=Math.max(6,Math.min(r.left,window.innerWidth-260))+'px';
+    eqMenuEl.style.top=(r.bottom+4)+'px';
+    eqMenuEl.hidden=false;
+  }
+  function eqMenuClose(){ if(eqMenuEl&&!eqMenuEl.hidden)eqMenuEl.hidden=true; }
+  eqMenuEl.addEventListener('click',function(ev){
+    ev.stopPropagation();
+    var b=ev.target&&ev.target.closest?ev.target.closest('button'):null;
+    if(!b||b.disabled)return;
+    var it=eqMenuItems[parseInt(b.getAttribute('data-qi'),10)];
+    eqMenuClose();
+    if(it&&it.v)eqAddNode(it.v);
+  });
+  document.addEventListener('click',function(){eqMenuClose();});
+  document.getElementById('eqTplbar').addEventListener('click',function(ev){
+    ev.stopPropagation();
+    var b=ev.target&&ev.target.closest?ev.target.closest('.eq-tbtn'):null;
+    if(!b)return;
+    var v=b.getAttribute('data-eqv');
+    if(v.charAt(v.length-1)===':'){
+      var base=v.slice(0,-1);
+      if(!eqMenuEl.hidden&&eqMenuEl._base===base){eqMenuClose();return;}
+      eqMenuEl._base=base;
+      eqMenuOpen(b,EQ_MENUS[base]||[]);
+      return;
+    }
+    eqMenuClose();
+    eqAddNode(v);
+  });
+  /* ---- 符号板（C 类）---- */
+  var EQ_SYMS={
+    greek:['α','β','γ','δ','ε','ζ','η','θ','ι','κ','λ','μ','ν','ξ','π','ρ','σ','τ','υ','φ','χ','ψ','ω','Γ','Δ','Θ','Λ','Ξ','Π','Σ','Φ','Ψ','Ω'],
+    ops:['+','−','×','÷','±','∓','·','∘','⊗','⊕','∪','∩','∈','∉','⊂','⊃','⊆','⊇','∅'],
+    rel:['=','≠','<','>','≤','≥','≈','≡','∼','≃','∝'],
+    arrow:['→','←','↔','⇒','⇐','⇔','↦','↑','↓','⇑','⇓'],
+    big:['∑','∏','∫','∬','∭','∮','⋃','⋂','lim','max','min']
+  };
+  function eqSymsShow(tab){
+    var box=document.getElementById('eqSyms');
+    box.innerHTML='';
+    EQ_SYMS[tab].forEach(function(ch){
+      var b=document.createElement('button');
+      b.textContent=ch;
+      b.addEventListener('click',function(){
+        var slot=eqCurSlot();
+        if(!slot){eqMsgShow('先点一个格子',true);return;}
+        eqPlaceCaret(slot);
+        document.execCommand('insertText',false,ch);
+      });
+      box.appendChild(b);
+    });
+  }
+  document.getElementById('eqBody').querySelector('.eq-symbar').addEventListener('click',function(ev){
+    var b=ev.target&&ev.target.closest?ev.target.closest('.eq-symtab'):null;
+    if(!b)return;
+    this.querySelectorAll('.eq-symtab').forEach(function(x){x.classList.remove('on');});
+    b.classList.add('on');
+    eqSymsShow(b.getAttribute('data-tab'));
+  });
+  /* ---- 开 / 关 / 清空 / 插入 ---- */
+  function eqOpen(){
+    eqCaret={s:getSel().s,e:getSel().e};
+    eqScroll=_insSnap();
+    eqOverlay.hidden=false;
+    eqMsgShow('');
+    if(!eqCanvas.childNodes.length)eqSymsShow('greek');
+    var f=eqCanvas.querySelector('.eq-slot');
+    if(f){eqLastSlot=f;eqPlaceCaret(f);}
+    else{eqLastSlot=null;eqCanvas.focus();}
+  }
+  function eqClose(){
+    eqOverlay.hidden=true;
+    eqMenuClose();
+    focusKeepScroll(eqCaret.s,eqCaret.e,eqScroll);
+  }
+  function eqDoInsert(){
+    var tex;
+    try{tex=eqSerialize();}
+    catch(ex){eqMsgShow(ex&&ex.eq?ex.eq:String(ex.message||ex),true);return;}
+    try{katex.renderToString(tex,{throwOnError:true,output:'html'});}   /* R5 硬闸门 */
+    catch(ex){eqMsgShow('无法渲染：'+(ex&&ex.message?ex.message.replace(/<[^>]+>/g,' '):ex),true);return;}
+    var frag='$'+tex+'$';
+    if(frag.charAt(0)!=='$'||frag.charAt(frag.length-1)!=='$'){eqMsgShow('片段断言失败',true);return;}
+    eqOverlay.hidden=true;
+    insertNativeAtCaret(frag,eqCaret.s,eqCaret.e,eqScroll);
+    scheduleRender();scheduleSave();
+    showToast('已插入公式');
+  }
+  document.getElementById('eqX').addEventListener('click',eqClose);
+  document.getElementById('eqClear').addEventListener('click',function(){
+    eqCanvas.innerHTML='';eqLastSlot=null;eqMsgShow('');eqCanvas.focus();
+  });
+  document.getElementById('eqInsert').addEventListener('click',eqDoInsert);
+  eqOverlay.addEventListener('click',function(ev){ if(ev.target===eqOverlay) eqClose(); });
+  document.addEventListener('keydown',function(ev){
+    if(ev.key==='Escape'&&!eqOverlay.hidden&&document.activeElement!==eqCanvas.querySelector('.eq-slot')){
+      /* Esc 由画布自己的 keydown 优先处理（那里带焦点上下文），
+         焦点不在格子里（如点过按钮）时在这里兜底 */
+      if(!eqCanvas.contains(document.activeElement)){ev.preventDefault();eqClose();}
+    }
+  });
 
   /* ===== 可视化表格弹窗（v2.40.0）=====
      一张真表、格子直接打字，出口两条：复制纯 markdown / 插入到光标处。
@@ -5897,7 +6953,7 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
   var tbStatEl=document.getElementById('tbStat');
   var tbData=[];              /* 二维纯文本，[0] 恒为表头；DOM 才是输入真相，这里只作重建暂存 */
   var tbNR=3, tbNC=3;
-  var tbCaret={s:0,e:0};
+  var tbCaret={s:0,e:0}, tbScroll=null;
   var tbSnapBefore=null, tbSnapAfter=null;
   var tbResizeTimer=null;
 
@@ -6075,10 +7131,8 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     var ins=pre+md+post, nv=before+ins+after;
     tbSnapBefore=val; tbSnapAfter=nv;
     tbOverlayEl.hidden=true;
-    setText(nv);
-    setSel(s+ins.length,s+ins.length);
+    replaceAtCaret(nv,s+ins.length,s+ins.length,tbScroll);
     scheduleRender(); scheduleSave();
-    editor.focus();
     showToast('已插入表格（'+tbNR+' 行 × '+tbNC+' 列，Ctrl+Z 可撤销）');
   }
 
@@ -6101,6 +7155,7 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
 
   function tbOpen(s,e){
     tbCaret={s:(s==null?getSel().s:s), e:(e==null?getSel().e:e)};
+    tbScroll=_insSnap();
     tbNR=Math.max(2,Math.min(30,parseInt(tbRowsEl.value,10)||3));
     tbNC=Math.max(1,Math.min(12,parseInt(tbColsEl.value,10)||3));
     tbRowsEl.value=tbNR; tbColsEl.value=tbNC;
@@ -6111,7 +7166,7 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
   }
   function tbClose(){
     tbOverlayEl.hidden=true;
-    setSel(tbCaret.s,tbCaret.e);      /* 取消后光标回到原处，不留在文首 */
+    focusKeepScroll(tbCaret.s,tbCaret.e,tbScroll);  /* 取消后光标与滚动都回原处 */
   }
   function tbResizeNow(){
     var r=parseInt(tbRowsEl.value,10), c=parseInt(tbColsEl.value,10);
@@ -6161,25 +7216,84 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
   /* 分屏联动开关：开=预览跟随编辑滚动（分屏联动管线照常），关=各滚各的。
      与视图/主题同模式：localStorage 持久化 + 工具栏文字态按钮。默认开。 */
   var followOn=true;
+  /* v2.41.0 「跟随」从工具栏移进预览栏横栏（参考线左边），同款勾选框范式：
+     勾选开启、去勾关闭。原逻辑与持久化键不变，只换事件源与状态显示。 */
   function applyFollow(){
-    document.getElementById('btnFollow').textContent=followOn?'跟随':'不跟随';
-    document.getElementById('btnFollow').classList.toggle('active',followOn);
+    document.getElementById('pvFollow').checked=followOn;
     try{lsSet(FOLLOW_KEY,followOn?'1':'0');}catch(e){}
   }
+  document.getElementById('pvFollow').addEventListener('change',function(){
+    followOn=this.checked;applyFollow();
+    if(followOn)syncPreviewToEditor();   /* 重新打开立即对齐，不等下次滚动 */
+  });
+  /* 兼容垫片：旧工具栏按钮（hidden）保留同一开关，既有测试点它切换 */
   document.getElementById('btnFollow').addEventListener('click',function(){
     followOn=!followOn;applyFollow();
-    if(followOn)syncPreviewToEditor();   /* 重新打开立即对齐，不等下次滚动 */
+    if(followOn)syncPreviewToEditor();
   });
 
   function applyTheme(t){
     if(t==='light')document.body.classList.add('light');else document.body.classList.remove('light');
-    document.getElementById('btnTheme').textContent=(t==='light'?'亮色':'暗色');
     try{lsSet(THEME_KEY,t);}catch(e){}
     rerenderMermaidForTheme();
   }
+  /* v2.41.0 主题切换收进「分屏▾」：菜单项文案随当前主题变（打开时现算）。
+     rmenu 是右侧四组下拉（分屏▾/配置▾/保存▾）共用的一张皮，一次只开一张。 */
+  var rmenu=document.getElementById('rmenu');
+  var rmenuItems=[];
+  function rmenuShow(btn,items){
+    var h='';
+    for(var i=0;i<items.length;i++){
+      var it=items[i];
+      if(it.sep){h+='<div class="nmm-sep"></div>';continue;}
+      h+='<button data-ri="'+i+'"'+(it.dis?' disabled':'')+'>'+escapeHtml(T(it.t))+'</button>';
+    }
+    rmenu.innerHTML=h;rmenuItems=items;
+    var r=btn.getBoundingClientRect();
+    rmenu.style.left=Math.max(6,Math.min(r.right-190,window.innerWidth-200))+'px';
+    rmenu.style.top=(r.bottom+4)+'px';
+    rmenu.hidden=false;
+  }
+  rmenu.addEventListener('click',function(ev){
+    ev.stopPropagation();
+    var b=ev.target&&ev.target.closest?ev.target.closest('button'):null;
+    if(!b||b.disabled)return;
+    var it=rmenuItems[parseInt(b.getAttribute('data-ri'),10)];
+    rmenu.hidden=true;
+    if(it&&it.run)it.run();
+  });
+  rmenu.addEventListener('click',function(ev){ev.stopPropagation();});
+  document.addEventListener('click',function(){rmenu.hidden=true;});
+  document.getElementById('btnViewMore').addEventListener('click',function(ev){
+    ev.stopPropagation();
+    if(!rmenu.hidden){rmenu.hidden=true;return;}
+    rmenuShow(this,[{t:document.body.classList.contains('light')?'切换到暗色':'切换到亮色',
+      run:function(){applyTheme(document.body.classList.contains('light')?'dark':'light');}}]);
+  });
+  /* 兼容垫片：旧主题按钮（hidden）保留同一开关 */
   document.getElementById('btnTheme').addEventListener('click',function(){
     applyTheme(document.body.classList.contains('light')?'dark':'light');
   });
+  /* v2.41.0 保存▾：另存为 + 存为母版（原另存为/另存为▾两钮移除） */
+  document.getElementById('btnSaveMore').addEventListener('click',function(ev){
+    ev.stopPropagation();
+    if(!rmenu.hidden){rmenu.hidden=true;return;}
+    rmenuShow(this,[
+      {t:'另存为…',run:function(){openSaveAs();}},
+      {t:'存为母版（含排版）',run:function(){tplSaveCurrent();}}
+    ]);
+  });
+  /* v2.41.0 配置▾：排版 / run / AI（原三钮移除）；配置本体弹「关于与快捷键」 */
+  document.getElementById('btnConfigMore').addEventListener('click',function(ev){
+    ev.stopPropagation();
+    if(!rmenu.hidden){rmenu.hidden=true;return;}
+    rmenuShow(this,[
+      {t:'排版设置',run:function(){tsOpen();}},
+      {t:'run 库（low runner）',run:function(){lrOpen();}},
+      {t:'AI 设置',run:function(){llmOpen();}}
+    ]);
+  });
+  document.getElementById('btnConfig').addEventListener('click',function(){ aboutOpen(); });
 
   document.getElementById('btnOpen').addEventListener('click',function(){ openFileNative(); });
   // 优先用后端原生"打开"框（能拿到完整路径 → 打开后可直接保存/归档图片）；
@@ -6672,8 +7786,14 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     }
     var all=[el].concat([].slice.call(el.querySelectorAll("*")));
     var snap=[];
+    /* v2.41.0 下划线下推：text-decoration 不继承（只传播绘制），<u><strong>x</strong></u>
+       里 strong 的计算值是 none，而 Word 导出按"文字所在元素"取样式 → 下划线丢失。
+       快照遍历时 class 还在，先记下哪些元素位于 u.uline 之内；写入遍历时给它们
+       追加 underline（追加不覆盖：保留元素自身已有的 line-through 等其他线型）。 */
+    var inUline=[];
     for(var i=0;i<all.length;i++){
       var kv=[];
+      try{inUline.push(!!(all[i].closest&&all[i].closest('u.uline')));}catch(e){inUline.push(false);}
       var keepColor=!!(all[i].style&&_ownColor(all[i]));
       if(all[i].style){
         var cs=getComputedStyle(all[i]);
@@ -6690,6 +7810,14 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
       var elm=all[j];
       if(!elm.style)continue;
       elm.removeAttribute("class");elm.removeAttribute("id");
+      if(inUline[j]){
+        var _decAt=-1;
+        for(var _dk=0;_dk<snap[j].length;_dk++){
+          if(snap[j][_dk].indexOf('text-decoration:')===0){_decAt=_dk;break;}
+        }
+        if(_decAt<0)snap[j].push('text-decoration:underline');
+        else if(snap[j][_decAt].indexOf('underline')<0)snap[j][_decAt]+=' underline';
+      }
       if(snap[j].length)elm.style.cssText=snap[j].join(";");
       else elm.removeAttribute("style");
     }
@@ -7558,8 +8686,163 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
   document.getElementById('btnSave').addEventListener('click',function(){ saveToDisk(false); });
   /* 工具栏与提示里一直写着 Ctrl+S，但此前根本没有这个绑定（按下去走的是浏览器
      自己的「保存网页」）。补上，并且必须 preventDefault。 */
+  /* ══════════ 快捷键注册表（v2.41.0）══════════
+     收编：此前 Ctrl+N/S/F/H 散在 4 处独立 keydown 监听，改键无从谈起。
+     现在 KB_ACTIONS 是唯一事实源，全部监听从 KB_MAP 读；改键 = 改 KB_MAP
+     + lsSet 落盘（走 ui-settings 管线上云，跨机器跟随）。
+     Ctrl+Z 不注册：撤销是浏览器原生行为（contenteditable undo），键位
+     改不了；两处快照接管（表格插入/全部替换）跟随浏览器主键，固定不动。
+     F3 类：fnext 忽略 Shift（Shift 只表示反向）。 */
+  var KB_STORE_KEY='md-keymap-v1';
+  var KB_ACTIONS=[
+    {id:'new',   label:'新建文档',              key:'n',  mods:'ctrl'},
+    {id:'save',  label:'保存',                  key:'s',  mods:'ctrl'},
+    {id:'find',  label:'查找',                  key:'f',  mods:'ctrl'},
+    {id:'repl',  label:'替换',                  key:'h',  mods:'ctrl'},
+    {id:'fnext', label:'查找下一个（Shift 反向）', key:'F3', mods:''},
+    {id:'bold',  label:'加粗（选区包 **）',      key:'b',  mods:'ctrl'},
+    {id:'italic',label:'斜体（选区包 *）',       key:'i',  mods:'ctrl'}
+  ];
+  var KB_MAP={};
+  function kbLoad(){
+    for(var i=0;i<KB_ACTIONS.length;i++)KB_MAP[KB_ACTIONS[i].id]={key:KB_ACTIONS[i].key,mods:KB_ACTIONS[i].mods};
+    try{
+      var raw=localStorage.getItem(KB_STORE_KEY);
+      if(!raw)return;
+      var o=JSON.parse(raw)||{};
+      for(var j=0;j<KB_ACTIONS.length;j++){
+        var a=KB_ACTIONS[j],v=o[a.id];
+        if(v&&kbShapeOk(v.key,v.mods)&&!kbConflict(v.key,v.mods,a.id))KB_MAP[a.id]={key:v.key,mods:v.mods};
+      }
+    }catch(e){}
+  }
+  function kbShapeOk(key,mods){
+    if(key==='F3')return mods==='';
+    if(!/^[a-z]$/.test(key))return false;
+    return mods==='ctrl'||mods==='ctrl+shift'||mods==='ctrl+alt';
+  }
+  function kbConflict(key,mods,exceptId){
+    for(var i=0;i<KB_ACTIONS.length;i++){
+      var a=KB_ACTIONS[i];
+      if(a.id===exceptId)continue;
+      var m=KB_MAP[a.id];
+      if(m&&m.key===key&&m.mods===mods)return a.id;
+    }
+    return null;
+  }
+  function kbLabel(id){
+    for(var i=0;i<KB_ACTIONS.length;i++)if(KB_ACTIONS[i].id===id)return T(KB_ACTIONS[i].label);
+    return id;
+  }
+  function kbDisp(m){
+    if(m.key==='F3')return 'F3';
+    var s='';
+    if(m.mods.indexOf('ctrl')>=0)s+='Ctrl+';
+    if(m.mods.indexOf('alt')>=0)s+='Alt+';
+    if(m.mods.indexOf('shift')>=0)s+='Shift+';
+    return s+m.key.toUpperCase();
+  }
+  /* noShift：忽略 Shift 修饰（fnext 用；Shift 只表示方向不参与键形） */
+  function kbMatch(e,id,noShift){
+    var m=KB_MAP[id];if(!m)return false;
+    var ctrl=e.ctrlKey||e.metaKey;
+    if((m.mods.indexOf('ctrl')>=0)!==ctrl)return false;
+    if((m.mods.indexOf('alt')>=0)!==e.altKey)return false;
+    if(!noShift&&(m.mods.indexOf('shift')>=0)!==e.shiftKey)return false;
+    if(m.key==='F3')return e.key==='F3';
+    var k=e.key||'';
+    return k.length===1&&k.toLowerCase()===m.key.toLowerCase();
+  }
+  function kbSaveOverrides(){
+    var o={};
+    for(var i=0;i<KB_ACTIONS.length;i++){
+      var a=KB_ACTIONS[i],m=KB_MAP[a.id];
+      if(m.key!==a.key||m.mods!==a.mods)o[a.id]={key:m.key,mods:m.mods};
+    }
+    try{lsSet(KB_STORE_KEY,JSON.stringify(o));}catch(e){}
+  }
+  kbLoad();
+  /* ---- 关于与快捷键面板 ---- */
+  var _aboutVer=null;
+  function aboutOpen(){
+    document.getElementById('aboutOverlay').hidden=false;
+    kbRender();
+    if(_aboutVer===null){
+      _aboutVer='';
+      fetch('/api/version').then(function(r){return r.json();}).then(function(j){
+        if(j&&j.ok&&j.app){_aboutVer=j.app;document.getElementById('aboutVer').textContent=T('版本')+' v'+j.app;}
+      }).catch(function(){});
+    }
+  }
+  function aboutMsg(s,err){
+    var el=document.getElementById('aboutMsg');
+    el.textContent=s||'';
+    el.classList.toggle('err',!!err);
+  }
+  var kbCapturing=null;   /* 正在改键的动作 id；null=非捕获态 */
+  function kbRender(){
+    var tb=document.getElementById('aboutKbBody');
+    var h='';
+    for(var i=0;i<KB_ACTIONS.length;i++){
+      var a=KB_ACTIONS[i],m=KB_MAP[a.id];
+      var isCap=(kbCapturing===a.id);
+      h+='<tr'+(isCap?' class="kb-cap"':'')+'><td>'+escapeHtml(T(a.label))+'</td>'
+        +'<td class="kb-key'+(isCap?' kb-capture':'')+'">'+(isCap?escapeHtml(T('请按新键位…（Esc 取消）')):escapeHtml(kbDisp(m)))+'</td>'
+        +'<td style="text-align:right"><button class="sv-btn" data-kb="'+a.id+'">'+T(isCap?'等待按键':'改键')+'</button></td></tr>';
+    }
+    tb.innerHTML=h;
+    var btns=tb.querySelectorAll('button');
+    for(var j=0;j<btns.length;j++){
+      btns[j].addEventListener('click',function(ev){
+        ev.stopPropagation();
+        kbCapturing=this.getAttribute('data-kb');
+        kbRender();
+      });
+    }
+  }
+  document.getElementById('aboutX').addEventListener('click',function(){
+    kbCapturing=null;
+    document.getElementById('aboutOverlay').hidden=true;
+  });
+  document.getElementById('aboutOverlay').addEventListener('click',function(e){
+    if(e.target===this){kbCapturing=null;this.hidden=true;}
+  });
   document.addEventListener('keydown',function(e){
-    if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&!e.altKey&&(e.key==='s'||e.key==='S')){
+    if(e.key==='Escape'&&!document.getElementById('aboutOverlay').hidden){
+      kbCapturing=null;
+      document.getElementById('aboutOverlay').hidden=true;
+      return;
+    }
+  });
+  /* 改键捕获：capture 阶段抢在所有功能监听之前，捕获中一条键都不放行 */
+  document.addEventListener('keydown',function(e){
+    if(!kbCapturing)return;
+    e.preventDefault();e.stopPropagation();
+    if(e.key==='Escape'){kbCapturing=null;kbRender();aboutMsg('');return;}
+    var mods='';
+    if(e.ctrlKey||e.metaKey)mods='ctrl';
+    if(e.altKey)mods+=(mods?'+':'')+'alt';
+    if(e.shiftKey)mods+=(mods?'+':'')+'shift';
+    var key='';
+    if(e.key==='F3')key='F3';
+    else if(/^[a-zA-Z]$/.test(e.key||''))key=e.key.toLowerCase();
+    if(!key)return aboutMsg(T('只支持字母键或 F3'),true);
+    if(!kbShapeOk(key,mods))return aboutMsg(T('合法键形：Ctrl+字母 / Ctrl+Shift+字母 / Ctrl+Alt+字母 / F3（不带修饰）'),true);
+    var hit=kbConflict(key,mods,kbCapturing);
+    if(hit)return aboutMsg(TF('与「{0}」冲突，换一个键位',kbLabel(hit)),true);
+    KB_MAP[kbCapturing]={key:key,mods:mods};
+    kbSaveOverrides();
+    kbCapturing=null;kbRender();aboutMsg('');
+  },true);
+  document.getElementById('aboutKbReset').addEventListener('click',function(){
+    try{lsRemove(KB_STORE_KEY);}catch(e){}
+    kbLoad();
+    kbCapturing=null;kbRender();aboutMsg('');
+  });
+  /* ---- 保存（Ctrl+S）与全部注册键的统一监听 ---- */
+  document.addEventListener('keydown',function(e){
+    if(e.isComposing)return;
+    if(kbMatch(e,'save')){
       e.preventDefault(); saveToDisk(false);
     }
   });
@@ -8692,7 +9975,9 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     document.getElementById('tsDirty').hidden=true;
     document.getElementById('tsOverlay').hidden=false;
   }
-  document.getElementById('btnTypeset').addEventListener('click',tsOpen);
+  /* v2.41.0 排版/run/AI 三钮收进「配置▾」（btnConfigMore），原独立按钮移除；
+     tsOpen / lrOpen / llmOpen 三个入口函数保留，由配置▾菜单与快捷键面板调用 */
+  document.getElementById('btnTypeset').addEventListener('click',tsOpen);   /* 兼容垫片（hidden） */
   /* 面板里任何控件动过 → 底栏提示「尚未应用」。应用＝持久化，不点就等于
      什么都没存：关掉再打开会从 tsCfg 重填，这些改动当场消失（v2.26.3）。 */
   function tsMarkDirty(){document.getElementById('tsDirty').hidden=false;}
@@ -8843,7 +10128,8 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     if(runModeCfg().mode==='manual'){ markPendingRuns(true); }
     else{ scheduleRunPass(); }
   }
-  document.getElementById('btnRun').addEventListener('click',lrOpen);
+  /* v2.41.0 run 钮收进配置▾ */
+  document.getElementById('btnRun').addEventListener('click',lrOpen);   /* 兼容垫片（hidden） */
   /* ── v2.5 运行模式 / 手动执行 ────────────────────────────── */
   /* 执行点 ▶ 按钮（事件委托：渲染产物逐个绑太脆，preview 冒泡一次搞定；
      手动模式"待运行"与失败态"重试"共用） */
@@ -9339,23 +10625,11 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     showToast(T('已撤销母版排版'));
   });
 
-  /* ---- 另存为▾：存为母版（v2.28.0） ----
+  /* ---- 保存▾（v2.41.0）：另存为 + 存为母版收进一个下拉 ----
      母版库位置固定（runtime/templates），"存哪"不是作者该决定的事，所以这条路
      不问目录、只取名；另存为模态里也相应不再提供 .smdm（否则两条路会打架）。
      当前文档本身就是母版时，这里变成"保存母版"＝写回它自己（与 Ctrl+S 同一条路），
      不再派生副本——不然每点一次就多一份。 */
-  function tplSaveMenuToggle(){
-    var m = document.getElementById('saveAsMenu');
-    var b = document.getElementById('btnSaveAsMore');
-    if (!m || !b) return;
-    if (!m.hidden){ m.hidden = true; return; }
-    var isTpl = /\.smdm$/i.test(currentFile || '');
-    m.innerHTML = '<button data-tpl-save="1">' + T(isTpl ? '保存母版' : '存为母版') + '</button>';
-    var r = b.getBoundingClientRect();
-    m.style.left = Math.max(6, Math.min(r.left, window.innerWidth - 250)) + 'px';
-    m.style.top = (r.bottom + 4) + 'px';
-    m.hidden = false;
-  }
   function tplSaveCurrent(){
     /* 已是母版：写回包内（saveToDisk 按扩展名分流，不在这里另起一套）。
        v2.40.0：排版另走一条轻量通道（追加 typeset.json），必须在 saveToDisk
@@ -9415,17 +10689,6 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
       .catch(function(e){ showToast(TF('存为母版失败：{0}', e.message)); });
   }
   (function tplSaveBind(){
-    var more = document.getElementById('btnSaveAsMore');
-    var menu = document.getElementById('saveAsMenu');
-    if (!more || !menu) return;
-    more.addEventListener('click', function(ev){ ev.stopPropagation(); tplSaveMenuToggle(); });
-    document.addEventListener('click', function(){ menu.hidden = true; });
-    menu.addEventListener('click', function(ev){
-      ev.stopPropagation();
-      if (!(ev.target && ev.target.closest && ev.target.closest('button'))) return;
-      menu.hidden = true;
-      tplSaveCurrent();
-    });
     document.getElementById('tplSaveCancel').addEventListener('click', function(){
       document.getElementById('tplSaveOverlay').hidden = true;
     });
@@ -9616,9 +10879,11 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     });
   })();
 
-  document.getElementById('btnSaveAs').addEventListener('click', openSaveAs);
+  /* v2.41.0 另存为/母版收进保存▾ */
+  document.getElementById('btnSaveAs').addEventListener('click', openSaveAs);   /* 兼容垫片（hidden） */
   document.addEventListener('keydown', function(e){
-    if ((e.ctrlKey||e.metaKey) && (e.key==='n'||e.key==='N')){
+    if (e.isComposing) return;
+    if (kbMatch(e,'new')){
       e.preventDefault(); newDoc();
     }
   });
@@ -9776,35 +11041,78 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     if(new RegExp('(^|[\\s,{])'+lit+'\\s*==').test(t)){ key=String(fname||''); }
     return _lastDpPrefix()+key+' == '+rel+'}';
   }
+  /* ===== v2.41.0 V2 唯一落盘入口（方案 §11.5）=====
+     从资源管理器「复制 → 粘贴」和链接▾「插入本地文件 / 本地图片」只是
+     把文件交进来的方式不同；从这里往后的每一步必须逐字相同：
+       落盘端点 → 返回的相对路径 → 插入正文的形态 → 渲染区表现 → 打开方式。
+     所以两段正文抽成下面两个函数，粘贴 handler 与菜单入口都只负责
+     「拿到 File + 抓插入点/滚动快照」，绝不各写一份落盘逻辑。
+     插入统一走 insertNativeAtCaret（execCommand 保住原生 undo 栈，
+     并在失焦重聚焦后恢复编辑区/预览栏滚动）。 */
+  function pasteImageFile(blob, caret, sc){
+    if (!currentFile) {
+      showToast('粘贴图片前请先保存文档（Ctrl+S），图片将存入同名 .assets 目录。');
+      openSaveAs();
+      return;
+    }
+    if (!blob) return;
+    var fr = new FileReader();
+    fr.onload = function(){
+      /* 写盘唯一入口（SSOT）：一律走服务端 /api/paste-image，
+         服务端按容器落位（.md→<stem>.assets，.smd→包内 assets/） */
+      fetch('/api/paste-image',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({docPath:currentFile,dataUrl:fr.result})})
+        .then(function(r){return r.json();})
+        .then(function(j){
+          if (j && j.ok) {
+            var ins = '![](' + j.rel + ')';
+            insertNativeAtCaret(ins,caret.e,caret.e,sc);
+          } else { showToast('图片保存失败：'+((j&&j.error)||'未知错误')); }
+        }).catch(function(er){ showToast('图片保存失败：'+er.message); });
+    };
+    fr.readAsDataURL(blob);
+  }
+  function pasteAttachFile(f, caret, sc){
+    if (!currentFile) {
+      showToast('粘贴文件前请先保存文档（Ctrl+S），文件将存入同名 .assets 目录。');
+      openSaveAs();
+      return;
+    }
+    if (!f) return;
+    if (f.size > 20 * 1024 * 1024) {
+      showToast('文件超过 20MB 上限（当前 ' + (f.size / 1048576).toFixed(1) + 'MB）');
+      return;
+    }
+    showToast('正在写入 ' + f.name + ' …');
+    var frF = new FileReader();
+    frF.onload = function () {
+      fetch('/api/paste-file', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({docPath: currentFile, name: f.name, dataUrl: frF.result})})
+        .then(function(r){ return r.json(); })
+        .then(function(j){
+          if (j && j.ok) {
+            var t0 = getText() || '';
+            var pre = (caret.e > 0 && t0.charAt(caret.e - 1) !== '\n') ? '\n' : '';
+            /* 数据点方言：渲染区会挂「打开」按钮 → /api/open-ref 系统程序打开。
+               绝不改成 [名](rel) 普通链接——那条是 404 死路。 */
+            var ins = pre + _dpRefLine(f.name, j.rel);
+            insertNativeAtCaret(ins,caret.e,caret.e,sc);
+            showToast('已插入数据点：' + ins.replace(/^\n/, ''));
+          } else {
+            showToast('文件写入失败：' + ((j && j.error) || '未知错误'));
+          }
+        }).catch(function(er){ showToast('文件写入失败：' + er.message); });
+    };
+    frF.readAsDataURL(f);
+  }
   editor.addEventListener('paste', function(e){
     var items = (e.clipboardData || window.clipboardData).items;
     if (!items) return;
     for (var i = 0; i < items.length; i++) {
       if (items[i].type && items[i].type.indexOf('image') === 0) {
         e.preventDefault();
-        if (!currentFile) {
-          showToast('粘贴图片前请先保存文档（Ctrl+S），图片将存入同名 .assets 目录。');
-          openSaveAs();
-          return;
-        }
-        var blob = items[i].getAsFile();
-        var caret = getSel();   /* 异步落盘期间用户可能移动光标：先存插入点 */
-        var fr = new FileReader();
-        fr.onload = function(){
-          /* 写盘唯一入口（SSOT）：一律走服务端 /api/paste-image，
-              服务端按容器落位（.md→<stem>.assets，.smd→包内 assets/） */
-          var __p = fetch('/api/paste-image',{method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({docPath:currentFile,dataUrl:fr.result})}).then(function(r){return r.json();});
-          Promise.resolve(__p)
-            .then(function(j){
-              if (j && j.ok) {
-                var ins = '![](' + j.rel + ')';
-                setSel(caret.e, caret.e);
-                insertPlainText(ins);   /* execCommand 路径自带 input 事件 */
-              } else { showToast('图片保存失败：'+((j&&j.error)||'未知错误')); }
-            }).catch(function(er){ showToast('图片保存失败：'+er.message); });
-        };
-        fr.readAsDataURL(blob);
+        /* 异步落盘期间用户可能移动光标：先存插入点与滚动快照 */
+        pasteImageFile(items[i].getAsFile(), getSel(), _insSnap());
         return;
       }
       /* v2.8 外部文件引用：剪贴板里是真文件（从资源管理器复制 xlsx/pdf/csv…）
@@ -9812,38 +11120,7 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
          文本/网页图片进不了这个分支（它们没有 kind='file'）。 */
       if (items[i].kind === 'file') {
         e.preventDefault();
-        var f = items[i].getAsFile();
-        if (!f) return;
-        if (!currentFile) {
-          showToast('粘贴文件前请先保存文档（Ctrl+S），文件将存入同名 .assets 目录。');
-          openSaveAs();
-          return;
-        }
-        if (f.size > 20 * 1024 * 1024) {
-          showToast('文件超过 20MB 上限（当前 ' + (f.size / 1048576).toFixed(1) + 'MB）');
-          return;
-        }
-        var caretF = getSel();
-        showToast('正在写入 ' + f.name + ' …');
-        var frF = new FileReader();
-        frF.onload = function () {
-          fetch('/api/paste-file', {method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({docPath: currentFile, name: f.name, dataUrl: frF.result})})
-            .then(function(r){ return r.json(); })
-            .then(function(j){
-              if (j && j.ok) {
-                var t0 = getText() || '';
-                var pre = (caretF.e > 0 && t0.charAt(caretF.e - 1) !== '\n') ? '\n' : '';
-                var ins = pre + _dpRefLine(f.name, j.rel);
-                setSel(caretF.e, caretF.e);
-                insertPlainText(ins);
-                showToast('已插入数据点：' + ins.replace(/^\n/, ''));
-              } else {
-                showToast('文件写入失败：' + ((j && j.error) || '未知错误'));
-              }
-            }).catch(function(er){ showToast('文件写入失败：' + er.message); });
-        };
-        frF.readAsDataURL(f);
+        pasteAttachFile(items[i].getAsFile(), getSel(), _insSnap());
         return;
       }
     }
@@ -10384,11 +11661,17 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
       });
     }
   }
-  document.getElementById('btnFiles').addEventListener('click',function(){
+  /* v2.41.0 「文件」钮收进「打开▾」菜单（原独立按钮移除），面板行为不变 */
+  function fmOpen(){
     renderFileList();
     renderHist();                                  /* 右列：历史版本 */
     document.getElementById('fmOverlay').hidden=false;
+  }
+  document.getElementById('openMoreFiles').addEventListener('click',function(){
+    document.getElementById('openMoreMenu').hidden=true;
+    fmOpen();
   });
+  document.getElementById('btnFiles').addEventListener('click',fmOpen);   /* 兼容垫片（hidden） */
   document.getElementById('fmClose').addEventListener('click',function(){
     document.getElementById('fmOverlay').hidden=true;
   });
@@ -11014,7 +12297,7 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
       })
       .catch(function(e){ msg.textContent='模型列表获取失败：'+e.message; });
   }
-  document.getElementById('btnLLM').addEventListener('click',function(){
+  function llmOpen(){
     fetch('/api/llm-config').then(function(r){return r.json();}).then(function(j){
       if(!(j&&j.ok)){ showToast('读取 AI 配置失败'); return; }
       var c=j.config;
@@ -11046,7 +12329,9 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
       document.getElementById('llmOverlay').hidden=false;
       llmRefreshModels(true);   /* 静默预取一次 */
     }).catch(function(e){ showToast('读取 AI 配置失败：'+e.message); });
-  });
+  }
+  /* v2.41.0 AI 钮收进配置▾ */
+  document.getElementById('btnLLM').addEventListener('click',llmOpen);   /* 兼容垫片（hidden） */
   document.getElementById('llmClose').addEventListener('click',function(){
     document.getElementById('llmOverlay').hidden=true;
   });
@@ -11497,14 +12782,23 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
   },true);
   document.addEventListener('keydown',function(e){
     if(e.isComposing)return;
-    if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&!e.altKey){
-      var k=(e.key||'').toLowerCase();
-      if(k==='f'){ e.preventDefault(); fbOpen(false); }
-      else if(k==='h'){ e.preventDefault(); fbOpen(true); }
-    }else if(e.key==='F3'&&!fbBar.hidden){
+    if(kbMatch(e,'find')){ e.preventDefault(); fbOpen(false); }
+    else if(kbMatch(e,'repl')){ e.preventDefault(); fbOpen(true); }
+    else if(kbMatch(e,'fnext',true)&&!fbBar.hidden){
       e.preventDefault(); e.shiftKey?fbPrev():fbNext();
     }
+    /* v2.41.0 加粗/斜体：只在选区位于编辑区内时接管（preventDefault 拦掉
+       浏览器 contenteditable 自带的 <b>/<i> 插入——那会往源码里塞 HTML） */
+    else if(kbMatch(e,'bold')&&_selInEditor()){ e.preventDefault(); fmtApply({wrap:true,pre:'**',post:'**',ph:'粗体'}); }
+    else if(kbMatch(e,'italic')&&_selInEditor()){ e.preventDefault(); fmtApply({wrap:true,pre:'*',post:'*',ph:'斜体'}); }
   });
+  /* 选区锚点是否落在编辑区内（焦点可以在别处，如刚点完工具栏按钮） */
+  function _selInEditor(){
+    try{
+      var n=document.getSelection().anchorNode;
+      return !!n&&(n===editor||editor.contains(n));
+    }catch(e){return false;}
+  }
   fbOptStyle();
   updateAnnCount();
   /* v2.15.0 界面语言：初始值取本机设置（裸键，不参与 ui-settings 同步，
@@ -11665,6 +12959,8 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     [/@@\s*color/,[['@@ color r{这段是红的}','行内着色：色值 = 11 个字母简写（r红 g绿 b蓝 y黄 o橙 p紫 c青 m品红 k黑 w白 a灰）或 3/6/8 位十六进制（不带 #）'],['花括号按层配对','内容可与加粗、~~删除线~~、x^{2} 上标混排，如 @@ color r{价 x^{2}}']]],
     [/^[ ]{0,3}@@\s*MDE/i,[['@@ MDE_{k == v}','执行点数据（low runner）'],['@@ MDE__{…}','隐性公共池（不渲染）'],['@@ MDE import 名 [is 别名] [{global p}]','导入 run，正文原位替换执行结果'],['@@ MDE from 名 import 函数 [is 别名]','从 run 选择性导入']]],
     [/^[ ]{0,3}@@/,[['@@ begin …','块：fill 分栏／full 独占页／page 页区／font 字体字号／color 着色'],['@@ caption{…}','表格题注'],['@@ table{50l:r(…)}','表格宽与列宽方案'],['@@ blank{n}','段间空白'],['@@ meta','元数据锚点'],['@@ MDE_{k == v}','执行点数据（low runner）'],['@@ MDE__{…}','隐性公共池（不渲染）']]],
+    /* v2.41.0 下划线方言：普通 ++ 与重复 ++{y x n}++ */
+    [/\+\+\{/,[[ '++{0 x 9}++','填空线：0=空字符（一个正文字宽的空白），n=1~200，整体带下划线'],['++{□ x 9}++','填字格：□=方框，重复 n 次，整体带下划线'],['++文字++','普通下划线：内容可混排加粗/删除线/上下标']]],
     [/^[ ]{0,3}<<</,[['<<<','缩进包围块：开行 <<< → 中间放内容 → 闭行 <<<，开闭各自独占一行']]]
   ];
   function dgHintUpdate(){

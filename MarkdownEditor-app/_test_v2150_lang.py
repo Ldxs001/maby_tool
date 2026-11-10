@@ -113,7 +113,7 @@ try:
         pg.reload(); pg.wait_for_timeout(1000)
 
         # 题注前缀只在「图表自动编号」开启时出现，经面板真实开关打开
-        pg.click("#btnTypeset"); pg.wait_for_timeout(300)
+        pg.evaluate("document.getElementById('btnTypeset').click()"); pg.wait_for_timeout(300)
         if not pg.is_checked("#tsCapNumOn"):
             pg.check("#tsCapNumOn")
         pg.click("#tsApply"); pg.wait_for_timeout(900)

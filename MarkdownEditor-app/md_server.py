@@ -67,7 +67,23 @@ except Exception as _e:
 PORT = int(os.environ.get("MD_PORT") or 18766)  # MD_PORT：多实例/测试隔离用，默认不变
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 148  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代
+MD_SERVER_VERSION = 149  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代（149：/api/version 增 app 产品版本号）
+
+_APP_VERSION = ""       # 缓存：CHANGELOG.md 首个版本号（与 detect_version 同源）
+
+def _app_version():
+    """产品版本号单一来源 = CHANGELOG.md 首个版本标题（installer/_build_installer.py
+    detect_version 同口径）。读取失败返回空串，前端显示「版本 -」，不抛错。"""
+    global _APP_VERSION
+    if _APP_VERSION:
+        return _APP_VERSION
+    try:
+        with io.open(os.path.join(HERE, "CHANGELOG.md"), "r", encoding="utf-8") as f:
+            m = re.search(r"^#{1,3}\s*v?(\d+\.\d+\.\d+)", f.read(4096), re.M)
+        _APP_VERSION = m.group(1) if m else ""
+    except Exception:
+        _APP_VERSION = ""
+    return _APP_VERSION
 
 # ---------- v2.40.1 自动化写围栏 ----------
 # 前端在自动化浏览器（Playwright/CDP，navigator.webdriver=true）里会给全部
@@ -1859,6 +1875,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # 启动画面据此判断"窗口真正加载出来了"再淡出（v1.11.1）。
             self._send(200, json.dumps(
                 {"ok": True, "version": MD_SERVER_VERSION,
+                 "app": _app_version(),
                  "sessions": len(_LIVE_SESSIONS)},
                 ensure_ascii=False))
             return
@@ -1939,6 +1956,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # 启动画面据此判断"窗口真正加载出来了"再淡出（v1.11.1）。
             self._send(200, json.dumps(
                 {"ok": True, "version": MD_SERVER_VERSION,
+                 "app": _app_version(),
                  "sessions": len(_LIVE_SESSIONS)},
                 ensure_ascii=False))
             return

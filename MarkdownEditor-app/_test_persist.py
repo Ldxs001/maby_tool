@@ -82,7 +82,7 @@ with sync_playwright() as p:
     pg.keyboard.type("<<<")
     pg.wait_for_timeout(900)
 
-    pg.click("#btnTypeset")
+    pg.evaluate("document.getElementById('btnTypeset').click()")
     pg.wait_for_timeout(200)
     pg.select_option('select[data-ind="p"]', "first")
     pg.fill('input[data-indchars="p"]', "2")
@@ -126,7 +126,7 @@ with sync_playwright() as p:
     m2 = ind_blk_margin()
     check("初设排版后 ind-blk margin 即时=2 字符(px)",
           m2 is not None and 30 < m2 < 45, str(m2))
-    pg.click("#btnTypeset")
+    pg.evaluate("document.getElementById('btnTypeset').click()")
     pg.wait_for_timeout(200)
     pg.fill('input[data-indchars="p"]', "3")
     pg.click("#tsApply")

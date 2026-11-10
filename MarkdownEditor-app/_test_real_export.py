@@ -92,15 +92,21 @@ try:
         url = "http://127.0.0.1:%d/?file=%s" % (
             PORT, urllib.parse.quote(SRC.replace("\\", "/")))
         pg.goto(url)
+        # 等文档正文进编辑区再动排版面板：goto 后立即点 tsApply 会与
+        # 文档 fetch 竞态（首渲染图片挂载被打断，img 永不加载——实测卡死）。
+        # v2.39 横栏化后本测试长期失修，此处补加载守卫。
+        pg.wait_for_function(
+            "()=>(document.getElementById('editor')||{textContent:''})"
+            ".textContent.length>0", timeout=20000)
         # 显式设 A4+25/18/25/18：服务端 ui-state 会恢复本机真实排版（如 A3/
         # mt=30），{40}→版心×0.4 断言须在确定态下做（A4 版心 6.85in）
         pg.evaluate(
             "()=>{document.getElementById('btnTypeset').click();"
             "document.getElementById('tsPaper').value='A4';"
-            "document.getElementById('tsMt').value=25;"
-            "document.getElementById('tsMr').value=18;"
-            "document.getElementById('tsMb').value=25;"
-            "document.getElementById('tsMl').value=18;"
+            "document.getElementById('pvMt').value=25;"
+            "document.getElementById('pvMr').value=18;"
+            "document.getElementById('pvMb').value=25;"
+            "document.getElementById('pvMl').value=18;"
             "document.getElementById('tsApply').click();}")
         pg.wait_for_timeout(800)
         # 等全部内容渲染：图片加载 + 图表完成
@@ -132,7 +138,9 @@ try:
                      content_type="application/json",
                      body=json.dumps({"ok": True, "path": docx_path})))
         with pg.expect_response("**/api/export-docx**", timeout=60000) as ri:
-            pg.click("#btnExportDocx")
+            # v2.39 后 docx 入口在导出▾菜单里（btnExportDocx 独立按钮已移除）
+            pg.click("#btnExportMore")
+            pg.click("#expDocx")
         rj = ri.value.json()
         check("docx 导出 ok", rj.get("ok") is True, str(rj)[:120])
         xml = zipfile.ZipFile(docx_path).read(

@@ -100,7 +100,7 @@ def main():
 
         def open_ts():
             if pg.evaluate("() => !!document.getElementById('tsOverlay').hidden"):
-                pg.click("#btnTypeset")
+                pg.evaluate("document.getElementById('btnTypeset').click()")
                 pg.wait_for_timeout(450)
 
         pg.evaluate("""(t) => { const ed=document.getElementById('editor');
@@ -192,7 +192,7 @@ def main():
         pg.wait_for_timeout(2600)
         def open_ts2():
             if pg.evaluate("() => !!document.getElementById('tsOverlay').hidden"):
-                pg.click("#btnTypeset")
+                pg.evaluate("document.getElementById('btnTypeset').click()")
                 pg.wait_for_timeout(450)
         open_ts2()
         pg.fill("#tsCpl", str(orig))

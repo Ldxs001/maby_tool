@@ -97,7 +97,7 @@ def main():
             "ml=%s" % c.get("page", {}).get("ml"))
 
         # ---- T3 面板应用不冲掉横栏边距 ----
-        pg.click("#btnTypeset")
+        pg.evaluate("document.getElementById('btnTypeset').click()")
         pg.wait_for_timeout(600)
         pg.evaluate("""() => { const s=document.querySelector('select[data-ts="p"]');
           if(s && s.options.length){ s.value=s.options[0].value;

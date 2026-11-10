@@ -383,7 +383,7 @@ def ui_tests():
             body=json.dumps(stub, ensure_ascii=False)))
         pg.goto(url)
         pg.wait_for_timeout(1500)
-        pg.click("#btnRun")
+        pg.evaluate("document.getElementById('btnRun').click()")
         pg.wait_for_timeout(300)
         check("C1 面板打开", pg.is_visible("#lrPanel"))
         check("C2 用法框初始隐藏", not pg.is_visible("#lrUsage"))

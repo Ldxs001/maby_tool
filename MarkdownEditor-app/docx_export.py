@@ -77,9 +77,66 @@ def _children(el):
 def mathml_to_omml(mathml_str):
     root = etree.fromstring(mathml_str.encode("utf-8"))
     omml = _mk("oMath")
-    for c in _children(root):
-        omml.append(_tr(c))
+    for om in _tr_seq(_children(root)):
+        omml.append(om)
     return omml
+
+
+def _empty_mrow_base(el):
+    """msub/msup/msubsup 的 base 是否为空 mrow（无子元素无文本）。
+
+    latex2mathml 对 {}^{a}_{b}X 这类前置角标产出的是【兄弟结构】：
+      <msubsup><mrow/>…sub…sup…</msubsup><mi>X</mi>
+    中心 X 不在 msubsup 里。OMML 正规写法是 m:sPre（Pre-Sub-Superscript，
+    ECMA-376 CT_SPre，Word 公式工具栏的"上下标前置"），且必须把后随
+    兄弟吞进 m:e——v2.41.0 方案 §7.9 第七版定案，撤回"隐形定界符包空
+    base"的方案 0（主人实测能显示但不是 OMML 正规结构）。"""
+    if len(el) == 0:
+        return False
+    base = None
+    for c in el:
+        if isinstance(c.tag, str):
+            base = c
+            break
+    if base is None:
+        return False
+    if etree.QName(base).localname != "mrow":
+        return False
+    return len(_children(base)) == 0 and not (base.text or "").strip()
+
+
+def _tr_seq(elems):
+    """按序转换一列 MathML 兄弟节点。遇到"空 base 上下标 + 后随兄弟"
+    时合并成 m:sPre，一次吞掉两个节点；其余照常逐个 _tr。
+    空底无兄弟（如手打的 {}^{3}）不进这里，走 _tr 原路径不崩。"""
+    out = []
+    i = 0
+    n = len(elems)
+    while i < n:
+        el = elems[i]
+        tag = etree.QName(el).localname
+        if (tag in ("msub", "msup", "msubsup") and _empty_mrow_base(el)
+                and i + 1 < n):
+            kids = _children(el)[1:]  # 去掉空 base
+            sub = sup = None
+            if tag == "msub" and kids:
+                sub = _mk("sub", _tr(kids[0]))
+            elif tag == "msup" and kids:
+                sup = _mk("sup", _tr(kids[0]))
+            elif tag == "msubsup" and len(kids) >= 2:
+                sub = _mk("sub", _tr(kids[0]))
+                sup = _mk("sup", _tr(kids[1]))
+            # 子元素序 e、sub、sup，与 sSubSup 同序；缺的一侧留空参数
+            # （schema 允许，nary 分支的空 m:e 是先例）
+            sp = _mk("sPre", _mk("e", _tr(elems[i + 1])))
+            sp.append(sub if sub is not None else _mk("sub"))
+            sp.append(sup if sup is not None else _mk("sup"))
+            out.append(sp)
+            i += 2
+            continue
+        out.append(_tr(el))
+        i += 1
+    return out
 
 
 def _tr(el):
@@ -102,12 +159,13 @@ def _tr(el):
         return _text_run(txt)
     if tag == "mspace":
         return _text_run(" ")
-    # 分组容器：无括号定界（begChr/endChr 空串 = Word 的"括号-无"）
+    # 分组容器：无括号定界（begChr/endChr 空串 = Word 的"括号-无"）；
+    # 子节点走 _tr_seq——sPre 兄弟合并不只发生在顶层，mrow 里面同样要认
     if tag in ("mrow", "mstyle", "mpadded", "mphantom"):
         return _mk("d",
                    _mk("dPr", _mk("begChr", **{"val": ""}),
                        _mk("endChr", **{"val": ""})),
-                   _mk("e", *[_tr(k) for k in kids]))
+                   _mk("e", *_tr_seq(kids)))
 
     # 分式
     if tag == "mfrac" and len(kids) >= 2:
@@ -201,7 +259,7 @@ def _tr(el):
                 mr = _mk("mr")
                 for cell in _children(row):
                     if etree.QName(cell).localname == "mtd":
-                        mr.append(_mk("e", *[_tr(c) for c in _children(cell)]))
+                        mr.append(_mk("e", *_tr_seq(_children(cell))))
                 m.append(mr)
         return m
 

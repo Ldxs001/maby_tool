@@ -66,7 +66,7 @@ with sync_playwright() as p:
         pg.fill('input[data-indchars="%s"]' % key, "2")
 
     # 1. 打开排版面板，列表/引用选「整体缩进」，应用
-    pg.click("#btnTypeset")
+    pg.evaluate("document.getElementById('btnTypeset').click()")
     pg.wait_for_timeout(200)
     sel_ind("li", "block")
     sel_ind("quote", "block")
@@ -85,7 +85,7 @@ with sync_playwright() as p:
     check("应用阶段无页面异常", not errors, "; ".join(errors[:2]))
 
     # 3. 重开面板回读
-    pg.click("#btnTypeset")
+    pg.evaluate("document.getElementById('btnTypeset').click()")
     pg.wait_for_timeout(200)
     li_v = pg.eval_on_selector('select[data-ind="li"]', "e=>e.value")
     q_v = pg.eval_on_selector('select[data-ind="quote"]', "e=>e.value")
