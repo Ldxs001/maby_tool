@@ -141,8 +141,19 @@ def make_staging(ver):
     os.makedirs(docs, exist_ok=True)
     for f in DIST_DOCS_FILES:
         shutil.copy2(os.path.join(SRC, "docs", f), os.path.join(docs, f))
+    # 内置文档的 .mde 元数据档案（zero.json）建档即只读。目标是只读文件时
+    # copytree 覆盖它必 PermissionError——实测报错的永远是 .mde/zero.json，
+    # 手删那一份就立刻成功、接着轮到下一份。所以每轮先把 .mde 整目录删掉再
+    # 复制（目录里只有 1~2 个文件），复制用 copyfile：只搬内容不带属性，
+    # 包内保持可写。上面 137 行的 _clear_readonly_tree 继续兜上一轮遗留。
     for d in DIST_DOCS_DIRS:
-        shutil.copytree(os.path.join(SRC, "docs", d), os.path.join(docs, d), dirs_exist_ok=True)
+        tgt_mde = os.path.join(docs, d, ".mde")
+        if os.path.isdir(tgt_mde):
+            _clear_readonly_tree(tgt_mde)
+            shutil.rmtree(tgt_mde, ignore_errors=True)
+    for d in DIST_DOCS_DIRS:
+        shutil.copytree(os.path.join(SRC, "docs", d), os.path.join(docs, d),
+                        dirs_exist_ok=True, copy_function=shutil.copyfile)
     for f in DIST_FILES:
         shutil.copy2(os.path.join(SRC, f), os.path.join(STAGING, f))
     # 举报收件邮箱种子：不入库（.gitignore 排除），只随构建产物分发。

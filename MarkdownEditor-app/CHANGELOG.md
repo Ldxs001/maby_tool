@@ -22,6 +22,9 @@
 - **产物选择器只认 `data-fa`、不挂 `.mde-font`**：HTML 导出走 `inlineStylesInto` 会 `removeAttribute("class")`，挂 class 的规则在那条路径打不中；打印/分页路径反而保留 class，属性选择器两边都通。同时把 `--mff`/`--mff-w`/`--mfs`/`--mfa` 补进 `inlineStylesInto` 的属性清单，否则变量在导出件里未定义、`var(--mfa)` 那条 `!important` 会因 guaranteed-invalid 整条失效。
 - **Word 段落对齐**：Word 的段落对齐不继承，新增 `_font_align()` 从 font 容器样式取 `WD_ALIGN`，标题与段落两分支各落一次值；段落自带对齐仍优先于容器。
 
+**修复**
+- **构建链：内置文档元数据档案覆盖失败**：`installer/_build_installer.py` 复制 docs 时，`.mde/zero.json`（建档即只读）覆盖报 `Permission denied`，且报错随份数推进——删掉报错那份就轮到下一份；`_clear_readonly_tree` 单测有效但在整树复制里赶不上属性回写。改为复制前先删 `.mde` 整目录、复制改用 `copyfile`（只搬内容不继承只读属性），包内文件保持可写，同一份 staging 可重复构建。
+
 **变更**
 - **使用指南「块级字体」一节改写**：标题改为 `@@ begin font{"字体名" 对齐 字号}`，补齐对齐字母表、纯对齐块、token 剥取顺序（数字当字号、单字母 `lcrj` 当对齐、其余拼成字体名）、表格与代码块不跟随的原因、引号名规避 `c` 冲突；并写一节的 `font` 表格行与嵌套规则同步，语法速查表与概览行同步。
 - **D215 诊断文案**：`font 参数非法` 的提示补上对齐字母集，与实际语法一致。
