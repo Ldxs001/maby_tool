@@ -67,7 +67,7 @@ except Exception as _e:
 PORT = int(os.environ.get("MD_PORT") or 18766)  # MD_PORT：多实例/测试隔离用，默认不变
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 152  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代（152：@@ blank{break} 的分页 CSS、页数测量镜像与搬页模拟；151：元数据档案锁位在已存在路径补回）
+MD_SERVER_VERSION = 153  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代（153：引用块 CSS 生成器收口与导出模板调用；152：@@ blank{break} 的分页 CSS、页数测量镜像与搬页模拟；151：元数据档案锁位在已存在路径补回）
 
 _APP_VERSION = ""       # 缓存：CHANGELOG.md 首个版本号（与 detect_version 同源）
 
@@ -3912,6 +3912,38 @@ FIGCAP_BASE_CSS = """
 .markdown-body [data-blank="break"]{break-before:page;}
 """
 
+def _quote_css(bd="#4a6cf7", bg="#f5f7ff", radius=None,
+               margin="1em 0", color=None, first="border"):
+    """引用块 CSS 声明的唯一生成入口。返回**不含选择器、不含花括号**的声明串。
+
+    P0 阶段只有 bar 一档，所以没有 style 参数——多加一个就是提前把 P1 的形状
+    焊死在 P0 上。P1 会在这里长出 style/bd/bg 三参。
+
+    first 只控制**属性的书写顺序**，不改变任何语义：
+      "border" → border-left;background;padding;margin   导出模板口径
+      "margin" → margin;padding;border-left;background   分页 PAGED_BASE_CSS 口径
+    留这个参数的唯一原因：P0 的验收判据是"导出件与 v2.41.0 逐字节一致"。
+    CSS 属性换序虽无语义差别，但 PDF 内部字节会变、判据当场失效。
+    P1 统一口径后可删。
+
+    结尾带分号，与 P0 之前的字面量逐字节对齐（旧串都是 `...;}` 收尾）。
+
+    color 只有预览侧用到（.markdown-body blockquote 带 color:var(--text)），
+    导出两路都不传。
+    """
+    if first == "margin":
+        parts = ["margin:%s" % margin, "padding:.4em 1em",
+                 "border-left:3px solid %s" % bd, "background:%s" % bg]
+    else:
+        parts = ["border-left:3px solid %s" % bd, "background:%s" % bg,
+                 "padding:.4em 1em", "margin:%s" % margin]
+    if radius:
+        parts.append("border-radius:%s" % radius)
+    if color:
+        parts.append("color:%s" % color)
+    return ";".join(parts) + ";"
+
+
 PAGED_BASE_CSS = """
 *{box-sizing:border-box;}
 /* font-family/font-size 必须与预览 body 基准逐字一致（--sans 链 + 15px）：
@@ -5334,7 +5366,7 @@ def build_standalone_html(md_path, body_html, ts_css, page_cfg=None,
         # v2.33.0 与预览/打印同口径：折行，不给横向滚动。三条通道一旦各写
         # 一套，同一段代码在导出件里要拖才能看全、在纸上却是折好的。
         'pre{background:#f4f4f4;padding:14px;border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;}'
-        'blockquote{border-left:3px solid #4a6cf7;background:#f5f7ff;padding:.4em 1em;margin:1em 0;}'
+        'blockquote{' + _quote_css() + '}'
         'table{border-collapse:collapse;width:100%;max-width:100%;table-layout:auto;}'
         'th,td{border:1px solid #ddd;padding:7px 12px;overflow-wrap:anywhere;}'
         # v2.33.0 @@ begin font：块级临时字体/字号。导出件没有别处提供

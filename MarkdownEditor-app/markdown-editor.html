@@ -1074,6 +1074,11 @@
       border-radius:50%;background:#fff;transition:left .15s;}
     .ts-sw:checked::after{left:18px;}
     .ts-chk{accent-color:#4a6cf7;cursor:pointer;margin:0 2px 0 0;vertical-align:middle;}
+    /* v2.42.0 「不画」附加勾选项：跟 .ts-chk 同族，不新开控件类型。
+       ts-sw 有 order:2 永远排最后，所以本项落在取色器与开关之间。 */
+    .ts-none{display:flex;align-items:center;gap:2px;white-space:nowrap;
+      font-size:12px;opacity:.82;cursor:pointer;}
+    .ts-ctl input[type=color]:disabled{opacity:.35;cursor:not-allowed;}
     .ts-meta-stat{margin-top:5px;padding-top:5px;border-top:1px dashed rgba(128,128,128,.28);
       font-size:11px;line-height:1.5;opacity:.62;}
     .ts-sep{display:flex;align-items:center;justify-content:space-between;margin:12px 0 6px;font-weight:600;opacity:.85;font-size:12px;border-top:1px solid rgba(128,128,128,.22);padding-top:8px;}
@@ -1656,6 +1661,9 @@
      <div class="ts-row"><label title="段落缩进（按元素独立，字符数 × 当前字号自动换算）">引用块 · 字符数</label><span class="ts-ctl"><select data-ind="quote"></select><span class="ts-num"><input data-indchars="quote" type="number" min="0" max="8" step="0.5" value="2"><i>字</i></span></span></div>
      <div class="ts-row"><label title="段落缩进（按元素独立，字符数 × 当前字号自动换算）">列表 · 字符数</label><span class="ts-ctl"><select data-ind="li"></select><span class="ts-num"><input data-indchars="li" type="number" min="0" max="8" step="0.5" value="2"><i>字</i></span></span></div>
      <div class="ts-row"><label title="编号/圆点站到文字块外面，多行项的续行与首行文字左沿对齐；关闭则续行顶格（v2.13.5 及更早的口径）">列表标记外凸</label><span class="ts-ctl"><input id="tsHangOn" class="ts-sw" type="checkbox"></span></div>
+     <div class="ts-row"><label title="引用块的外观。Word 导出一律画成竖线——Word 的段落边框没有字形、也没有圆角，硬做只能浮一个文本框或者贴图，分页就乱">引用样式</label><span class="ts-ctl"><select id="tsQuoteStyle"><option value="bar">竖线</option><option value="box">直角框</option><option value="round">圆角框</option><option value="quote">大引号</option></select></span></div>
+     <div class="ts-row"><label title="关＝跟主题走（预览吃 --accent，导出与打印吃各自的固定值）；开＝用右边这个色。大引号档用它画字形；勾「不画」＝完全不画，连大引号一起隐藏">引用边框色</label><span class="ts-ctl"><input id="tsQuoteBdOn" class="ts-sw" type="checkbox"><input id="tsQuoteBdColor" type="color" value="#4a6cf7"><label class="ts-none" title="不画边框（等价 #00000000）；大引号档连引号一起隐藏。优先级高于开关">不画<input id="tsQuoteBdNone" class="ts-chk" type="checkbox"></label></span></div>
+     <div class="ts-row"><label title="关＝跟主题走（预览吃 --accent-soft）；开＝用右边这个色。设了之后深色纸面也保持它，不被纸面规则压回去；勾「不画」＝完全透明不铺色">引用底色</label><span class="ts-ctl"><input id="tsQuoteBgOn" class="ts-sw" type="checkbox"><input id="tsQuoteBgColor" type="color" value="#f5f7ff"><label class="ts-none" title="不铺底色（等价 #00000000）。优先级高于开关">不画<input id="tsQuoteBgNone" class="ts-chk" type="checkbox"></label></span></div>
      </div>
      <div class="ts-card">
      <div class="ts-card-h">目录</div>
@@ -2295,6 +2303,83 @@ function _colorVal(s){
   if(/^[0-9a-f]{6}$/.test(s)||/^[0-9a-f]{8}$/.test(s))return '#'+s;
   return '';
 }
+
+/* ---- v2.42.0 P2 引用块行末 {…} 参数 ----------------------------------
+   文法与 _fontParseParam 同族：全角空格归一、引号只包样式名、裸 token 按
+   **形状**分类、顺序不限、无占位符、三项全空 return null（fail-closed）。
+   样式白名单必须先于颜色判——将来某个档名若恰好是合法 HEX，不能因为改个
+   名字就静默改语义。两个颜色形状完全相同，只能靠出现顺序区分：先边框后底色。
+   与图片后缀的分工不靠猜 token 含义，见 _imgOwnsTrailingBrace。 ---------- */
+var _Q_STYLES='bar box round quote';
+function _quoteParseParam(raw){
+  var s=String(raw==null?'':raw).replace(/\u3000/g,' ').trim();
+  if(!s)return null;
+  var style='',cols=[],rest=s;
+  var qi=s.match(/"([^"]+)"|\u201c([^\u201d]+)\u201d/);
+  if(qi){
+    var qv=(qi[1]!==undefined?qi[1]:qi[2]).trim();
+    if(_Q_STYLES.split(' ').indexOf(qv)<0)return null;   /* 引号只许包样式名 */
+    style=qv;
+    rest=(s.slice(0,qi.index)+' '+s.slice(qi.index+qi[0].length)).trim();
+  }
+  var toks=rest?rest.split(/\s+/):[];
+  for(var i=0;i<toks.length;i++){
+    var t=toks[i];if(!t)continue;
+    if(_Q_STYLES.split(' ').indexOf(t)>=0){
+      if(style)return null;                                /* 两个样式 → 非法 */
+      style=t;
+    }else{
+      var c=_colorVal(t);
+      if(!c||cols.length>=2)return null;                  /* 第三个颜色无语义 */
+      cols.push(c);
+    }
+  }
+  if(!style&&!cols.length)return null;
+  return {style:style,bd:cols[0]||'',bg:cols[1]||''};
+}
+/* 「这串花括号像是引用参数吗」——只用来决定要不要报 D217。
+   别家方言的行末花括号（@@ color r{红}、x^{2}、@@ MDE_{k == v}）不是
+   写错的引用参数，不该被诊断刷屏。判据按形状：含样式名，或全部 token
+   都是合法颜色。不按「{ 前面那个字符」这种痕迹猜。 */
+function _qLooksLikeParam(raw){
+  var s=String(raw==null?'':raw).replace(/\u3000/g,' ').trim();
+  if(!s)return false;
+  var toks=s.split(/\s+/),anyColor=false;
+  for(var i=0;i<toks.length;i++){
+    var t=toks[i].replace(/^["\u201c]+|["\u201d]+$/g,'');
+    if(_Q_STYLES.split(' ').indexOf(t)>=0)return true;
+    if(_colorVal(t))anyColor=true;else return false;
+  }
+  return anyColor;
+}
+/* 找出行末那个 {...} 的左花括号下标；不配对 / 不以 } 收尾 → -1。
+   从右往左配平：{c}{b a} 会返回第二个 {，正是引用参数的位置。 */
+function _qTrailingBrace(line){
+  var t=line.replace(/\s+$/,'');
+  if(t.charAt(t.length-1)!=='}')return -1;
+  var d=0;
+  for(var i=t.length-1;i>=0;i--){
+    var c=t.charAt(i);
+    if(c==='}')d++;
+    else if(c==='{'){d--;if(d===0)return i;}
+  }
+  return -1;
+}
+/* 结构判据（方案 §4.3②）：行末 { 是否已被图片后缀认领。
+   问的是「最后一个图片匹配延伸到哪」，不是「{ 前是不是 )」——后者会把
+   原文(he said){b a} 这种正文误判成不归引用。必须用共享的 RE_IMG；
+   g 正则 lastIndex 有状态，每次扫描前重置。末尾是 > 不是 >=：
+   {c}{b a} 边界相等，用 >= 会把引用参数判成图片的（实测踩过）。 */
+function _imgOwnsTrailingBrace(line,bracePos){
+  RE_IMG.lastIndex=0;
+  var m,last=null;
+  while((m=RE_IMG.exec(line))!==null){
+    last=m;
+    if(RE_IMG.lastIndex===m.index)RE_IMG.lastIndex++;
+  }
+  return !!(last&&last[0].indexOf('{')>=0
+            &&(last.index+last[0].length)>bracePos);
+}
 /* ---- v2.33.0 @@ begin font{"字体名" 字号} 的参数解析 ----
    v2.41.0 加对齐，三种参数都在同一个花括号里，顺序不限：
      font{"Microsoft YaHei Light" 12pt}   引号包名（名里有空格时用这个）
@@ -2540,6 +2625,11 @@ function _tickScan(text){
   }
   return pairs;
 }
+/* v2.42.0 P2：图片后缀正则提为共享常量。块层判「行末 {…} 归谁」与内联层
+   真正做替换，必须是同一个正则对象——各抄一份就是新的分叉点：只要两边差
+   一个字符，就会出现「预览归图、导出归引用」。g 标志带 lastIndex 状态，
+   _imgOwnsTrailingBrace 每次扫描前必须重置为 0。 */
+var RE_IMG=/!\[([^\]]*)\]\(([^)]+?)(?:\s+"([^"]*)")?\)(?:\s*\{([1-9]\d{0,2})?([clr])?(?::([^{}\n]*))?\})?/g;
 function parseInline(text,noMde){
   var codes=[];
   /* 反斜杠转义的反引号（\`）不参与配对：先换私用区字符，配对完还原成字面反引号。
@@ -2687,7 +2777,7 @@ function parseInline(text,noMde){
      [1-9]\d{0,2} 捕获，>100 钳到 100；对齐后缀独立可选（仅 {c} 也合法）；
      非法整体不进参数组（后缀原样留在正文可见，fail-closed）。
      参数组在 `)` 之外，保存时的路径改写只动括号内路径，天然不触碰后缀。 */
-  text=text.replace(/!\[([^\]]*)\]\(([^)]+?)(?:\s+"([^"]*)")?\)(?:\s*\{([1-9]\d{0,2})?([clr])?(?::([^{}\n]*))?\})?/g,function(m,alt,src,title,wpct,algn,captoks){
+  text=text.replace(RE_IMG,function(m,alt,src,title,wpct,algn,captoks){
     /* 对齐内联进 img 自身 style（display:block + margin auto）而非
        p 的 text-align——ts-style 面板档 !important 按源序后置会盖掉
        主 CSS 的 p:has() 选择器规则；img 自身 margin 与 p text-align
@@ -3978,7 +4068,33 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
       var _qAt=i;
       var quote=[];
       while(i<lines.length && /^[ ]*>/.test(lines[i])){quote.push(lines[i].replace(/^[ ]*>[ ]?/,''));i++;}
-      html+='<blockquote>'+parseMarkdown(quote.join('\n'),_lv,opts,_base+_qAt,_lv3)+'</blockquote>';
+      /* v2.42.0 P2：行末 {…} 临时覆盖。剥的是**整个块**的最后一个非空行，
+         不是某一行——参数属于块。此时 quote[] 已去掉 > 前缀，正则不必处理 >。
+         失败一律不剥（原串留在正文），不静默吃掉用户写的东西。 */
+      var _qAttr='',_qLi=-1;
+      for(var _qi=quote.length-1;_qi>=0;_qi--){
+        if(!quote[_qi].trim())continue;
+        _qLi=_qi;break;
+      }
+      if(_qLi>=0){
+        var _qLine=quote[_qLi],_qBp=_qTrailingBrace(_qLine);
+        if(_qBp>=0 && !_imgOwnsTrailingBrace(_qLine,_qBp)){
+          var _qClose=_qLine.replace(/\s+$/,'').length-1;
+          var _qRaw=_qLine.slice(_qBp+1,_qClose);
+          var _qp=_quoteParseParam(_qRaw);
+          if(_qp){
+            quote[_qLi]=_qLine.slice(0,_qBp)+_qLine.slice(_qClose+1);
+            if(!quote[_qLi].trim())quote.splice(_qLi,1);
+            if(_qp.style)_qAttr+=' data-qstyle="'+_qp.style+'"';
+            if(_qp.bd)_qAttr+=' data-qbd="'+_qp.bd+'"';
+            if(_qp.bg)_qAttr+=' data-qbg="'+_qp.bg+'"';
+          }else if(_qLooksLikeParam(_qRaw)){
+            _dgE(_qAt+_qLi,'D217','引用参数无效：{样式 边框色 底色}，样式取 bar|box|round|quote，颜色见色卡；本块按原样渲染','warn');
+          }
+        }
+      }
+      if(!quote.join('').trim())_dgE(_qAt,'D218','引用块只剩参数，已按空引用处理','warn');
+      html+='<blockquote'+_qAttr+'>'+parseMarkdown(quote.join('\n'),_lv,opts,_base+_qAt,_lv3)+'</blockquote>';
       curInd=IPX.quote;
       continue;
     }
@@ -5761,7 +5877,7 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     q.t=setTimeout(function step(){
       if(!renderQueue || renderQueue!==q) return;
       var bi=q.changed[q.idx];
-      if(bi===undefined){ renderQueue=null; tagAnchorLines(q.blocks,q.startLines); applyAutoNum(); applyCapNum(); fitFig(); buildOutline(); scheduleRunPass(); queueLatinWrap(); return; }
+      if(bi===undefined){ renderQueue=null; tagAnchorLines(q.blocks,q.startLines); applyAutoNum(); applyCapNum(); fitFig(); buildOutline(); scheduleRunPass(); queueLatinWrap(); _quoteApplyInline(); return; }
       q.idx++;
       var div=q.existing[bi];
       var fresh=false;
@@ -8561,6 +8677,153 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
       .then(function(j){ if(!j||!j.ok){ showToast('打开失败：'+((j&&j.error)||'未知错误')); } })
       .catch(function(e){ showToast('打开失败：'+e.message); });
   }
+  /* 引用块 CSS 声明的唯一生成入口，与 md_server.py 的 _quote_css 同构。
+     P0 只有 bar 一档，故无 style 参数（多加一个就是提前把 P1 的形状焊死在
+     P0 上）。返回不含选择器、不含花括号的声明串，结尾带分号——调用处写成
+     '<sel>{'+_quoteCss({...})+'}'
+     属性顺序固定 border-left;background;padding;margin，与 P0 之前的字面量
+     逐字节一致：J1 比的是字节，语义等价不算数。 */
+  function _quoteCss(p){
+    p=p||{};
+    var s='border-left:3px solid '+(p.bd||'#4a6cf7')
+         +';background:'+(p.bg||'#f5f7ff')
+         +';padding:.4em 1em;margin:'+(p.margin||'1em 0')+';';
+    if(p.radius)s+='border-radius:'+p.radius+';';
+    if(p.color)s+='color:'+p.color+';';
+    return s;
+  }
+  /* v2.42.0 引用样式的色值白名单：只认 #RRGGBB / #RRGGBBAA，脏值一律回空。
+     空＝跟随主题（今天的口径），不是"无边框"——不会把整块变成黑底。
+     缺 # 补上、大小写归一，免得同一色在配置里存出四种写法。
+     定义在 tsCfg 的 IIFE 之外：配置读取与 _quoteRules 都用这一份，
+     P2 的 {…} 临时参数也直接喂进来，校验只有一处。 */
+  function _qcHex(v){
+    v=String(v||'').replace(/^\s+|\s+$/g,'');
+    if(!v)return '';
+    if(!/^#?[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(v))return '';
+    return (v.charAt(0)==='#'?v:'#'+v).toLowerCase();
+  }
+  /* v2.42.0 全局引用样式：四档规则块（bar/box/round/quote）。
+     默认态（style=bar 且两色都空）返回空串——基线 CSS 本来就是它（预览 :330 /
+     导出模板 / PAGED_BASE_CSS），再产一遍是同值重复，还会跟深纸面那条
+     `background:…!important` 打架。这与 cpl=0 时字距整段不产出同一形态：
+     不是"没配置"，是"默认值已经由基线实现"。
+     色必须落成绝对色：导出/打印不吃 var()（后端只做 #preview→.markdown-body 替换）。
+     选择器末段 .markdown-body.md-tone-dark 专为压过 :9474 那条 !important 而加
+     ——同特异性由源序定胜负，所以本段必须拼在纸面段之后（见 applyTypeset）。 */
+  function _quoteRules(q, tone){
+    q=q||{};
+    var style=_Q_STYLES.split(' ').indexOf(q.style)>=0?q.style:'bar';
+    /* 色在这里再校验一次，不靠调用方：P2 的 {…} 参数是直接喂进来的，
+       脏值一旦进 CSS 就是"3px solid red"这种静默失败。 */
+    var bd=_qcHex(q.bd), bg=_qcHex(q.bg);
+    return _quoteRulesFor(
+      '#preview blockquote, .markdown-body blockquote, .markdown-body.md-tone-dark blockquote',
+      style, bd, bg, tone, false);
+  }
+  /* v2.42.0 P2：同一套规则既给全局档用，也给单个块的 {…} 覆盖用。
+     selB 由调用方给全（含深纸面那一项）；force=true 时不许走「默认返回空串」
+     ——块上写了 {bar} 就是要把全局 quote 档压回 bar，返回空串等于没覆盖。
+     选择器带属性时特异性天然高于 .markdown-body.md-tone-dark blockquote，
+     background 的 !important 直接压过深纸面规则，不必改 :9574 那条。 */
+  function _quoteRulesFor(selB, style, bd, bg, tone, force){
+    if(!force&&style==='bar'&&!bd&&!bg)return '';
+    var dark=(tone==='dark');
+    var C=bd||(dark?'#7aa2f7':'#4a6cf7');
+    var B=bg||(dark?'rgba(122,162,247,.10)':'#f5f7ff');
+    /* 颜色只做颜色的事（2026-11-12 用户纠正）：alpha=00 只是"看不见"，
+       宽度、位置、上下留白全由样式档决定，一个都不动。真不想要字形/边框
+       就去换 bar、box 档，别拿透明色当"删除"用——那是让颜色改结构。
+       所以这里不为透明开任何分支，C / B 原样进 CSS，浏览器自己把
+       #rrggbb00 画成透明。半透明同理；Word 无透明度，P3 再按 alpha 降级。 */
+    /* 伪元素不能拼在逗号组后面（只作用于最后一项），逐个选择器展开 */
+    function pseudo(sfx){
+      return selB.split(', ').map(function(s){return s+sfx;}).join(', ');
+    }
+    /* 即便 C 是透明的也要写出 3px：不写就继承基线里那条蓝色竖线，
+       等于用户设的色没生效（2026-11-12 渲染实测）。宽度归样式，色归参数。 */
+    var r='', border='border-left:3px solid '+C+';';
+    var bgd='background:'+B+' !important;';
+    if(style==='bar'){
+      r=selB+'{'+border+bgd+'padding:.4em 1em;'
+        +'border-radius:0 var(--radius,6px) var(--radius,6px) 0;}';
+    }else if(style==='box'||style==='round'){
+      /* border 简写会重置基础 CSS 的 border-left，四边才画得齐 */
+      r=selB+'{border:1px solid '+C+';'+bgd
+        +'padding:.6em 1em;border-radius:'+(style==='round'?'6px':'0')+';}';
+    }else{
+      /* 大引号档：一对开引号在左上角、一对闭引号在右下角（用户参考图形态）。
+         字形是 U+275D ❝ / U+275E ❞ ——**一个字符自带两枚饱满墨滴**，
+         就是常见的 "66 / 99" 引号图形。早先用 \201C\201C 是细体逗号引号，
+         实测四条细撇、既不饱满也不成对，已废；U+275D 用通用 serif 族即可
+         正常显示（系统回退到符号字体），不依赖专有字体名。
+         伪元素字号 4.6em，墨迹约占 3.8 个父级 em 高，所以上下 padding 必须
+         给到 3.2/3.4em ——字形是绝对定位、不占正文流，不给就会盖住首末行。
+         定位里的 em 按伪元素自身字号算，top:-.10em ≈ 上移 0.46 个父级 em，
+         只让字形微微骑出边缘；不写 margin，避开整体缩进 margin-left 与
+         gap/@@ blank 的段间距冲突。 */
+      /* 字形档没有边框，边框色就是字形的色。C 为 #rrggbb00 时字形透明，
+         但伪元素与 3.2/3.4em 留白**照常保留**——那是 quote 档的结构。
+         早先写 cOff?'currentColor':C 是反的：会冒出两个黑色大引号。 */
+      r=selB+'{position:relative;border:0;'+bgd+'padding:3.2em 1.2em 3.4em;}';
+      r+=pseudo('::before')+'{content:"\\275D";position:absolute;'
+        +'left:.02em;top:-.10em;font:700 4.6em/1 serif;line-height:1;'
+        +'color:'+C+';}';
+      r+=pseudo('::after')+'{content:"\\275E";position:absolute;'
+        +'right:.02em;bottom:-.16em;font:700 4.6em/1 serif;line-height:1;'
+        +'color:'+C+';}';
+    }
+    return r;
+  }
+  /* v2.42.0 P2：把 DOM 上每个带 data-q* 的引用块，翻成属性选择器规则。
+     同一个参数组合只产一条（去重）；没写的项回落全局 tsCfg.quote，再回落
+     基线 bar 与纸面色——所以 {b} 在全局 quote 档下仍是 quote，只换字形色。
+     不写 inline style：quote 档要 ::before/::after 伪元素，inline 写不出来；
+     且 :9574 深纸面那条 background:…!important 会压过内联样式。 */
+  function _quoteInlineCss(pv){
+    if(!pv||!pv.querySelectorAll)return '';
+    var els=pv.querySelectorAll('blockquote[data-qstyle],blockquote[data-qbd],blockquote[data-qbg]');
+    if(!els.length)return '';
+    var _hasCfg=(typeof tsCfg!=='undefined'&&tsCfg);
+    var tone=(_hasCfg&&tsCfg.page&&tsCfg.page.tone==='dark')?'dark':'light';
+    var g=(_hasCfg&&tsCfg.quote)||{};
+    var gs=_Q_STYLES.split(' ').indexOf(g.style)>=0?g.style:'bar';
+    var gb=_qcHex(g.bd)||'', gg=_qcHex(g.bg)||'';
+    var seen={},out='';
+    for(var i=0;i<els.length;i++){
+      var e=els[i];
+      var st=e.getAttribute('data-qstyle')||'';
+      var bd=e.getAttribute('data-qbd')||'';
+      var bg=e.getAttribute('data-qbg')||'';
+      var key=st+'|'+bd+'|'+bg;
+      if(seen[key])continue;
+      seen[key]=1;
+      var af='';
+      if(st)af+='[data-qstyle="'+st+'"]';
+      if(bd)af+='[data-qbd="'+bd+'"]';
+      if(bg)af+='[data-qbg="'+bg+'"]';
+      var es=(_Q_STYLES.split(' ').indexOf(st)>=0?st:gs);
+      var eb=_qcHex(bd)||gb, eg=_qcHex(bg)||gg;
+      var selB='#preview blockquote'+af+', .markdown-body blockquote'+af
+              +', .markdown-body.md-tone-dark blockquote'+af;
+      out+=_quoteRulesFor(selB,es,eb,eg,tone,true);
+    }
+    return out;
+  }
+  /* 追加到 #ts-style 尾部：这条通道原本就被四条导出链原样带走
+     （前端 standalone HTML、后端 HTML、打印、docx），CSS 自动随内容走，
+     不必逐处改 payload。QINLINE 哨兵保证幂等——render 每轮收尾与
+     applyTypeset 每次重建都会调它。无 data-q* 时连哨兵都不写
+     ＝ 默认态 ts-style 逐字节不变。 */
+  function _quoteApplyInline(){
+    var st=document.getElementById('ts-style');
+    var pv=document.getElementById('preview');
+    if(!st||!pv)return;
+    var base=st.textContent||'', k=base.indexOf('/*QINLINE*/');
+    if(k>=0)base=base.slice(0,k);
+    var css=_quoteInlineCss(pv);
+    st.textContent=base+(css?'/*QINLINE*/'+css:'');
+  }
   function buildStandaloneHtml(){
     var body=document.getElementById('preview').innerHTML
       .replace(/src="\/img\?path=([^"]+)"/g,function(m,enc){
@@ -8576,7 +8839,9 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     var tsCss=tsEl?tsEl.textContent:'';
     return '<!DOCTYPE html>\n<html lang="zh-CN"><head><meta charset="UTF-8"><title>'+escapeHtml(title)+'</title>'+
       '<style>'+katexCssText+'div.md-math-block{overflow-x:auto;margin:.8em 0;}span.md-math-inline{white-space:nowrap;}'+tsCss+'</style>'+'<style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:820px;margin:40px auto;padding:0 20px;line-height:1.7;color:#222;}'+
-      'h1,h2{border-bottom:1px solid #eee;padding-bottom:.3em;}code{background:#f4f4f4;padding:.15em .4em;border-radius:4px;font-family:Consolas,monospace;}pre{background:#f4f4f4;padding:14px;border-radius:8px;overflow:auto;}blockquote{border-left:3px solid #4a6cf7;background:#f5f7ff;padding:.4em 1em;margin:1em 0;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ddd;padding:7px 12px;}img{max-width:100%;}a{color:#4a6cf7;}</style></head><body class="markdown-body">'+body+'</body></html>';
+      'h1,h2{border-bottom:1px solid #eee;padding-bottom:.3em;}code{background:#f4f4f4;padding:.15em .4em;border-radius:4px;font-family:Consolas,monospace;}pre{background:#f4f4f4;padding:14px;border-radius:8px;overflow:auto;}'
+      +'blockquote{'+_quoteCss({})+'}'
+      +'table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ddd;padding:7px 12px;}img{max-width:100%;}a{color:#4a6cf7;}</style></head><body class="markdown-body">'+body+'</body></html>';
   }
 
   /* 启动一律进默认文档（草稿感知载入）。旧全局缓存键退役（2026-10-15）：
@@ -8975,12 +9240,24 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
   var IND_UL='#preview ul, .markdown-body ul';
   var tsCfg=(function(){
     var raw={};try{raw=JSON.parse(localStorage.getItem(TS_KEY)||'{}');}catch(e){}
+    /* 色值白名单在 _qcHex（见 _quoteRules 上方）：这里不做第二份实现。 */
     var ch0=parseFloat(raw.indent&&raw.indent.chars);if(isNaN(ch0))ch0=2;ch0=Math.max(0,Math.min(8,ch0));
     var o={autoSaveMin:Math.max(0,Math.min(60,parseInt(raw.autoSaveMin,10)||0)),
       fonts:{},indent:{},
       table:{three:!!(raw.table&&raw.table.three),
         headOn:!!(raw.table&&raw.table.headOn),headColor:(raw.table&&raw.table.headColor)||'#dbe5ff',
         colOn:!!(raw.table&&raw.table.colOn),colColor:(raw.table&&raw.table.colColor)||'#dbe5ff'}};
+    /* v2.42.0 引用块样式：四档 bar 竖线 / box 直角框 / round 圆角框 /
+       quote 大引号。字形类只保留大引号（corner 「」与 brace {} 于 2026-11-12 砍掉）。
+       默认 {bar, '', ''} ＝ 今天版面的原样：竖线，边框色与底色跟主题走。
+       两色留空有明确语义（各端维持现口径）：预览吃 --accent / --accent-soft，
+       导出与打印吃各自写死的 #4a6cf7 / #f5f7ff。只有显式设色才落成绝对色。
+       默认态不产出任何规则——基线 CSS 本来就是它，见 _quoteRules。 */
+    o.quote={style:(function(v){
+        return ('bar box round quote').split(' ').indexOf(v)>=0?v:'bar';
+      })(raw.quote&&raw.quote.style),
+      bd:_qcHex(raw.quote&&raw.quote.bd),
+      bg:_qcHex(raw.quote&&raw.quote.bg)};
     /* v2.13.2 统一段间距：默认关。开=把正文块级元素的上下 margin 统一成
        该 em 值（标题不在其列，1.4em/.6em 的标题层次保持原样）。
        @@ blank{n} 恒定压过它（blank 两侧 margin 清零，见 applyTypeset 末尾）。 */
@@ -9469,8 +9746,14 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
         +'--table-border:#e0ddd5;--code-bg:#f4f4f4;--accent:#4a6cf7;'
         +'background:#ffffff !important;color:#22242a !important;}';
     }
+    /* v2.42.0 引用样式：默认态返回空串（基线即默认），用户改过才产出。
+       必须拼在纸面段之后——深纸面那条 blockquote 背景带 !important，
+       同特异性靠源序定胜负；详见 _quoteRules 头注释。 */
+    css+=_quoteRules(tsCfg.quote,_tone);
     var st=document.createElement('style');st.id='ts-style';st.textContent=css;
     document.head.appendChild(st);
+    /* v2.42.0 P2：面板重建 ts-style 会抹掉上一轮追加的逐块规则，补回来。 */
+    _quoteApplyInline();
     /* 纸面态挂在 #preview 上（它本身就是 .markdown-body）：导出时后端按
        page_cfg.tone 给 <body> 挂同一个类，三处选择器逐字同源。 */
     var _pvEl=document.getElementById('preview');
@@ -10041,6 +10324,22 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     document.getElementById('tsGapOn').checked=!!tsCfg.gap.on;
     document.getElementById('tsGapEm').value=tsCfg.gap.em;
     document.getElementById('tsHangOn').checked=!!tsCfg.list.hang;
+    /* 引用样式：三态回填。「不画」＝alpha 00，由勾选框承担 round-trip，
+       绝不经过只认 6 位的取色器——否则点一次「应用」就把 00000000 洗成
+       #000000（实心黑）。_qcHex 读入时已归一成小写带 #，正则可直接判。
+       8 位半透明在全局面板没有产生途径（取色器给不了 alpha，P2 行内参数
+       不写 tsCfg），所以不必再存一份 raw 值。 */
+    var _qNone=function(v){return /^#[0-9a-f]{6}00$/.test(v||'');};
+    var _qBdN=_qNone(tsCfg.quote.bd), _qBgN=_qNone(tsCfg.quote.bg);
+    document.getElementById('tsQuoteStyle').value=tsCfg.quote.style;
+    document.getElementById('tsQuoteBdOn').checked=!!tsCfg.quote.bd;
+    document.getElementById('tsQuoteBdNone').checked=_qBdN;
+    document.getElementById('tsQuoteBdColor').value=(tsCfg.quote.bd||'#4a6cf7').slice(0,7);
+    document.getElementById('tsQuoteBdColor').disabled=_qBdN;
+    document.getElementById('tsQuoteBgOn').checked=!!tsCfg.quote.bg;
+    document.getElementById('tsQuoteBgNone').checked=_qBgN;
+    document.getElementById('tsQuoteBgColor').value=(tsCfg.quote.bg||'#f5f7ff').slice(0,7);
+    document.getElementById('tsQuoteBgColor').disabled=_qBgN;
     tsMetaFill();   /* 填的是排版设置里那份值，与当前文件无关 */
     /* 打开面板＝从设置重填所有框：上次没应用的改动已被丢弃，提示同步清掉 */
     document.getElementById('tsDirty').hidden=true;
@@ -10054,6 +10353,13 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
   function tsMarkDirty(){document.getElementById('tsDirty').hidden=false;}
   document.getElementById('tsBody').addEventListener('input',tsMarkDirty);
   document.getElementById('tsBody').addEventListener('change',tsMarkDirty);
+  /* v2.42.0 「不画」勾上后取色器禁用：否则勾了还能改色、改了没反应。
+     挂在 tsBody 既有委托上，不另绑一套监听器。 */
+  document.getElementById('tsBody').addEventListener('change',function(e){
+    var m=/^tsQuote(Bd|Bg)None$/.exec((e.target&&e.target.id)||'');
+    if(!m)return;
+    document.getElementById('tsQuote'+m[1]+'Color').disabled=!!e.target.checked;
+  });
 
   document.getElementById('tsClose').addEventListener('click',function(){document.getElementById('tsOverlay').hidden=true;});
   document.getElementById('tsOverlay').addEventListener('click',function(e){if(e.target===this)this.hidden=true;});
@@ -11296,6 +11602,20 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     var _gv=parseFloat(document.getElementById('tsGapEm').value);
     tsCfg.gap.em=isNaN(_gv)?0.85:Math.max(0,Math.min(3,_gv));
     tsCfg.list.hang=!!document.getElementById('tsHangOn').checked;
+    /* 引用样式：三态写回，优先级写死。
+       ① 勾「不画」→ '#00000000'（与 P2 的 {…} 参数同口径，_qcHex 认 8 位）；
+          忽略开关与取色器，禁用态的取色器值本来就不该被读。
+       ② 未勾 → 与 v2.41.0 逐字节相同：关＝留空＝跟主题走（不残留上次的值，
+          否则预览吃主题、导出吃旧值，两个口径对不上），开＝取色器 6 位。 */
+    tsCfg.quote.style=(function(v){
+      return ('bar box round quote').split(' ').indexOf(v)>=0?v:'bar';
+    })(document.getElementById('tsQuoteStyle').value);
+    var _qBdN=!!document.getElementById('tsQuoteBdNone').checked;
+    var _qBgN=!!document.getElementById('tsQuoteBgNone').checked;
+    tsCfg.quote.bd=_qBdN?'#00000000':(document.getElementById('tsQuoteBdOn').checked
+      ?String(document.getElementById('tsQuoteBdColor').value||'').toLowerCase():'');
+    tsCfg.quote.bg=_qBgN?'#00000000':(document.getElementById('tsQuoteBgOn').checked
+      ?String(document.getElementById('tsQuoteBgColor').value||'').toLowerCase():'');
     tsCfg.metaOn=!!document.getElementById('tsMetaOn').checked;
     /* 元数据是排版设置的一部分：先把框里的值存进配置（随 TS_KEY 持久化，
        以后打开任何文件都在）。**应用只做这件事**，文档档案等保存那一刻再落
@@ -13014,6 +13334,8 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     if(!dgHintOn&&dgHint)dgHint.classList.remove('on');
   });
   var DG_HINTS=[
+    /* v2.42.0 P2：v2.40.2 补 @@ table/meta 漏提示的教训，新方言当天进表。 */
+    [/^[ ]*>/,[['> 引用{box b a}','引用块行末参数：样式 bar／box／round／quote，最多两色（先边框色后底色）；顺序不限，不设就不写，覆盖排版面板全局档'],['> ![图](a.png){c}{b a}','图与引用都带后缀时，前一个 {…} 归图片、后一个归引用；只设引用写 {}{b a}']]],
     [/^[ ]{0,3}@@\s*begin\s+fill/i,[['@@ begin fill{50|50}','分栏：各栏比例相加 =100；不带参数 = 2~4 栏等分'],['空行分栏','连续非空行属同一栏，末行写 @@ end fill 收尾']]],
     [/^[ ]{0,3}@@\s*begin\s+full/i,[['@@ begin full{t|m|b}','独占一页：t=居上 m=居中 b=居下（分页导出生效）'],['@@ begin full{m:![](图) o|c|f 九宫}','独占一页+背景图：o=原始尺寸 c=撑满 f=填充；九宫两字母 lt~rb 定位（预览/HTML/打印生效）']]],
     [/^[ ]{0,3}@@\s*begin\s+page/i,[['@@ begin page{noll|1|i|I}','页区页码：noll 不印页码／1 重编／i、I 罗马数字（分页导出生效）']]],

@@ -414,6 +414,83 @@ function _colorVal(s){
   if(/^[0-9a-f]{6}$/.test(s)||/^[0-9a-f]{8}$/.test(s))return '#'+s;
   return '';
 }
+
+/* ---- v2.42.0 P2 引用块行末 {…} 参数 ----------------------------------
+   文法与 _fontParseParam 同族：全角空格归一、引号只包样式名、裸 token 按
+   **形状**分类、顺序不限、无占位符、三项全空 return null（fail-closed）。
+   样式白名单必须先于颜色判——将来某个档名若恰好是合法 HEX，不能因为改个
+   名字就静默改语义。两个颜色形状完全相同，只能靠出现顺序区分：先边框后底色。
+   与图片后缀的分工不靠猜 token 含义，见 _imgOwnsTrailingBrace。 ---------- */
+var _Q_STYLES='bar box round quote';
+function _quoteParseParam(raw){
+  var s=String(raw==null?'':raw).replace(/\u3000/g,' ').trim();
+  if(!s)return null;
+  var style='',cols=[],rest=s;
+  var qi=s.match(/"([^"]+)"|\u201c([^\u201d]+)\u201d/);
+  if(qi){
+    var qv=(qi[1]!==undefined?qi[1]:qi[2]).trim();
+    if(_Q_STYLES.split(' ').indexOf(qv)<0)return null;   /* 引号只许包样式名 */
+    style=qv;
+    rest=(s.slice(0,qi.index)+' '+s.slice(qi.index+qi[0].length)).trim();
+  }
+  var toks=rest?rest.split(/\s+/):[];
+  for(var i=0;i<toks.length;i++){
+    var t=toks[i];if(!t)continue;
+    if(_Q_STYLES.split(' ').indexOf(t)>=0){
+      if(style)return null;                                /* 两个样式 → 非法 */
+      style=t;
+    }else{
+      var c=_colorVal(t);
+      if(!c||cols.length>=2)return null;                  /* 第三个颜色无语义 */
+      cols.push(c);
+    }
+  }
+  if(!style&&!cols.length)return null;
+  return {style:style,bd:cols[0]||'',bg:cols[1]||''};
+}
+/* 「这串花括号像是引用参数吗」——只用来决定要不要报 D217。
+   别家方言的行末花括号（@@ color r{红}、x^{2}、@@ MDE_{k == v}）不是
+   写错的引用参数，不该被诊断刷屏。判据按形状：含样式名，或全部 token
+   都是合法颜色。不按「{ 前面那个字符」这种痕迹猜。 */
+function _qLooksLikeParam(raw){
+  var s=String(raw==null?'':raw).replace(/\u3000/g,' ').trim();
+  if(!s)return false;
+  var toks=s.split(/\s+/),anyColor=false;
+  for(var i=0;i<toks.length;i++){
+    var t=toks[i].replace(/^["\u201c]+|["\u201d]+$/g,'');
+    if(_Q_STYLES.split(' ').indexOf(t)>=0)return true;
+    if(_colorVal(t))anyColor=true;else return false;
+  }
+  return anyColor;
+}
+/* 找出行末那个 {...} 的左花括号下标；不配对 / 不以 } 收尾 → -1。
+   从右往左配平：{c}{b a} 会返回第二个 {，正是引用参数的位置。 */
+function _qTrailingBrace(line){
+  var t=line.replace(/\s+$/,'');
+  if(t.charAt(t.length-1)!=='}')return -1;
+  var d=0;
+  for(var i=t.length-1;i>=0;i--){
+    var c=t.charAt(i);
+    if(c==='}')d++;
+    else if(c==='{'){d--;if(d===0)return i;}
+  }
+  return -1;
+}
+/* 结构判据（方案 §4.3②）：行末 { 是否已被图片后缀认领。
+   问的是「最后一个图片匹配延伸到哪」，不是「{ 前是不是 )」——后者会把
+   原文(he said){b a} 这种正文误判成不归引用。必须用共享的 RE_IMG；
+   g 正则 lastIndex 有状态，每次扫描前重置。末尾是 > 不是 >=：
+   {c}{b a} 边界相等，用 >= 会把引用参数判成图片的（实测踩过）。 */
+function _imgOwnsTrailingBrace(line,bracePos){
+  RE_IMG.lastIndex=0;
+  var m,last=null;
+  while((m=RE_IMG.exec(line))!==null){
+    last=m;
+    if(RE_IMG.lastIndex===m.index)RE_IMG.lastIndex++;
+  }
+  return !!(last&&last[0].indexOf('{')>=0
+            &&(last.index+last[0].length)>bracePos);
+}
 /* ---- v2.33.0 @@ begin font{"字体名" 字号} 的参数解析 ----
    v2.41.0 加对齐，三种参数都在同一个花括号里，顺序不限：
      font{"Microsoft YaHei Light" 12pt}   引号包名（名里有空格时用这个）
@@ -659,6 +736,11 @@ function _tickScan(text){
   }
   return pairs;
 }
+/* v2.42.0 P2：图片后缀正则提为共享常量。块层判「行末 {…} 归谁」与内联层
+   真正做替换，必须是同一个正则对象——各抄一份就是新的分叉点：只要两边差
+   一个字符，就会出现「预览归图、导出归引用」。g 标志带 lastIndex 状态，
+   _imgOwnsTrailingBrace 每次扫描前必须重置为 0。 */
+var RE_IMG=/!\[([^\]]*)\]\(([^)]+?)(?:\s+"([^"]*)")?\)(?:\s*\{([1-9]\d{0,2})?([clr])?(?::([^{}\n]*))?\})?/g;
 function parseInline(text,noMde){
   var codes=[];
   /* 反斜杠转义的反引号（\`）不参与配对：先换私用区字符，配对完还原成字面反引号。
@@ -806,7 +888,7 @@ function parseInline(text,noMde){
      [1-9]\d{0,2} 捕获，>100 钳到 100；对齐后缀独立可选（仅 {c} 也合法）；
      非法整体不进参数组（后缀原样留在正文可见，fail-closed）。
      参数组在 `)` 之外，保存时的路径改写只动括号内路径，天然不触碰后缀。 */
-  text=text.replace(/!\[([^\]]*)\]\(([^)]+?)(?:\s+"([^"]*)")?\)(?:\s*\{([1-9]\d{0,2})?([clr])?(?::([^{}\n]*))?\})?/g,function(m,alt,src,title,wpct,algn,captoks){
+  text=text.replace(RE_IMG,function(m,alt,src,title,wpct,algn,captoks){
     /* 对齐内联进 img 自身 style（display:block + margin auto）而非
        p 的 text-align——ts-style 面板档 !important 按源序后置会盖掉
        主 CSS 的 p:has() 选择器规则；img 自身 margin 与 p text-align
@@ -2097,7 +2179,33 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
       var _qAt=i;
       var quote=[];
       while(i<lines.length && /^[ ]*>/.test(lines[i])){quote.push(lines[i].replace(/^[ ]*>[ ]?/,''));i++;}
-      html+='<blockquote>'+parseMarkdown(quote.join('\n'),_lv,opts,_base+_qAt,_lv3)+'</blockquote>';
+      /* v2.42.0 P2：行末 {…} 临时覆盖。剥的是**整个块**的最后一个非空行，
+         不是某一行——参数属于块。此时 quote[] 已去掉 > 前缀，正则不必处理 >。
+         失败一律不剥（原串留在正文），不静默吃掉用户写的东西。 */
+      var _qAttr='',_qLi=-1;
+      for(var _qi=quote.length-1;_qi>=0;_qi--){
+        if(!quote[_qi].trim())continue;
+        _qLi=_qi;break;
+      }
+      if(_qLi>=0){
+        var _qLine=quote[_qLi],_qBp=_qTrailingBrace(_qLine);
+        if(_qBp>=0 && !_imgOwnsTrailingBrace(_qLine,_qBp)){
+          var _qClose=_qLine.replace(/\s+$/,'').length-1;
+          var _qRaw=_qLine.slice(_qBp+1,_qClose);
+          var _qp=_quoteParseParam(_qRaw);
+          if(_qp){
+            quote[_qLi]=_qLine.slice(0,_qBp)+_qLine.slice(_qClose+1);
+            if(!quote[_qLi].trim())quote.splice(_qLi,1);
+            if(_qp.style)_qAttr+=' data-qstyle="'+_qp.style+'"';
+            if(_qp.bd)_qAttr+=' data-qbd="'+_qp.bd+'"';
+            if(_qp.bg)_qAttr+=' data-qbg="'+_qp.bg+'"';
+          }else if(_qLooksLikeParam(_qRaw)){
+            _dgE(_qAt+_qLi,'D217','引用参数无效：{样式 边框色 底色}，样式取 bar|box|round|quote，颜色见色卡；本块按原样渲染','warn');
+          }
+        }
+      }
+      if(!quote.join('').trim())_dgE(_qAt,'D218','引用块只剩参数，已按空引用处理','warn');
+      html+='<blockquote'+_qAttr+'>'+parseMarkdown(quote.join('\n'),_lv,opts,_base+_qAt,_lv3)+'</blockquote>';
       curInd=IPX.quote;
       continue;
     }
