@@ -41,9 +41,9 @@ for (const [input, expect] of cases) {
   console.log('FAIL ' + JSON.stringify(input) + ' -> ' + out + ' (expect ' + expect + ')'); fails++;
 }
 /* 端到端：指南示例整行走块解析，不得产生链接/图片/反斜杠残留 */
-const md = parseMarkdown("\\!\\[内嵌示例图\\](MDEditor 使用指南.assets/内嵌示例图.png)\n");
+const md = parseMarkdown("\\!\\[内嵌示例图\\](MDEditor 实操手册.assets/内嵌示例图.png)\n");
 if (md.indexOf('<a ') >= 0 || md.indexOf('<img') >= 0 || md.indexOf('\\') >= 0
-    || md.indexOf('![内嵌示例图](MDEditor 使用指南.assets/内嵌示例图.png)') < 0) {
+    || md.indexOf('![内嵌示例图](MDEditor 实操手册.assets/内嵌示例图.png)') < 0) {
   console.log('FAIL md guide-style -> ' + md.slice(0, 200)); fails++;
 } else console.log('PASS md guide-style literal');
 console.log('JS-FAILS=' + fails);

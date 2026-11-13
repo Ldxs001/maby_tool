@@ -7,7 +7,7 @@ import json, re, os, sys, urllib.request, urllib.parse
 BASE = "http://127.0.0.1:18766"
 APP = os.path.dirname(os.path.abspath(__file__))
 
-IMG = os.path.join(APP, "docs", "MDEditor 使用指南.assets",
+IMG = os.path.join(APP, "docs", "MDEditor 实操手册.assets",
                    "20261103_010158_8502.png")
 print("封面图存在:", os.path.isfile(IMG), os.path.getsize(IMG), "bytes")
 

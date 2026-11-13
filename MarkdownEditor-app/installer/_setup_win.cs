@@ -240,7 +240,8 @@ namespace MDEditorSetup
             var lines = new List<string>();
             ExtractTo(tmp, null);
             string docs = Path.Combine(tmp, "docs");
-            string guide = Path.Combine(docs, "MDEditor 使用指南.md");
+            string quick = Path.Combine(docs, "MDEditor 快速手册.md");
+            string guide = Path.Combine(docs, "MDEditor 实操手册.md");
             string lic = Path.Combine(docs, "版权与开源组件声明.md");
             string dll = Path.Combine(tmp, @"python\Lib\site-packages\pythonnet\runtime\Python.Runtime.dll");
             string fonts = Path.Combine(tmp, @"katex\fonts");
@@ -255,6 +256,7 @@ namespace MDEditorSetup
             string wskd = Path.Combine(tmp, @"wavedrom\skins\dark.js");
             string gejs = Path.Combine(tmp, @"vega\vega-embed.min.js");
             lines.Add("total_files=" + Directory.GetFiles(tmp, "*", SearchOption.AllDirectories).Length);
+            lines.Add("quick_md_exists=" + (File.Exists(quick) ? 1 : 0));
             lines.Add("guide_md_exists=" + (File.Exists(guide) ? 1 : 0));
             lines.Add("license_doc_exists=" + (File.Exists(lic) ? 1 : 0));
             lines.Add("uninstall_icon_exists=" + (File.Exists(uico) ? 1 : 0));

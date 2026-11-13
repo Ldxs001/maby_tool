@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
-"""用户真实文档复现：docs/MDEditor 使用指南.md（相对路径图片、带空格
+"""用户真实文档复现：docs/MDEditor 实操手册.md（相对路径图片、带空格
 目录名、{40} 宽度参数、mermaid 图表）三导出全链路：
 1. docx：图片（普通+{40}）与图表全部嵌入，{40}→版心×0.4
 2. HTML：图片 src 重写 file:///（空格路径），图表栅格化
@@ -20,7 +20,7 @@ import urllib.request
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(HERE, "docs", "MDEditor 使用指南.md")
+SRC = os.path.join(HERE, "docs", "MDEditor 实操手册.md")
 # v2.5.2 后用户文档正文含裸 MDE 执行点（其中 process_words 不存在→
 # 失败态→导出关口正确拦截）。本测试回归"导出产物"功能本身，用剔除
 # 执行点行的临时副本测（用户文档零改动；速查表/章节示例带反引号

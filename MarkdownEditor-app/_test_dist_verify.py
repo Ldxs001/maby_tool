@@ -108,8 +108,8 @@ check("favicon", len(get("/favicon.ico")) > 10000)
 
 # --- 4) 内置文档（默认文章 + 版权声明） ---
 d1 = json.loads(get("/doc?file=" + urllib.parse.quote(
-    "MDEditor 使用指南.md")).decode("utf-8"))
-check("default doc (使用指南)", d1.get("ok") and len(d1.get("content", "")) > 500,
+    "MDEditor 实操手册.md")).decode("utf-8"))
+check("default doc (实操手册)", d1.get("ok") and len(d1.get("content", "")) > 500,
       "%d chars" % len(d1.get("content", "")))
 d2 = json.loads(get("/doc?file=" + urllib.parse.quote(
     "版权与开源组件声明.md")).decode("utf-8"))

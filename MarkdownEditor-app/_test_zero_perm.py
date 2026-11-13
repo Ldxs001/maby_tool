@@ -241,7 +241,7 @@ check("F12 update(lock=False) 不补锁", not is_ro(zp_g) and not is_hidden(zp_g
 # 真实场景：拿内置指南的档案当「解压后」的样子（内容齐、属性全无）
 adir_h = os.path.join(TD, "h.assets")
 os.makedirs(adir_h, exist_ok=True)
-shutil.copytree(os.path.join(HERE, "docs", "MDEditor 使用指南.assets", ".mde"),
+shutil.copytree(os.path.join(HERE, "docs", "MDEditor 实操手册.assets", ".mde"),
                 os.path.join(adir_h, ".mde"), dirs_exist_ok=True)
 zp_h = os.path.join(adir_h, ".mde", md_meta.ZERO_NAME)
 ctypes.windll.kernel32.SetFileAttributesW(zp_h, attrs(zp_h) & ~0x3)

@@ -12,7 +12,7 @@ from playwright.sync_api import sync_playwright
 
 BASE = "http://127.0.0.1:18766"
 OUT = os.path.abspath("Temp")
-IMG = "docs/MDEditor 使用指南.assets/20261103_010158_8502.png"
+IMG = "docs/MDEditor 实操手册.assets/20261103_010158_8502.png"
 
 DOC = """@@ begin full{m:![](%s) f cc} color w
 # 封面

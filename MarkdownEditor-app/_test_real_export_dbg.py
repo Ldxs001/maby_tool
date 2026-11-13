@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 wUwproject. Licensed under GNU AGPL v3 (or later).
-"""用户真实文档复现：docs/MDEditor 使用指南.md（相对路径图片、带空格
+"""用户真实文档复现：docs/MDEditor 实操手册.md（相对路径图片、带空格
 目录名、{40} 宽度参数、mermaid 图表）三导出全链路：
 1. docx：图片（普通+{40}）与图表全部嵌入，{40}→版心×0.4
 2. HTML：图片 src 重写 file:///（空格路径），图表栅格化
@@ -20,7 +20,7 @@ import urllib.request
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(HERE, "docs", "MDEditor 使用指南.md")
+SRC = os.path.join(HERE, "docs", "MDEditor 实操手册.md")
 PORT = 18766
 NO_WINDOW = 0x08000000
 

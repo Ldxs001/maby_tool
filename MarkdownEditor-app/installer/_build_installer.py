@@ -28,9 +28,16 @@ SMOKE_REPORT = os.path.join(tempfile.gettempdir(), "md_setup_smoke_report.txt")
 # dist checklist minimum set (sections 1+2+3+4). Keep in sync with docs checklist.
 DIST_DIRS = ["python", "katex", "pagedjs", "LICENSES",
              "mermaid", "viz", "wavedrom", "vega", "docxdeps"]
-DIST_DOCS_FILES = ["MDEditor 使用指南.md", "版权与开源组件声明.md",
+# v2.45.0 三份文档各司其职：
+#   快速手册.md   = 无路径启动的默认文档（一页速查，中英对照）
+#   实操手册.md   = 原「使用指南」改名（完整语法，可改可练）
+#   使用手册.html = 图解手册，由「配置 → 使用手册」以 iframe 载入，
+#                   走 /static/docs/ 取文件，所以必须在包里，且**不能**当成
+#                   内置 Markdown 文档列进 BUILTIN_DOCS（它是自包含 HTML）。
+DIST_DOCS_FILES = ["MDEditor 快速手册.md", "MDEditor 实操手册.md",
+                   "MDEditor 使用手册.html", "版权与开源组件声明.md",
                    "low runner 数据形式规范.md"]
-DIST_DOCS_DIRS = ["MDEditor 使用指南.assets", "版权与开源组件声明.assets"]
+DIST_DOCS_DIRS = ["MDEditor 实操手册.assets", "版权与开源组件声明.assets"]
 # 两份内置文档都用自有元数据通道：档案在 <文档>.assets/.mde/ 里，漏一整个目录 = 装完打开就没有元数据区。
 # low runner run 库（种子：运行树 runtime/runs/ → 安装后 runtime/runs/，
 # md_server 启动 makedirs 不会清掉既有文件）。
@@ -377,8 +384,14 @@ def run_smoke(exe):
                 rep[k] = v
     checks = [
         ("payload extracted", int(rep.get("total_files", "0")) > 500, rep.get("total_files", "?")),
-        ("guide md exists (exact Chinese name)",
-         rep.get("guide_md_exists") == "1" and "MDEditor 使用指南.md" in rep.get("docs_listing", ""),
+        ("quick reference md exists (default doc)",
+         rep.get("quick_md_exists") == "1" and "MDEditor 快速手册.md" in rep.get("docs_listing", ""),
+         rep.get("docs_listing", "")[:200]),
+        ("practice handbook md exists",
+         rep.get("guide_md_exists") == "1" and "MDEditor 实操手册.md" in rep.get("docs_listing", ""),
+         rep.get("docs_listing", "")[:200]),
+        ("illustrated handbook html exists",
+         "MDEditor 使用手册.html" in rep.get("docs_listing", ""),
          rep.get("docs_listing", "")[:200]),
         ("license doc exists", rep.get("license_doc_exists") == "1", ""),
         ("uninstall icon in payload", rep.get("uninstall_icon_exists") == "1", ""),

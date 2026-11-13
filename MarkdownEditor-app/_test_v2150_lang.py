@@ -128,7 +128,9 @@ try:
         print("\n[1] 默认中文态")
         check("body[data-lang]=zh", pg.get_attribute("body", "data-lang") == "zh")
         tb = pg.inner_text("#toolbar")
-        for w in ("排版", "保存", "另存为", "打印"):
+        # v2.41.0 起「排版/另存为」收进下拉（配置▾ / 保存▾），不再是一级按钮；
+        # 这里改验仍在栏面上的四个入口。
+        for w in ("保存", "打印", "导出", "配置"):
             check("工具栏含「%s」" % w, w in tb)
         check("语言按钮显示 EN（可切到英文）", pg.inner_text("#btnLang").strip() == "EN")
         zh_html = pg.inner_html("#toolbar")
@@ -152,6 +154,9 @@ try:
               while(pe&&pe!==r){
                 if(pe.tagName==='OPTGROUP'){skip=true;break;}
                 if(pe.tagName==='SELECT'&&pe.hasAttribute('data-ts')){skip=true;break;}
+                /* #statFile 显示的是文档文件名（内置文档本身叫「快速手册」），
+                   属内容不属界面文案 */
+                if(pe.id==='statFile'){skip=true;break;}
                 pe=pe.parentNode;
               }
               if(!skip&&t!=='中') out.push(sel+' :: '+t);

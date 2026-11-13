@@ -389,7 +389,7 @@ function _dpTableSrc(body){
    调用方不产本 span（按普通文本渲染）。隐性 display:none 不占位 */
 /* 外部引用值 → 「打开」按钮的判定（v2.8）：值须是不含换行的相对路径，
    形如 <名>.assets/文件 或 assets/文件。**允许空格**——文档名带空格
-   （如「MDEditor 使用指南.assets/x.csv」）是常见情形，早先按 \s 一律
+   （如「MDEditor 实操手册.assets/x.csv」）是常见情形，早先按 \s 一律
    排除，导致这类文档永远不出按钮。存在性与目录白名单由服务端判定 */
 function _dpRefPath(val){
   var v=String(val==null?'':val).trim();

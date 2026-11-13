@@ -688,6 +688,21 @@
     .about-kb .kb-capture{color:var(--accent);font-weight:600;}
     #aboutMsg{min-height:18px;font-size:12px;padding:4px 2px 0;}
     #aboutMsg.err{color:#e06c75;}
+    /* v2.45.0 使用手册弹层：iframe 装独立 HTML。手册自带 CSS 与明暗切换，
+       iframe 是天然的样式/DOM 沙箱——两边的选择器再野也互不污染，这是选
+       iframe 而不是把 265KB 正文塞进主文档的唯一理由（也顺带保住了 VDOM
+       以外的滚动与锚点行为）。 */
+    #hbOverlay[hidden]{display:none !important;}
+    #hbWrap{width:min(1180px,96vw);height:min(880px,calc(100vh - 32px));
+      display:flex;flex-direction:column;background:var(--panel,#23272f);
+      border:1px solid rgba(128,128,128,.34);border-radius:10px;
+      box-shadow:0 18px 48px rgba(0,0,0,.5);overflow:hidden;}
+    body.light #hbWrap{background:#fff;}
+    #hbBody{flex:1 1 auto;min-height:0;background:#fff;}
+    #hbFrame{width:100%;height:100%;border:0;display:block;}
+    #hbWrap .hb-sub{font-size:11.5px;font-weight:400;opacity:.66;margin-left:8px;}
+    #hbMsg{flex:0 0 auto;font-size:12px;padding:6px 16px;color:#e06c75;}
+    #hbMsg[hidden]{display:none !important;}
     .about-foot{padding:8px 0 2px;display:flex;justify-content:flex-end;}
     #exportMenu{min-width:172px;}
     /* v2.40.0 打印▾：只有一项，宽度取 196 与 printMenuBind 里的定位常量同值
@@ -1490,8 +1505,15 @@
         <div class="about-sep">快捷键（点「改键」后直接按新组合：Ctrl+字母 / Ctrl+Shift 或 Ctrl+Alt +字母；Ctrl+Z 是浏览器原生撤销，不开放改键）</div>
         <table class="about-kb"><tbody id="aboutKbBody"></tbody></table>
         <div id="aboutMsg"></div>
-        <div class="about-foot"><button id="aboutKbReset" class="sv-btn">恢复默认键位</button></div>
+        <div class="about-foot" style="display:flex;gap:8px;flex-wrap:wrap;"><button id="aboutKbReset" class="sv-btn">恢复默认键位</button><button id="aboutHbOpen" class="sv-btn">打开使用手册</button></div>
       </div>
+    </div>
+  </div>
+  <div id="hbOverlay" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:112;display:flex;align-items:center;justify-content:center;">
+    <div id="hbWrap">
+      <div class="ts-head"><span>MDEditor 使用手册<span class="hb-sub">一条一卡 · 示意动画 · 中英双语</span></span><span class="ts-head-r"><button id="hbX" title="关闭（Esc）">×</button></span></div>
+      <div id="hbBody"><iframe id="hbFrame" title="MDEditor 使用手册"></iframe></div>
+      <div id="hbMsg" hidden></div>
     </div>
   </div>
   <div id="tbOverlay" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:110;display:flex;align-items:center;justify-content:center;">
@@ -2278,7 +2300,7 @@ function _dpTableSrc(body){
    调用方不产本 span（按普通文本渲染）。隐性 display:none 不占位 */
 /* 外部引用值 → 「打开」按钮的判定（v2.8）：值须是不含换行的相对路径，
    形如 <名>.assets/文件 或 assets/文件。**允许空格**——文档名带空格
-   （如「MDEditor 使用指南.assets/x.csv」）是常见情形，早先按 \s 一律
+   （如「MDEditor 实操手册.assets/x.csv」）是常见情形，早先按 \s 一律
    排除，导致这类文档永远不出按钮。存在性与目录白名单由服务端判定 */
 function _dpRefPath(val){
   var v=String(val==null?'':val).trim();
@@ -4242,9 +4264,15 @@ var I18N_ROOTS=['#toolbar','#status','#findBar','#svOverlay','#tsOverlay','#lrOv
                 /* v2.40.0：预览栏横栏、打印▾、导出▾。导出▾此前只在词表里有词条
                    却不在扫描根里——菜单文字一直没真正翻过去，这次一并补上。 */
                 '#pvbar','#printMenu','#exportMenu',
+                /* v2.45.0：图解手册弹层。漏了它，英文界面下弹层标题与副标题
+                   会停在中文——正是 #exportMenu 当年那个坑。 */
+                '#hbOverlay',
                 /* v2.40.1：打印面板此前不在扫描根、也没有词条——英文界面下
                    整块停在中文，补上。 */
-                '#printPanel'];
+                '#printPanel',
+                /* v2.46.0：分页预览栏、选中文具条、语法检查面板。这三个都是浮层，
+                   此前不在扫描根，英文界面下一直是中文。 */
+                '#ppOverlay','#selTools','#dgPanel'];
 function _i18nRoots(){
   var out=[];
   for(var i=0;i<I18N_ROOTS.length;i++){
@@ -4335,7 +4363,7 @@ I18N_EN["第 {0} 版"]="Version {0}";
 /* v2.40.0 预览栏横栏 / 镜像出片 */
 I18N_EN["参考线"]="Guides";
 I18N_EN["镜像"]="Mirror";
-I18N_EN["镜像时不翻页"]="Pages kept unmirrored";
+I18N_EN["镜像时不翻页"]="Unmirrored";
 I18N_EN["目录"]="Contents";
 I18N_EN["首页"]="First page";
 I18N_EN["每行字数"]="Chars per line";
@@ -4557,6 +4585,112 @@ I18N_EN["PDF · 固定分页"]="PDF · fixed pagination";
 I18N_EN["与打印同一分页、同一页码"]="same pagination and page numbers as Print";
 I18N_EN["Word · 可编辑"]="Word · editable";
 I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
+/* v2.45.0 使用手册弹层 + 内置文档改名（默认文档＝快速手册） */
+I18N_EN["使用手册（图解）"]="Handbook (illustrated)";
+I18N_EN["打开使用手册"]="Open handbook";
+I18N_EN["MDEditor 使用手册"]="MDEditor Handbook";
+I18N_EN["一条一卡 · 示意动画 · 中英双语"]="One card per item · illustrations · bilingual";
+I18N_EN["内置文档 · 点击载入（可编辑/另存为）"]="Built-in · click to load (editable / save as)";
+I18N_EN["默认文档（快速手册）"]="Default (Quick reference)";
+I18N_EN["回到启动时的那一页"]="Back to the page you start on";
+I18N_EN["run 库（low runner）"]="Run library (low runner)";
+I18N_EN["AI 设置"]="AI settings";
+/* v2.46.0 英文界面补漏：配置本体（关于与快捷键）、引用样式新增档、插入链接/图片/公式三个
+   小窗、导入栏、工具按钮 title。这些此前只有中文——词条在表里但漏了也不报错，只能靠
+   DOM 扫描发现，扫描脚本见仓库 _i18n_audit.py。 */
+I18N_EN["配置"]="Config";
+I18N_EN["退出"]="Exit";
+I18N_EN["主题"]="Theme";
+I18N_EN["关于与快捷键"]="About & shortcuts";
+I18N_EN["仓库"]="Repository";
+I18N_EN["版本"]="Version";
+I18N_EN["版本 -"]="Version -";
+I18N_EN["快捷键（点「改键」后直接按新组合：Ctrl+字母 / Ctrl+Shift 或 Ctrl+Alt +字母；Ctrl+Z 是浏览器原生撤销，不开放改键）"]="Shortcuts (click Change, then press the new combination: Ctrl+letter, Ctrl+Shift+letter or Ctrl+Alt+letter; Ctrl+Z is the browser's own undo and cannot be rebound)";
+I18N_EN["恢复默认键位"]="Restore default keys";
+/* 字体组第一列只有 ~76px，长词会被省略号吃掉：这两条改短写（原 Figure / Table caption） */
+I18N_EN["图题"]="Fig. cap.";
+I18N_EN["表题"]="Tab. cap.";
+/* 快捷键表每一行的动作名与改键按钮（kbRender 走 T()，逐条查表） */
+I18N_EN["新建文档"]="New document";
+I18N_EN["查找"]="Find";
+I18N_EN["查找下一个（Shift 反向）"]="Find next (Shift for previous)";
+I18N_EN["加粗（选区包 **）"]="Bold (wraps selection in **)";
+I18N_EN["斜体（选区包 *）"]="Italic (wraps selection in *)";
+I18N_EN["改键"]="Change";
+I18N_EN["等待按键"]="Press keys";
+I18N_EN["请按新键位…（Esc 取消）"]="Press the new keys… (Esc to cancel)";
+I18N_EN["引用样式"]="Quote style";
+I18N_EN["竖线"]="Bar";
+I18N_EN["直角框"]="Square box";
+I18N_EN["圆角框"]="Rounded box";
+I18N_EN["大引号"]="Big quote";
+I18N_EN["引用边框色"]="Quote border";
+I18N_EN["引用底色"]="Quote fill";
+I18N_EN["不画"]="Off";
+I18N_EN["粘贴文本"]="Paste text";
+I18N_EN["从文件"]="From file";
+I18N_EN["文件（最近文件与切换）"]="Files (recent files)";
+I18N_EN["链接地址"]="Link URL";
+I18N_EN["插入"]="Insert";
+I18N_EN["公式"]="Formula";
+I18N_EN["通用"]="Common";
+I18N_EN["特殊"]="Special";
+I18N_EN["符号"]="Symbols";
+I18N_EN["希腊"]="Greek";
+I18N_EN["运算符"]="Operators";
+I18N_EN["关系符"]="Relations";
+I18N_EN["箭头"]="Arrows";
+I18N_EN["大型"]="Large";
+I18N_EN["清空"]="Clear";
+I18N_EN["插入图片"]="Insert image";
+I18N_EN["网络图片地址（http:// 或 https://）"]="Image address (http:// or https://)";
+I18N_EN["图片说明（可空，仅网络图片）"]="Description (optional, URL images only)";
+I18N_EN["或选择本地图片（png / jpg / webp / gif）"]="Or pick a local image (png / jpg / webp / gif)";
+I18N_EN["选择本地图片…"]="Pick a local image…";
+I18N_EN["图片说明"]="Description";
+I18N_EN["网络图片填地址后点「插入」；本地图片点上方按钮选中即插入，与从剪贴板粘贴走同一条落盘链路（需先保存文档）。"]="For a URL image, fill the address and click Insert; a local image is inserted as soon as you pick it with the button above, through the same write-to-disk path as pasting from the clipboard (save the document first).";
+I18N_EN["插入（网络图片）"]="Insert (URL image)";
+I18N_EN["从网页、AI 回答、别的编辑器复制来的 Markdown 直接放这里…"]="Paste Markdown copied from a web page, an AI answer or another editor…";
+I18N_EN["可直接粘贴路径；与「打开」同一套选文件方式，只多过一遍映射，不覆盖原文件"]="Paste a path directly, or pick a file the same way as Open; it only adds the mapping pass and never overwrites the original";
+/* 工具按钮 title：主按钮与▾后缀（caret 生成时拼「（更多）」）各一条 */
+I18N_EN["一级标题（▾ 选 H2~H6 / 正文）"]="H1 (▾ for H2–H6 / body)";
+I18N_EN["一级标题（▾ 选 H2~H6 / 正文）（更多）"]="H1 (▾ for H2–H6 / body) — more";
+I18N_EN["加粗（▾=斜体/删除线/下划线/上下标/填空线）"]="Bold (▾ = italic / strike / underline / super- and subscript / fill-in line)";
+I18N_EN["加粗（▾=斜体/删除线/下划线/上下标/填空线）（更多）"]="Bold (▾ = italic / strike / underline / super- and subscript / fill-in line) — more";
+I18N_EN["引用块（▾=嵌套/取消引用）"]="Quote block (▾ = nest / remove quote)";
+I18N_EN["引用块（▾=嵌套/取消引用）（更多）"]="Quote block (▾ = nest / remove quote) — more";
+I18N_EN["无序列表（▾=有序/任务）"]="Bullet list (▾ = numbered / task)";
+I18N_EN["无序列表（▾=有序/任务）（更多）"]="Bullet list (▾ = numbered / task) — more";
+I18N_EN["插入链接（窗口）；▾=图片/本地文件/取消链接"]="Insert link (dialog); ▾ = image / local file / remove link";
+I18N_EN["插入链接（窗口）；▾=图片/本地文件/取消链接（更多）"]="Insert link (dialog); ▾ = image / local file / remove link — more";
+I18N_EN["插入表格（窗口里直接输入；▾=宽列/题注指令）"]="Insert table (type straight into the dialog; ▾ = wide column / caption directives)";
+I18N_EN["插入表格（窗口里直接输入；▾=宽列/题注指令）（更多）"]="Insert table (type straight into the dialog; ▾ = wide column / caption directives) — more";
+I18N_EN["公式面板：往格子里填，出来就是 LaTeX（$…$），预览区 KaTeX 渲染"]="Formula panel: fill the slots and out comes LaTeX ($…$), rendered by KaTeX in the preview";
+I18N_EN["切换亮色/暗色主题"]="Switch light / dark theme";
+I18N_EN["导入外部 Markdown / 最近文件与切换"]="Import external Markdown / recent files";
+I18N_EN["排版设置 / run 库 / AI 设置"]="Typesetting / run library / AI settings";
+I18N_EN["另存为… / 存为母版（含排版）"]="Save as… / save as template (with layout)";
+I18N_EN["预览跟随编辑区滚动（入口已移至预览栏勾选框）"]="Preview follows editor scroll (moved to the checkbox on the preview bar)";
+I18N_EN["主题切换（入口已移至分屏▾）"]="Switch theme (moved to Split ▾)";
+I18N_EN["最近文件与切换（入口已移至打开▾）"]="Recent files (moved to Open ▾)";
+I18N_EN["另存为…（入口已移至保存▾）"]="Save as… (moved to Save ▾)";
+I18N_EN["AI 设置（入口已移至配置▾）"]="AI settings (moved to Config ▾)";
+I18N_EN["排版设置（入口已移至配置▾）"]="Typesetting (moved to Config ▾)";
+I18N_EN["low runner（入口已移至配置▾）"]="low runner (moved to Config ▾)";
+I18N_EN["预览跟随编辑区滚动（仅分屏模式生效）：勾选开启、去勾关闭，两栏各滚各的"]="Preview follows the editor scroll (split view only): tick to turn on, untick to turn off; each pane otherwise scrolls on its own";
+/* 引用样式（v2.42.0 新增档）的五条 title */
+I18N_EN["引用块的外观。Word 导出一律画成竖线——Word 的段落边框没有字形、也没有圆角，硬做只能浮一个文本框或者贴图，分页就乱"]="How a quote block looks. Word export always draws the bar: Word's paragraph border has no glyphs and no rounded corners, and faking it takes a floating text box or a pasted image, which wrecks pagination";
+I18N_EN["关＝跟主题走（预览吃 --accent，导出与打印吃各自的固定值）；开＝用右边这个色。大引号档用它画字形；勾「不画」＝完全不画，连大引号一起隐藏"]="Off = follow the theme (the preview uses --accent, exports and Print use their own fixed values); on = use the colour on the right. The Big quote style draws its glyphs with it; ticking Off draws nothing at all, hiding the quotation marks too";
+I18N_EN["关＝跟主题走（预览吃 --accent-soft）；开＝用右边这个色。设了之后深色纸面也保持它，不被纸面规则压回去；勾「不画」＝完全透明不铺色"]="Off = follow the theme (the preview uses --accent-soft); on = use the colour on the right. Once set it survives dark paper instead of being overridden by the paper rules; ticking Off makes it fully transparent";
+I18N_EN["不画边框（等价 #00000000）；大引号档连引号一起隐藏。优先级高于开关"]="Draw no border (same as #00000000); the Big quote style hides its quotation marks too. Takes priority over the switch";
+I18N_EN["不铺底色（等价 #00000000）。优先级高于开关"]="No fill (same as #00000000). Takes priority over the switch";
+/* 公式面板的五条按钮 title 与画布说明 */
+I18N_EN["分数 / 二项式"]="Fractions / binomials";
+I18N_EN["角标组合 / 大运算符"]="Scripts / big operators";
+I18N_EN["括号 / 矩阵 / 分段"]="Brackets / matrices / cases";
+I18N_EN["平方根 / n 次根"]="Square root / n-th root";
+I18N_EN["上 / 下帽线符号"]="Over / under braces and hats";
+I18N_EN["公式画布：虚线框是空槽，点进去打字"]="Formula canvas: dashed boxes are empty slots, click one and type";
 /*I18N_END*/
 
 
@@ -4680,7 +4814,12 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
   function lsSet(k,v){ try{localStorage.setItem(k,v);}catch(e){} _uiQueue(k,v); }
   function lsRemove(k){ try{localStorage.removeItem(k);}catch(e){} _uiQueue(k,null); }
 
-  var BUILTIN_DOCS=[{name:'使用指南',file:'MDEditor 使用指南.md'},
+  /* 内置文档（v2.45.0 起三份，各司其职）：
+     快速手册 = 一页速查（中英对照），无路径启动时的默认文档；
+     实操手册 = 原「使用指南」改名，完整语法与配置，可改可另存、拿来练手；
+     版权声明。看图解动画走「配置 → 使用手册」，那是独立 HTML，不在这个列表里。 */
+  var BUILTIN_DOCS=[{name:'快速手册',file:'MDEditor 快速手册.md'},
+                    {name:'实操手册',file:'MDEditor 实操手册.md'},
                     {name:'版权与开源组件声明',file:'版权与开源组件声明.md'}];
 
   /* ── contenteditable 纯文本内核 ─────────────────────────────
@@ -7470,6 +7609,7 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     ev.stopPropagation();
     if(!rmenu.hidden){rmenu.hidden=true;return;}
     rmenuShow(this,[
+      {t:'使用手册（图解）',run:function(){hbOpen();}},
       {t:'排版设置',run:function(){tsOpen();}},
       {t:'run 库（low runner）',run:function(){lrOpen();}},
       {t:'AI 设置',run:function(){llmOpen();}}
@@ -9110,6 +9250,60 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
       }).catch(function(){});
     }
   }
+  /* ---- v2.45.0 使用手册弹层 ----
+     手册是一份独立自包含 HTML（docs/MDEditor 使用手册.html），经 /static/ 取回后
+     塞进 iframe。三点口径：
+     1) **懒加载**：只在第一次打开时设 src。启动不载入 265KB，也不让它拖慢首屏；
+     2) **失败可见**：iframe 同源，onload 后能读 contentDocument——title 不含
+        "MDEditor" 就说明 404（服务端把 404 当纯文本发回，浏览器照样渲染成空白页），
+        此时在底部出一行红字点名缺哪个文件，而不是留一块白；
+     3) 关闭不清 src：下次打开是即时的，且保留用户在里面切的明暗与语言。 */
+  var HANDBOOK_URL='/static/docs/'+encodeURIComponent('MDEditor 使用手册.html');
+  var _hbLoaded=false, _hbLangSynced=false;
+  function hbMsg(s){
+    var el=document.getElementById('hbMsg');
+    if(!s){ el.hidden=true; el.textContent=''; return; }
+    el.hidden=false; el.textContent=s;
+  }
+  function hbOpen(){
+    document.getElementById('aboutOverlay').hidden=true;   /* 从关于面板点进来：先收下层的 */
+    kbCapturing=null;
+    document.getElementById('hbOverlay').hidden=false;
+    hbMsg('');
+    if(!_hbLoaded){
+      _hbLoaded=true;
+      document.getElementById('hbFrame').src=HANDBOOK_URL;
+    }
+  }
+  function hbClose(){ document.getElementById('hbOverlay').hidden=true; }
+  document.getElementById('hbX').addEventListener('click',hbClose);
+  document.getElementById('aboutHbOpen').addEventListener('click',hbOpen);
+  document.getElementById('hbOverlay').addEventListener('click',function(e){
+    if(e.target===this)hbClose();
+  });
+  document.getElementById('hbFrame').addEventListener('load',function(){
+    if(!_hbLoaded)return;                 /* about:blank 的首个 load 不算 */
+    var ok=false;
+    try{
+      var d=this.contentDocument;
+      ok=!!(d&&d.body&&d.querySelector('h1')&&/MDEditor/.test(d.title||''));
+    }catch(e){ ok=false; }
+    hbMsg(ok?'':'手册没能载入（'+HANDBOOK_URL+'）。安装包里的 docs 目录可能不完整，或这份文件被移走了。');
+    /* 首次载入跟随界面语言：英文界面点开手册，不该先看到一份中文。
+       只同步这一次——之后用户在手册里自己切过什么就以他为准，不再覆盖。
+       手册是独立文档、自带语言按钮；同源 iframe 才点得到它，跨域时静默跳过。 */
+    if(ok&&!_hbLangSynced){
+      _hbLangSynced=true;
+      try{
+        var d=this.contentDocument;
+        if(_lang==='en'&&(d.documentElement.getAttribute('data-lang')||'zh')!=='en'){
+          var lb=d.getElementById('langBtn');
+          if(lb)lb.click();
+        }
+      }catch(e){}
+    }
+  });
+
   function aboutMsg(s,err){
     var el=document.getElementById('aboutMsg');
     el.textContent=s||'';
@@ -9144,6 +9338,12 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
     if(e.target===this){kbCapturing=null;this.hidden=true;}
   });
   document.addEventListener('keydown',function(e){
+    if(e.key==='Escape'&&!document.getElementById('hbOverlay').hidden){
+      /* 手册弹层压在关于面板之上，Esc 先关它。焦点在 iframe 里时主文档收不到键，
+         那种情况只能点 × 或点遮罩——手册自己不会吞 Esc 给外层的（跨文档不冒泡）。 */
+      hbClose();
+      return;
+    }
     if(e.key==='Escape'&&!document.getElementById('aboutOverlay').hidden){
       kbCapturing=null;
       document.getElementById('aboutOverlay').hidden=true;
@@ -12003,7 +12203,8 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
         currentBuiltin=idx;
         /* 内置文档也是实体文件，档案必须**先就绪再渲染**（v2.23.2）：
            以前这里直接 applyDocWithDraft，跳过了 loadMetaFor，于是自带档案的
-           使用指南/版权声明打开后元数据区一直是空的，面板也显示「未建档」。 */
+           内置文档（快速手册/实操手册/版权声明）打开后元数据区一直是空的，
+           面板也显示「未建档」。 */
         loadMetaFor(j.path).then(function(){
           applyDocWithDraft(j.path, j.content, '已保存');
           updateFileIndicator(d.name);
@@ -12014,7 +12215,7 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
       .catch(function(e){ showToast('载入内置文档失败：'+e.message); });
   }
   function loadDefault(){
-    loadBuiltin(0);   /* 默认文档 = 使用指南（实体文件） */
+    loadBuiltin(0);   /* 默认文档 = 快速手册（BUILTIN_DOCS[0]，实体文件） */
   }
   function renderFileList(){
     var el=document.getElementById('fmList');
@@ -12025,7 +12226,7 @@ I18N_EN["保留样式与真实公式"]="styles and real formulas preserved";
       html+='<div class="fm-item'+cur+'" data-builtin="'+b+'"><b>'+BUILTIN_DOCS[b].name+'</b><div class="fm-sub">内置文档 · 点击载入（可编辑/另存为）</div></div>';
     }
     html+='<div class="fm-sub" style="padding:8px 4px 6px;font-weight:600;">最近文件</div>';
-    html+='<div class="fm-item" data-act="default"><b>默认文档（使用指南）</b><div class="fm-sub">回到初始示例状态</div></div>';
+    html+='<div class="fm-item" data-act="default"><b>默认文档（快速手册）</b><div class="fm-sub">回到启动时的那一页</div></div>';
     for(var i=0;i<rec.length;i++){
       var r=rec[i];
       var cur=(r.path&&r.path===currentFile)?' cur':'';

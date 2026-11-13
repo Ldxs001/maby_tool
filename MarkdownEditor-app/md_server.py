@@ -67,7 +67,7 @@ except Exception as _e:
 PORT = int(os.environ.get("MD_PORT") or 18766)  # MD_PORT：多实例/测试隔离用，默认不变
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDITOR_HTML = os.path.join(HERE, "markdown-editor.html")
-MD_SERVER_VERSION = 153  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代（153：引用块 CSS 生成器收口与导出模板调用；152：@@ blank{break} 的分页 CSS、页数测量镜像与搬页模拟；151：元数据档案锁位在已存在路径补回）
+MD_SERVER_VERSION = 155  # 每次服务端路由/能力变更时 +1；md_launch 依此自愈换代（155：英文界面补漏——词表、扫描根与三处浮层文案随页面换代，旧进程须被强杀重开；154：内置文档拆三份——快速手册为默认、实操手册改名、图解手册走 /static/docs/ 由 iframe 载入；153：引用块 CSS 生成器收口与导出模板调用；152：@@ blank{break} 的分页 CSS、页数测量镜像与搬页模拟；151：元数据档案锁位在已存在路径补回）
 
 _APP_VERSION = ""       # 缓存：CHANGELOG.md 首个版本号（与 detect_version 同源）
 
