@@ -484,6 +484,27 @@ def main():
     else:
         ck("T15 阳性对照可用（备份解析器存在）", False, PARSER_OLD)
 
+    # ---- F 组 · v3.1.0 通道 a 回写移除（静态钉死，改 html 即红） ----
+    src_html = io.open(os.path.join(HERE, "markdown-editor.html"),
+                       encoding="utf-8").read()
+    ck("F01 writeFrontMatter 已删除",
+       "function writeFrontMatter" not in src_html)
+    ck("F02 metaUiFields 已删除",
+       "function metaUiFields" not in src_html)
+    ck("F03 docMetaState 死函数已删除",
+       "function docMetaState" not in src_html)
+    ck("F04 applyMeta 只读桩（不再回写正文）",
+       "function applyMeta(){ return null; }" in src_html)
+    ck("F05 旧 toast 词条已删（front matter 已写入正文）",
+       'I18N_EN["front matter 已写入正文"]' not in src_html
+       and "写入会改这段原文" not in src_html)
+    ck("F06 新 toast 词条在场（面板不写入）",
+       "front matter 是手写元数据，面板不写入" in src_html)
+    ck("F07 tsMetaHint front matter 只读分支在场",
+       has(src_html, "function tsMetaHint", "本档元数据是手写 YAML"))
+    ck("F08 docFrontMatter 仍在（冲突判定与只读回读依赖它）",
+       "function docFrontMatter" in src_html)
+
     # ---- E 组 · 导出剔除（子进程跑 node 断言，逐行并入本文件的判定） ----
     strip_test = os.path.join(HERE, "_test_export_strip.cjs")
     if os.path.isfile(strip_test):

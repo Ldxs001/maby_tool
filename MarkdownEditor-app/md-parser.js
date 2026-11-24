@@ -1418,7 +1418,17 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
       }
       if(_fmCl>0){
         var _fmRw=[],_fmKv=false;
-        for(var _fmM=1;_fmM<_fmCl;_fmM++){
+        /* v3.1.0 列表聚合：`key:` 空值后**紧随**的 `- item` 行聚合成一行显示
+           （值 = 各项以中文逗号连接），对齐真实世界 front matter 的列表写法
+           （tags/categories，如博客导出稿）。规矩：
+           ① 只认「键行值为空 + 紧随的 - 行」——键行已有值的，其后的 - 行按
+              原文露出（不猜意图）；
+           ② 项与标量同一条引号剥离规矩（成对引号两端各剥一次）；
+           ③ 第一条不合 `- ` 形态的行即停——后续再出现的 - 行是新的原文行，
+              不并回上一个键；
+           ④ 聚合只在显示层：正文一个字不动（回写通道 v3.1.0 起移除，
+              front matter 是手写形式，面板只读，见 applyMeta 旧址）。 */
+        for(var _fmM=1;_fmM<_fmCl;){
           var _fmLn=lines[_fmM];
           var _fmMv=/^([A-Za-z_][A-Za-z0-9_\-. ]*?)[ \t]*:[ \t]*(.*)$/.exec(_fmLn);
           if(_fmMv){
@@ -1426,10 +1436,25 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
             var _fmV=_fmMv[2].replace(/[ \t]+$/,'');
             if(_fmV.length>=2&&((_fmV.charAt(0)==='"'&&_fmV.charAt(_fmV.length-1)==='"')||
                                 (_fmV.charAt(0)==="'"&&_fmV.charAt(_fmV.length-1)==="'")))_fmV=_fmV.slice(1,-1);
+            if(_fmV===''){
+              var _fmIts=[],_fmN=_fmM+1;
+              while(_fmN<_fmCl){
+                var _fmIm=/^[ \t]*-[ \t]*(.*)$/.exec(lines[_fmN]);
+                if(!_fmIm)break;
+                var _fmIv=_fmIm[1].replace(/[ \t]+$/,'');
+                if(_fmIv.length>=2&&((_fmIv.charAt(0)==='"'&&_fmIv.charAt(_fmIv.length-1)==='"')||
+                                     (_fmIv.charAt(0)==="'"&&_fmIv.charAt(_fmIv.length-1)==="'")))_fmIv=_fmIv.slice(1,-1);
+                _fmIts.push(_fmIv);
+                _fmN++;
+              }
+              if(_fmIts.length){_fmRw.push({k:_fmMv[1],v:_fmIts.join('，')});_fmM=_fmN;continue;}
+            }
             _fmRw.push({k:_fmMv[1],v:_fmV});
+            _fmM++;continue;
           }else if(_fmLn.replace(/\s/g,'')!==''){
             _fmRw.push({k:null,v:_fmLn});     /* 不合键值的行按原文行输出，零吞字 */
           }
+          _fmM++;
         }
         if(_fmKv){_fmRows=_fmRw;i=_fmCl+1;}
         else _dgE(0,'D501','front matter 内没有 key: value 行，未按元数据区渲染（已按普通文本走）','warn');
@@ -1439,8 +1464,27 @@ function parseMarkdown(src,_lv,opts,_base,_lv3){
     }
   }
   if(_fmRows){
-    for(var _fmZ=0;_fmZ<lines.length;_fmZ++){
+    /* v3.0.1 冲突扫描的围栏豁免（与 _scanBeginBlock v2.35.1 的 @@ begin/end
+       围栏豁免同一手法）：``` 代码块里的 @@ meta 是**展示用法的字面文本**，
+       不参与冲突判定——手册在代码块里演示锚点写法即误报场景（文档删净了
+       真锚点、文首加了 front matter，代码块示例照样触发冲突条）。
+       配对规矩与主循环同一套：开 N 个反引号、个数恰为 N 的行收尾、
+       未闭合时其后所有行都按围栏内容处理（与主循环 D103 口径一致）。
+       <<< 包围块与 @@ begin/end 的内层**保持参与判定**：两者走递归渲染
+       （递归调用里 _fmRows=null、_fmConflict=false，其中的 @@ meta 会真的
+       再渲染一个元数据区），与 front matter 并存即真冲突。
+       扫描自 front matter 闭合行之后起：块内行已被前置消费，永远不是锚点
+       （旧版从第 0 行扫起，front matter 内的字面 @@ meta 行同样误触）。 */
+    for(var _fmZ=_fmCl+1;_fmZ<lines.length;){
+      var _fmFL=_fenceLen(lines[_fmZ]);
+      if(_fmFL>=3){
+        var _fmFe=_fmZ+1;
+        while(_fmFe<lines.length&&_fenceLen(lines[_fmFe])!==_fmFL)_fmFe++;
+        _fmZ=_fmFe<lines.length?_fmFe+1:lines.length;  /* 收尾行也是围栏内容；未闭合吃到文末 */
+        continue;
+      }
       if(/^[ ]{0,3}@@\s*meta[ \t]*$/.test(lines[_fmZ])){_metaLineSeen=true;break;}
+      _fmZ++;
     }
     _fmConflict=_metaLineSeen;
     if(_fmConflict){

@@ -35,3 +35,6 @@ _release_assets/
 
 # ── 英文界面取证截图（审计脚本可重跑，产物不入库）──
 MarkdownEditor-app/_shots_i18n/
+
+# ── 商店截图（脚本可重跑，产物不入库）──
+MarkdownEditor-app/_shots_store/

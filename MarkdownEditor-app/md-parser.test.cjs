@@ -465,6 +465,129 @@ t('块级色值非法：标记行原文、结束行不露出', () => {
   return h.includes('@@ begin color zz') && !h.includes('@@ end color') && h.includes('内容');
 });
 
+/* ============================================================
+ * 十、元数据冲突扫描的围栏豁免（v3.0.1）
+ *    front matter（文首 ---...---）被认出后，冲突扫描逐行找 @@ meta。
+ *    修复前裸扫全文：``` 代码块里的 @@ meta 是展示用法的字面文本，
+ *    却被当成真锚点误触冲突（手册在代码块里演示锚点写法即现实场景）。
+ *    修法与 _scanBeginBlock v2.35.1 围栏豁免同一手法：开 N 收 N、
+ *    未闭合吃到文末、扫描自 front matter 闭合行之后起。
+ *    <<< 与 @@ begin/end 内层保持参与判定：两者走递归渲染，
+ *    递归里 _fmRows=null，其中的 @@ meta 会真的再渲染一个元数据区。
+ * ============================================================ */
+section('十、元数据冲突扫描的围栏豁免（v3.0.1）');
+
+const FM = '---\ntitle: 实操手册\n---\n\n';
+const conflictOf = h => /mde-fm-conflict|元数据冲突/.test(h);
+const fmZoneOf = h => /mde-fm(?!-conflict)/.test(h) && h.includes('title');
+
+t('front matter 正常渲染（无 meta）', () => {
+  const h = parseMarkdown(FM + '# 正文\n\n一段话。\n');
+  return fmZoneOf(h) && !conflictOf(h);
+});
+
+t('正文真 @@ meta → 冲突条、front matter 不渲染', () => {
+  const h = parseMarkdown(FM + '@@ meta\n\n# 正文\n');
+  return conflictOf(h) && !fmZoneOf(h);
+});
+
+t('``` 代码块里的 @@ meta 示例 → 不冲突（v3.0.1 修复点）', () => {
+  const h = parseMarkdown(FM + '# 用法\n\n```text\n@@ meta\n```\n\n正文。\n');
+  return !conflictOf(h) && fmZoneOf(h);
+});
+
+t('未闭合 ``` 之后整篇按围栏内容 → 其中的 @@ meta 也不触发冲突', () => {
+  const h = parseMarkdown(FM + '```text\n未闭合\n@@ meta\n后续全是代码内容\n');
+  return !conflictOf(h) && fmZoneOf(h);
+});
+
+t('围栏配对开 N 收 N：内层个数不同的行不干扰收尾判定', () => {
+  const h = parseMarkdown(FM + '````\n```text\n@@ meta\n```\n````\n\n正文。\n');
+  return !conflictOf(h) && fmZoneOf(h);
+});
+
+t('front matter 块内的字面 @@ meta 行 → 不触发冲突（扫描自闭合行后起）', () => {
+  const h = parseMarkdown('---\n@@ meta\ntitle: 手册\n---\n\n正文。\n');
+  return fmZoneOf(h) && !conflictOf(h);
+});
+
+t('缩进代码块里的 @@ meta → 不冲突', () => {
+  const h = parseMarkdown(FM + '# 用法\n\n    @@ meta\n\n正文。\n');
+  return !conflictOf(h) && fmZoneOf(h);
+});
+
+t('<<< 包围块里的 @@ meta → 保持冲突判定（内层递归会渲染元数据区）', () => {
+  const h = parseMarkdown(FM + '# 用法\n\n<<<\n@@ meta\n<<<\n\n正文。\n');
+  return conflictOf(h);
+});
+
+/* ============================================================
+ * 十一、front matter 列表聚合（v3.1.0）
+ *    `key:` 空值后紧随的 `- item` 行聚合成一行（各项以中文逗号连接），
+ *    对齐真实世界 front matter 的列表写法（tags/categories）。规矩：
+ *    只认「键行值为空 + 紧随的 - 行」；键行已有值的，其后的 - 行按原文
+ *    露出（零吞字不猜意图）；第一条不合 - 形态的行即停。
+ * ============================================================ */
+section('十一、front matter 列表聚合（v3.1.0）');
+
+function fmRowsOf(h) {
+  const out = {};
+  for (const m of h.matchAll(/<span class="mde-fm-k">([^<]*)<\/span><span class="mde-fm-v">([^<]*)<\/span>/g)) out[m[1]] = m[2];
+  return out;
+}
+function fmRawOf(h) {
+  return [...h.matchAll(/mde-fm-raw"><span class="mde-fm-v">([^<]*)<\/span>/g)].map(m => m[1]);
+}
+
+t('空值键 + 紧随 - 行 → 聚合成中文逗号串', () => {
+  const r = fmRowsOf(parseMarkdown('---\ntags:\n- 狗狗\n- 呛咳\n---\n\n正文'));
+  return r.tags === '狗狗，呛咳';
+});
+
+t('项自带成对引号 → 同标量规矩剥离', () => {
+  const r = fmRowsOf(parseMarkdown('---\ntags:\n- "宠物急救"\n---\n\n正文'));
+  return r.tags === '宠物急救';
+});
+
+t('键行已有值 → 其后的 - 行按原文露出，不聚合', () => {
+  const h = parseMarkdown('---\ntags: 已有值\n- 不是列表项\n---\n\n正文');
+  const r = fmRowsOf(h);
+  return r.tags === '已有值' && fmRawOf(h).includes('- 不是列表项');
+});
+
+t('第一条不合 - 形态的行即停：后续 - 行是新原文行', () => {
+  const h = parseMarkdown('---\ntags:\n- 甲\nother: 值\n- 乙\n---\n\n正文');
+  const r = fmRowsOf(h);
+  return r.tags === '甲' && r.other === '值' && fmRawOf(h).includes('- 乙');
+});
+
+t('空值键后没有 - 行 → 保持空值', () => {
+  const r = fmRowsOf(parseMarkdown('---\ncategories:\ndraft: false\n---\n\n正文'));
+  return r.categories === '' && r.draft === 'false';
+});
+
+t('列表前的不合键值行仍是原文行（零吞字不变）', () => {
+  const h = parseMarkdown('---\n自由文本行\ntags:\n- 狗狗\n---\n\n正文');
+  const r = fmRowsOf(h);
+  return r.tags === '狗狗' && fmRawOf(h).includes('自由文本行');
+});
+
+t('博客样例全链：标量 + 双列表一次到位（v3.1.0 目标场景）', () => {
+  const src = ['---', 'title: "小狗呛着了怎么办？"', 'date: 2026-11-24',
+    'categories:', '- 宠物护理', '- 宠物急救', 'tags:', '- 狗狗', '- 呛咳',
+    'draft: false', '---', '', '# 正文'].join('\n');
+  const h = parseMarkdown(src);
+  const r = fmRowsOf(h);
+  return r.title === '小狗呛着了怎么办？' && r.date === '2026-11-24' &&
+    r.categories === '宠物护理，宠物急救' && r.tags === '狗狗，呛咳' &&
+    r.draft === 'false' && !conflictOf(h) && h.includes('<h1');
+});
+
+t('列表聚合不改变冲突判定：front matter + 正文真 @@ meta 仍冲突', () => {
+  const h = parseMarkdown('---\ntags:\n- 狗狗\n---\n\n@@ meta\n\n正文');
+  return conflictOf(h);
+});
+
 console.log('');
 console.log('合计 ' + (pass + fail) + ' 条：PASS ' + pass + ' / FAIL ' + fail);
 console.log(pass && !fail ? '✅ ALL CORE CHECKS PASS' : '❌ SOME CHECKS FAILED');
